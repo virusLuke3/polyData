@@ -1,0 +1,40 @@
+# 环境与密钥（切勿提交）
+.env
+.env.local
+.env.*.local
+*.pem
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# 数据库与大数据文件（可选：若不想把库和样本数据推上仓库可取消注释）
+# database/*.db
+# database/*.db-wal
+# database/*.db-shm
+# database/trades_sample.json
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 日志与临时
+*.log
+.cache/
+database/*.db
+database/*.db-wal
+database/*.db-shm
