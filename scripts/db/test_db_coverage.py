@@ -7,13 +7,12 @@
 
 import sys
 from pathlib import Path
-import sqlite3
 from datetime import datetime, timedelta, timezone
 
 _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
-from db import DEFAULT_DB_PATH
+from db import DEFAULT_DB_PATH, get_backend, get_connection
 DEFAULT_DB = DEFAULT_DB_PATH
 
 
@@ -21,7 +20,10 @@ def test_coverage(db_path: str = DEFAULT_DB) -> None:
     start = datetime(2024, 9, 4, tzinfo=timezone.utc)
     end = datetime(2026, 2, 22, tzinfo=timezone.utc)
 
-    conn = sqlite3.connect(db_path)
+    if get_backend() == "sqlite" and not Path(db_path).exists():
+        raise SystemExit(f"DB not found: {db_path}")
+
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     # 采样：区间首尾 + 每月 1 号和 15 号

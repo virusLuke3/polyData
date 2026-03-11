@@ -10,7 +10,6 @@ Polymarket 市场元数据库完整性验证脚本
 """
 
 import argparse
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +17,7 @@ from pathlib import Path
 _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
-from db import DEFAULT_DB_PATH
+from db import DEFAULT_DB_PATH, get_backend, get_connection
 
 # 目标时间段
 TARGET_START = "2024-09-01"
@@ -40,11 +39,11 @@ def _ok(msg: str) -> None:
 
 
 def run_verify(db_path: str) -> None:
-    if not Path(db_path).exists():
+    if get_backend() == "sqlite" and not Path(db_path).exists():
         print(f"错误: 数据库文件不存在: {db_path}", file=sys.stderr)
         sys.exit(1)
 
-    conn = sqlite3.connect(db_path)
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     # -------------------------------------------------------------------------
@@ -188,7 +187,7 @@ def main() -> None:
         "--db",
         default=DEFAULT_DB_PATH,
         metavar="PATH",
-        help="SQLite 数据库文件路径 (默认: database/polymarket_indexer.db)",
+        help=f"SQLite 数据库文件路径 (默认: {DEFAULT_DB_PATH})",
     )
     args = parser.parse_args()
     run_verify(args.db)

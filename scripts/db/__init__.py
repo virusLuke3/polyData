@@ -1,9 +1,31 @@
 # Database package: schema, connection, verification
 from .db import (
+    add_db_cli_args,
+    configure_db_from_args,
+    configure_runtime_db,
+    create_index_if_not_exists,
+    describe_db_target,
+    get_backend,
     get_connection,
     get_db,
+    get_table_columns,
     init_schema,
     dict_from_row,
+    DEFAULT_SQLITE_PATH,
     DEFAULT_DB_PATH,
 )
-__all__ = ["get_connection", "get_db", "init_schema", "dict_from_row", "DEFAULT_DB_PATH"]
+__all__ = [
+    "add_db_cli_args",
+    "configure_db_from_args",
+    "configure_runtime_db",
+    "create_index_if_not_exists",
+    "describe_db_target",
+    "get_backend",
+    "get_connection",
+    "get_db",
+    "get_table_columns",
+    "init_schema",
+    "dict_from_row",
+    "DEFAULT_SQLITE_PATH",
+    "DEFAULT_DB_PATH",
+]

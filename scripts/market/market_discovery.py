@@ -11,6 +11,7 @@ import json
 import sys
 import time
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple, Any
 
@@ -29,8 +30,15 @@ _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
+try:
+    from web3 import Web3
+except ImportError:
+    Web3 = None
+
 # 引入阶段一模块
-from db import get_db, get_connection, init_schema, DEFAULT_DB_PATH
+from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_db, get_connection, init_schema, DEFAULT_DB_PATH
+from config import get_rpc_url
+from trade.trade_decoder import CTF_EXCHANGE_ADDRESS, NEG_RISK_EXCHANGE_ADDRESS
 try:
     from .market_decoder import (
         calculate_market_tokens,
@@ -51,14 +59,346 @@ except ImportError:
 # Gamma API
 GAMMA_MARKETS_URL = f"{GAMMA_API_BASE}/markets"
 GAMMA_EVENTS_URL = f"{GAMMA_API_BASE}/events"
+CLOB_API_BASE = "https://clob.polymarket.com"
+TOKEN_REGISTERED_EVENT_SIGNATURE = "TokenRegistered(uint256,uint256,bytes32)"
+SYNC_KEY_CHAIN_REGISTRY_CTF = "market_chain_registry_ctf"
+SYNC_KEY_CHAIN_REGISTRY_NEG_RISK = "market_chain_registry_neg_risk"
+DEFAULT_CHAIN_BATCH_BLOCKS = 50000
+DEFAULT_CHAIN_REQUESTS_DELAY = 0.02
+CHAIN_REGISTRY_EVENTS = (
+    ("ctf", CTF_EXCHANGE_ADDRESS, SYNC_KEY_CHAIN_REGISTRY_CTF),
+    ("neg_risk", NEG_RISK_EXCHANGE_ADDRESS, SYNC_KEY_CHAIN_REGISTRY_NEG_RISK),
+)
+
+
+def _attach_event_meta_to_market(m: Dict, ev: Dict) -> None:
+    """把 event 的 negRisk、slug、category、tags 挂到 market 上，供 normalize_market_from_gamma 使用。"""
+    m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
+    m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+    m["_event_category"] = ev.get("category")
+    m["_event_subcategory"] = ev.get("subcategory")
+    m["_event_categories"] = ev.get("categories")
+    m["_event_tags"] = ev.get("tags")
+
+
+def _ensure_0x(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text if text.startswith("0x") else f"0x{text}"
+
+
+def _topic_to_int(topic: Any) -> int:
+    if hasattr(topic, "hex"):
+        return int(topic.hex(), 16)
+    text = str(topic)
+    if text.startswith("0x"):
+        text = text[2:]
+    return int(text, 16)
+
+
+def _topic_to_hex(topic: Any) -> str:
+    if hasattr(topic, "hex"):
+        return _ensure_0x(topic.hex())
+    return _ensure_0x(str(topic))
+
+
+def _token_registered_topic0() -> Optional[bytes]:
+    if Web3 is None:
+        return None
+    return Web3.keccak(text=TOKEN_REGISTERED_EVENT_SIGNATURE)
+
+
+def _build_web3(rpc_url: Optional[str] = None):
+    if Web3 is None:
+        raise RuntimeError("web3 is not installed; on-chain registry supplement is unavailable")
+    endpoint = rpc_url or get_rpc_url()
+    w3 = Web3(Web3.HTTPProvider(endpoint, request_kwargs={"timeout": 60}))
+    if not w3.is_connected():
+        raise ConnectionError(f"Cannot connect to RPC: {endpoint}")
+    return w3
+
+
+def _get_sync_last_block(conn, key: str) -> Optional[int]:
+    cur = conn.cursor()
+    cur.execute("SELECT last_block FROM sync_state WHERE key = ?", (key,))
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return int(row[0])
+
+
+def _save_sync_last_block(conn, key: str, block_number: int) -> None:
+    ts = datetime.now(timezone.utc).isoformat()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO sync_state (key, value, last_block, updated_at) VALUES (?, ?, ?, ?)",
+        (key, str(block_number), int(block_number), ts),
+    )
+    conn.commit()
+
+
+def _iter_block_ranges(from_block: int, to_block: int, batch_blocks: int):
+    current = from_block
+    while current <= to_block:
+        end = min(current + batch_blocks - 1, to_block)
+        yield current, end
+        current = end + 1
+
+
+def _fetch_logs_for_range(w3, address: str, topic0: bytes, from_block: int, to_block: int) -> List[Dict]:
+    last_err: Optional[Exception] = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            logs = w3.eth.get_logs(
+                {
+                    "address": Web3.to_checksum_address(address),
+                    "topics": [topic0],
+                    "fromBlock": from_block,
+                    "toBlock": to_block,
+                }
+            )
+            return [dict(log) for log in logs]
+        except Exception as e:
+            last_err = e
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_BASE_DELAY ** (attempt + 1))
+    if last_err is not None:
+        raise last_err
+    return []
+
+
+def _decode_token_registered_log(log: Dict) -> Optional[Dict[str, str]]:
+    topics = log.get("topics") or []
+    if len(topics) < 4:
+        return None
+    return {
+        "token0": str(_topic_to_int(topics[1])),
+        "token1": str(_topic_to_int(topics[2])),
+        "condition_id": _topic_to_hex(topics[3]),
+    }
+
+
+def fetch_market_by_condition_id_from_clob(condition_id: str) -> Optional[Dict]:
+    cid = _ensure_0x(condition_id)
+    if not cid:
+        return None
+    try:
+        resp = _get_session().get(f"{CLOB_API_BASE}/markets/{cid}", timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = _response_json(resp, f"GET {CLOB_API_BASE}/markets/{cid}")
+        resp.close()
+    except Exception as e:
+        _invalidate_session(str(e))
+        return None
+    if not isinstance(data, dict):
+        return None
+    data["conditionId"] = data.get("condition_id") or cid
+    data["questionId"] = data.get("question_id")
+    data["slug"] = data.get("market_slug") or data.get("slug") or f"market-{cid[2:18]}"
+    data["createdAt"] = data.get("createdAt") or data.get("created_at")
+    data["endDate"] = data.get("endDate") or data.get("end_date") or data.get("end_date_iso")
+    data["negRisk"] = data.get("negRisk") if data.get("negRisk") is not None else data.get("neg_risk")
+    return data
+
+
+def _build_minimal_market_from_registry(
+    condition_id: str,
+    token0: str,
+    token1: str,
+    exchange_name: str,
+) -> Dict:
+    token_ids = sorted([str(token0), str(token1)])
+    cid = _ensure_0x(condition_id)
+    return {
+        "condition_id": cid,
+        "question_id": None,
+        "oracle": None,
+        "slug": f"onchain-{exchange_name}-{cid[2:18]}",
+        "title": f"On-chain recovered market {cid[:18]}",
+        "description": "Recovered from Polymarket exchange registry because Gamma/CLOB discovery missed this market.",
+        "yes_token_id": token_ids[0],
+        "no_token_id": token_ids[1],
+        "clob_token_ids": token_ids,
+        "enable_neg_risk": 1 if exchange_name == "neg_risk" else 0,
+        "created_at": None,
+        "end_date": None,
+        "category": "",
+        "tags": ["onchain-registry"],
+        "gamma_market_id": "",
+    }
+
+
+def _recompute_resolved_token_ids(db_path: str) -> set:
+    conn = get_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT yes_token_id, no_token_id FROM markets WHERE yes_token_id IS NOT NULL AND no_token_id IS NOT NULL")
+        resolved = set()
+        for row in cur.fetchall():
+            if row[0]:
+                resolved.add(str(row[0]))
+            if row[1]:
+                resolved.add(str(row[1]))
+        return resolved
+    finally:
+        conn.close()
+
+
+def fetch_and_upsert_markets_for_token_ids_via_onchain(
+    token_ids: List[str],
+    db_path: str,
+    rpc_url: Optional[str] = None,
+) -> int:
+    if not token_ids:
+        return 0
+    try:
+        w3 = _build_web3(rpc_url)
+    except Exception as e:
+        print(f"fetch_and_upsert_markets_for_token_ids_via_onchain: {e}", file=sys.stderr)
+        return 0
+
+    abi = [
+        {
+            "inputs": [{"internalType": "uint256", "name": "token", "type": "uint256"}],
+            "name": "getConditionId",
+            "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+            "stateMutability": "view",
+            "type": "function",
+        },
+        {
+            "inputs": [{"internalType": "uint256", "name": "token", "type": "uint256"}],
+            "name": "getComplement",
+            "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function",
+        },
+    ]
+
+    seen_conditions: set = set()
+    norms: List[Dict] = []
+    for token_id in [str(t).strip() for t in token_ids if t and str(t).strip()]:
+        token_int = int(token_id)
+        for exchange_name, exchange_address, _sync_key in CHAIN_REGISTRY_EVENTS:
+            contract = w3.eth.contract(address=Web3.to_checksum_address(exchange_address), abi=abi)
+            try:
+                condition_bytes = contract.functions.getConditionId(token_int).call()
+                complement = str(contract.functions.getComplement(token_int).call())
+            except Exception:
+                continue
+            condition_id = _ensure_0x(condition_bytes.hex() if hasattr(condition_bytes, "hex") else str(condition_bytes))
+            if not condition_id or condition_id in seen_conditions:
+                continue
+            raw = fetch_market_by_condition_id_from_clob(condition_id)
+            if raw:
+                norm = normalize_market_from_gamma(raw)
+            else:
+                norm = _build_minimal_market_from_registry(condition_id, token_id, complement, exchange_name)
+            if norm:
+                seen_conditions.add(condition_id)
+                norms.append(norm)
+            break
+
+    if not norms:
+        return 0
+
+    conn = get_connection(db_path)
+    try:
+        return batch_upsert_markets(conn, norms)
+    finally:
+        conn.close()
+
+
+def supplement_missing_markets_from_onchain_registry(
+    db_path: str,
+    rpc_url: Optional[str] = None,
+    batch_blocks: int = DEFAULT_CHAIN_BATCH_BLOCKS,
+    requests_delay: float = DEFAULT_CHAIN_REQUESTS_DELAY,
+) -> int:
+    try:
+        w3 = _build_web3(rpc_url)
+    except Exception as e:
+        print(f"[onchain] registry supplement disabled: {e}", file=sys.stderr)
+        return 0
+
+    topic0 = _token_registered_topic0()
+    if topic0 is None:
+        return 0
+
+    latest_block = int(w3.eth.block_number)
+    conn = get_connection(db_path)
+    try:
+        seen_conditions = _load_existing_condition_ids(conn)
+        total_written = 0
+        for exchange_name, exchange_address, sync_key in CHAIN_REGISTRY_EVENTS:
+            start_block = (_get_sync_last_block(conn, sync_key) or -1) + 1
+            if start_block > latest_block:
+                continue
+            print(
+                f"[onchain] scanning {exchange_name} registry blocks {start_block}-{latest_block} (batch={batch_blocks}) ...",
+                file=sys.stderr,
+            )
+            for range_start, range_end in _iter_block_ranges(start_block, latest_block, batch_blocks):
+                try:
+                    logs = _fetch_logs_for_range(w3, exchange_address, topic0, range_start, range_end)
+                except Exception as e:
+                    print(
+                        f"[onchain] {exchange_name} registry logs failed for blocks {range_start}-{range_end}: {e}",
+                        file=sys.stderr,
+                    )
+                    _save_sync_last_block(conn, sync_key, range_start - 1)
+                    return total_written
+
+                norms: List[Dict] = []
+                for log in logs:
+                    decoded = _decode_token_registered_log(log)
+                    if not decoded:
+                        continue
+                    condition_id = decoded["condition_id"]
+                    if condition_id in seen_conditions:
+                        continue
+                    raw = fetch_market_by_condition_id_from_clob(condition_id)
+                    if raw:
+                        norm = normalize_market_from_gamma(raw)
+                    else:
+                        norm = _build_minimal_market_from_registry(
+                            condition_id,
+                            decoded["token0"],
+                            decoded["token1"],
+                            exchange_name,
+                        )
+                    if not norm:
+                        continue
+                    seen_conditions.add(condition_id)
+                    norms.append(norm)
+
+                if norms:
+                    total_written += batch_upsert_markets(conn, norms)
+                    print(
+                        f"[onchain] {exchange_name} wrote {len(norms)} missing markets from blocks {range_start}-{range_end} (total {total_written})",
+                        file=sys.stderr,
+                    )
+
+                _save_sync_last_block(conn, sync_key, range_end)
+                if requests_delay > 0:
+                    time.sleep(requests_delay)
+        return total_written
+    finally:
+        conn.close()
 
 # 默认请求间隔（秒）
 DEFAULT_REQUESTS_DELAY = 0.7
 # 重试次数与指数退避基数
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 2
+# 每 N 次请求后主动关闭并重建 Session，清除累积的僵死连接
+SESSION_RECYCLE_EVERY = 200
+# 请求超时：(连接超时秒, 读取超时秒)；分离两阶段，避免慢响应时无限等待
+REQUEST_TIMEOUT = (10, 45)
 
 SYNC_KEY_CLOSED_EVENTS_OFFSET = "closed_events_offset"
+# 记录最后一次 market discovery 的完成时间（ISO 字符串），用于增量同步起点
+SYNC_KEY_LAST_DISCOVERY_AT = "last_market_discovery_at"
 
 
 def _create_session() -> requests.Session:
@@ -67,9 +407,13 @@ def _create_session() -> requests.Session:
     retries = Retry(
         total=MAX_RETRIES,
         backoff_factor=RETRY_BASE_DELAY,
-        status_forcelist=[500, 502, 503, 504],
+        # 包含 429 以自动处理限速；urllib3 会尊重 Retry-After 头
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+        respect_retry_after_header=True,
     )
-    adapter = HTTPAdapter(max_retries=retries, pool_connections=10, pool_maxsize=10)
+    # 顺序爬取只需极少连接；过大的连接池在长时间运行中反而会堆积僵死连接
+    adapter = HTTPAdapter(max_retries=retries, pool_connections=2, pool_maxsize=4)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
@@ -77,13 +421,53 @@ def _create_session() -> requests.Session:
 
 # 模块级 Session，复用 TCP 连接，避免每次 requests.get 重新握手
 _HTTP_SESSION: Optional[requests.Session] = None
+# 当前 Session 已使用的请求次数，超过阈值后主动回收
+_HTTP_SESSION_REQUESTS: int = 0
 
 
-def _get_session() -> requests.Session:
-    global _HTTP_SESSION
-    if _HTTP_SESSION is None:
+def _get_session(recycle_every: int = SESSION_RECYCLE_EVERY) -> requests.Session:
+    """返回可用的 Session；超过 recycle_every 次请求后自动关闭旧 Session 并新建，
+    防止长时间爬取时僵死连接在池里堆积导致卡顿。"""
+    global _HTTP_SESSION, _HTTP_SESSION_REQUESTS
+    if _HTTP_SESSION is None or _HTTP_SESSION_REQUESTS >= recycle_every:
+        if _HTTP_SESSION is not None:
+            try:
+                _HTTP_SESSION.close()
+            except Exception:
+                pass
+            print(
+                f"  [session] Recycled after {_HTTP_SESSION_REQUESTS} requests (threshold={recycle_every})",
+                file=sys.stderr,
+            )
         _HTTP_SESSION = _create_session()
+        _HTTP_SESSION_REQUESTS = 0
     return _HTTP_SESSION
+
+
+def _invalidate_session(reason: Optional[str] = None) -> None:
+    """丢弃当前共享 Session，避免损坏的 keep-alive 连接被继续复用。"""
+    global _HTTP_SESSION, _HTTP_SESSION_REQUESTS
+    if _HTTP_SESSION is not None:
+        try:
+            _HTTP_SESSION.close()
+        except Exception:
+            pass
+    _HTTP_SESSION = None
+    _HTTP_SESSION_REQUESTS = 0
+    if reason:
+        print(f"  [session] Invalidated: {reason}", file=sys.stderr)
+
+
+def _response_json(resp: requests.Response, context: str) -> Any:
+    """统一 JSON 解析，遇到截断/脏响应时带上上下文。"""
+    try:
+        return resp.json()
+    except Exception as e:
+        try:
+            body_prefix = resp.text[:300].replace("\n", "\\n")
+        except Exception:
+            body_prefix = "<unavailable>"
+        raise RuntimeError(f"{context}: invalid JSON response: {e}; body_prefix={body_prefix!r}") from e
 
 
 def _fetch_with_retry(
@@ -91,17 +475,32 @@ def _fetch_with_retry(
     params: Dict,
     max_retries: int = MAX_RETRIES,
     base_delay: float = RETRY_BASE_DELAY,
+    session_recycle_every: int = SESSION_RECYCLE_EVERY,
 ) -> Any:
-    """带指数退避的 API 请求，失败时重试。使用 Session 复用连接，减轻 SSL 断连。"""
-    session = _get_session()
+    """带指数退避的 API 请求，失败时重试。
+
+    - 每次请求递增全局计数，触发阈值后自动回收 Session
+    - 使用 (connect, read) 分离超时，避免慢响应无限阻塞
+    - 显式关闭响应以确保连接归还到池
+    """
+    global _HTTP_SESSION_REQUESTS
     last_err = None
     for attempt in range(max_retries):
+        session = _get_session(recycle_every=session_recycle_every)
         try:
-            resp = session.get(url, params=params, timeout=60)
+            resp = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            _HTTP_SESSION_REQUESTS += 1
             resp.raise_for_status()
-            return resp.json()
+            data = _response_json(resp, f"GET {url}")
+            resp.close()
+            return data
         except Exception as e:
             last_err = e
+            _invalidate_session(str(e))
+            try:
+                resp.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
             if attempt < max_retries - 1:
                 delay = base_delay ** (attempt + 1)
                 print(f"  Retry {attempt + 1}/{max_retries} in {delay}s: {e}", file=sys.stderr)
@@ -137,63 +536,204 @@ def _save_closed_events_offset(conn, offset: int) -> None:
     conn.commit()
 
 
+def _get_latest_market_created_at(conn) -> Optional[datetime]:
+    """从 markets 表读取最新的 created_at，作为增量同步起点。
+    若表为空返回 None（触发全量拉取）。"""
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(created_at) FROM markets WHERE created_at IS NOT NULL")
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return _parse_iso_date(row[0])
+
+
+def _save_last_discovery_at(conn, dt: datetime, sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT) -> None:
+    """将本次同步完成时间写入 sync_state，供下次增量同步读取。"""
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO sync_state (key, value, updated_at) VALUES (?, ?, ?)",
+        (sync_state_key, dt.isoformat(), dt.isoformat()),
+    )
+    conn.commit()
+
+
+def _get_last_discovery_at(conn, sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT) -> Optional[datetime]:
+    """从 sync_state 读取上次成功完成的时间戳。"""
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM sync_state WHERE key = ?", (sync_state_key,))
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return _parse_iso_date(row[0])
+
+
+def resolve_incremental_since_date(
+    db_path: str,
+    sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT,
+    fallback_sync_state_keys: Optional[List[str]] = None,
+    fallback_to_latest_created_at: bool = True,
+) -> Optional[datetime]:
+    """推断增量同步的起始日期，优先取 sync_state 记录的上次完成时间，
+    若无记录则回退到 DB 中最新市场的 created_at，两者均无则返回 None（全量）。"""
+    init_schema(db_path=db_path)
+    conn = get_connection(db_path)
+    try:
+        since = _get_last_discovery_at(conn, sync_state_key=sync_state_key)
+        if since is not None:
+            return since
+        for fallback_key in fallback_sync_state_keys or []:
+            since = _get_last_discovery_at(conn, sync_state_key=fallback_key)
+            if since is not None:
+                return since
+        if fallback_to_latest_created_at:
+            return _get_latest_market_created_at(conn)
+        return None
+    finally:
+        conn.close()
+
+
 def fetch_all_markets(
-    limit: int = 500, active_only: bool = False, closed_only: bool = False
+    limit: int = 500,
+    active_only: bool = False,
+    closed_only: bool = False,
+    db_path: Optional[str] = None,
+    batch_size: int = 500,
+    requests_delay: float = DEFAULT_REQUESTS_DELAY,
+    progress_every_pages: int = 10,
 ) -> List[Dict]:
     """
-    从 Gamma API 获取市场列表
+    从 Gamma API 获取市场列表。
+
+    重要：改用 GET /events 而非 GET /markets 作为主入口。
+    原因：GET /markets 的响应里 tags 字段永远为 null，category 在新市场也通常为 null。
+    category 和 tags 只存在于 GET /events 返回的顶层 event 对象上，
+    必须通过 _attach_event_meta_to_market(m, ev) 把 event 的字段挂到 market 上。
 
     Args:
         limit: 最大获取数量
         active_only: 是否仅获取活跃市场
         closed_only: 是否仅获取已结束市场（closed=true）
+        db_path: 若指定则边抓边写入数据库（避免全量时无输出+内存爆）
+        batch_size: 与 db_path 联用的批量写入大小
+        requests_delay: 每次请求间隔（秒）
+        progress_every_pages: 每多少页打印一次进度
 
     Returns:
-        市场列表
+        市场列表（streaming-to-DB 模式下返回空列表，total_written 不为零）
     """
-    url = GAMMA_MARKETS_URL
-    params = {
-        "limit": min(limit, 100),
-        "ascending": "false",
-    }
-    if active_only:
-        params["active"] = "true"
-        params["closed"] = "false"
-        params["order"] = "volume24hr"
-    else:
-        params["order"] = "volume24hr"
+    if not active_only and not closed_only:
+        ancient = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        markets, _written = fetch_markets_since_date(
+            since_date=ancient,
+            include_active=True,
+            include_closed=True,
+            db_path=db_path,
+            batch_size=batch_size,
+            requests_delay=requests_delay,
+        )
+        return markets[:limit]
 
-    # closed_only 需走 events 接口，markets 不支持 closed
+    # closed_only 走 events?closed=true，已有专用函数
     if closed_only:
         return fetch_closed_markets(limit=limit)
 
-    all_markets = []
+    # 使用 GET /events（而非 GET /markets）以获取 tags 字段
+    # GET /markets 响应里 tags 永远为 null，只有 GET /events 的顶层 event 有 tags
+    params: Dict[str, Any] = {
+        "limit": 100,
+        "ascending": "false",
+        "active": "true",
+        "closed": "false",
+        "order": "volume24hr",
+    }
+
+    all_markets: List[Dict] = []
     offset = 0
-    session = _get_session()
-    while len(all_markets) < limit:
+    pages = 0
+    buffer: List[Dict] = []
+    total_written = 0
+    conn = None
+    seen_ids: set = set()
+
+    if db_path:
+        init_schema(db_path=db_path)
+        conn = get_connection(db_path)
+        seen_ids = _load_existing_condition_ids(conn)
+        if seen_ids:
+            print(
+                f"  Loaded {len(seen_ids)} existing markets from DB (will skip duplicates)",
+                file=sys.stderr,
+            )
+
+    collected = 0
+    while collected < limit:
         params["offset"] = offset
         try:
-            resp = session.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
+            time.sleep(requests_delay)
+            data = _fetch_with_retry(GAMMA_EVENTS_URL, dict(params))
         except Exception as e:
-            print(f"Error fetching markets: {e}", file=sys.stderr)
+            print(f"Error fetching events: {e}", file=sys.stderr)
             break
-        
-        if isinstance(data, list):
-            batch = data
-        elif isinstance(data, dict) and "markets" in data:
-            batch = data["markets"]
-        else:
-            batch = []
-        
-        if not batch:
+
+        if not isinstance(data, list):
+            data = data.get("events", []) if isinstance(data, dict) else []
+
+        if not data:
             break
-        all_markets.extend(batch)
-        offset += len(batch)
-        if len(batch) < 100:
+        pages += 1
+
+        for ev in data:
+            for m in ev.get("markets", []):
+                cid = m.get("conditionId")
+                if not cid:
+                    continue
+                # 把 event 的 category/tags 挂到 market 上
+                _attach_event_meta_to_market(m, ev)
+                if conn is not None:
+                    if cid in seen_ids:
+                        continue
+                    seen_ids.add(cid)
+                    buffer.append(m)
+                    collected += 1
+                    if len(buffer) >= batch_size:
+                        buffer, total_written = _flush_buffer_to_db(
+                            buffer, conn, total_written, batch_size
+                        )
+                else:
+                    if cid not in seen_ids:
+                        seen_ids.add(cid)
+                        all_markets.append(m)
+                        collected += 1
+
+        offset += len(data)
+        if len(data) < 100:
             break
-    
+
+        if progress_every_pages and pages % progress_every_pages == 0:
+            if conn is not None:
+                print(
+                    f"  ... fetched events pages={pages}, offset={offset}, written={total_written}, buffered={len(buffer)}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"  ... fetched events pages={pages}, offset={offset}, collected={len(all_markets)}",
+                    file=sys.stderr,
+                )
+
+    if conn is not None:
+        if buffer:
+            _, total_written = _flush_buffer_to_db(buffer, conn, total_written, batch_size)
+        try:
+            conn.close()
+        except Exception:
+            pass
+        print(
+            f"  Done streaming markets to DB. Total written={total_written}, pages={pages}, offset={offset}",
+            file=sys.stderr,
+        )
+        return []
+
     return all_markets[:limit]
 
 
@@ -236,6 +776,7 @@ def fetch_markets_since_date(
     db_path: Optional[str] = None,
     batch_size: int = 500,
     requests_delay: float = DEFAULT_REQUESTS_DELAY,
+    max_empty_closed_pages: int = 5,
 ) -> Tuple[List[Dict], int]:
     """
     从指定起始日期向后爬取市场，按时间排序，不设 limit。
@@ -247,6 +788,8 @@ def fetch_markets_since_date(
         include_closed: 是否包含已关闭市场
         db_path: 若指定，每 batch_size 个市场写入数据库
         batch_size: 每批写入数量，默认 500
+        max_empty_closed_pages: 增量优化——closed events 按 volume 排序，无法按日期截断；
+            连续 N 页全被 since_date 过滤后提前退出，避免无效遍历（默认 5）
 
     Returns:
         (市场列表用于 JSON 输出，总写入数)。当 db_path 指定时列表为空，仅返回计数
@@ -285,11 +828,15 @@ def fetch_markets_since_date(
             all_markets.append(m)
 
     try:
-        # 1. 从 /markets 拉取
+        # 1. 从 /events?active=true&closed=false 拉取活跃市场
+        # 注意：GET /markets 的响应里 tags 永远为 null；只有 GET /events 顶层对象有 tags。
+        # 因此改用 events 接口，并通过 _attach_event_meta_to_market 把 event 字段挂到 market 上。
         params = {
             "limit": 100,
             "order": "createdAt",
             "ascending": "false",
+            "active": "true",
+            "closed": "false",
         }
         offset = 0
         stopped_markets = False
@@ -298,26 +845,25 @@ def fetch_markets_since_date(
             params["offset"] = offset
             time.sleep(requests_delay)
             try:
-                batch = _fetch_with_retry(GAMMA_MARKETS_URL, dict(params))
+                batch = _fetch_with_retry(GAMMA_EVENTS_URL, dict(params))
             except Exception as e:
-                print(f"Error fetching markets (offset={offset}): {e}", file=sys.stderr)
+                print(f"Error fetching events (offset={offset}): {e}", file=sys.stderr)
                 break
 
             if not isinstance(batch, list):
-                batch = batch.get("markets", []) if isinstance(batch, dict) else []
+                batch = batch.get("events", []) if isinstance(batch, dict) else []
 
             if not batch:
                 break
 
-            for m in batch:
-                created = _parse_iso_date(m.get("createdAt") or m.get("created_at"))
-                if created is None:
-                    _add_market(m)
-                    continue
-                if created < since_date:
+            for ev in batch:
+                created = _parse_iso_date(ev.get("createdAt") or ev.get("created_at"))
+                if created is not None and created < since_date:
                     stopped_markets = True
                     break
-                _add_market(m)
+                for m in ev.get("markets", []):
+                    _attach_event_meta_to_market(m, ev)
+                    _add_market(m)
             if stopped_markets:
                 break
 
@@ -327,10 +873,13 @@ def fetch_markets_since_date(
                 break
             collected = total_written + len(buffer) if conn else len(all_markets)
             if offset % 500 == 0 and offset > 0:
-                print(f"  ... fetched {offset} from /markets, collected {collected}", file=sys.stderr)
+                print(f"  ... fetched {offset} from /events(active), collected {collected}", file=sys.stderr)
             del batch  # 及时释放，减轻长运行时的内存占用
 
         # 2. 从 /events?closed=true 补充已关闭市场（支持断点续传）
+        # closed events 按 volume 排序，无法像 /events?active 那样按时间截断；
+        # 使用"连续空页"计数：连续 max_empty_closed_pages 页全被 since_date 过滤则提前退出，
+        # 避免增量模式下无效遍历全量数据。
         if include_closed and conn is not None:
             ev_params = {
                 "limit": 100,
@@ -339,9 +888,11 @@ def fetch_markets_since_date(
                 "ascending": "false",
             }
             ev_offset = _get_closed_events_offset(conn)
-            if ev_offset is not None and ev_offset > 0:
+            ev_offset = ev_offset if ev_offset is not None and ev_offset > 0 else 0
+            if ev_offset > 0:
                 print(f"  Resuming closed events from offset {ev_offset}", file=sys.stderr)
 
+            consecutive_empty_pages = 0
             while True:
                 ev_params["offset"] = ev_offset
                 time.sleep(requests_delay)
@@ -357,11 +908,27 @@ def fetch_markets_since_date(
                     _save_closed_events_offset(conn, 0)  # 标记完成
                     break
 
+                before = total_written + len(buffer)
                 for ev in events:
                     for m in ev.get("markets", []):
-                        m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
-                        m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+                        _attach_event_meta_to_market(m, ev)
                         _add_market(m)
+                after = total_written + len(buffer)
+
+                # 本页一条新市场都没加入 → 累计空页计数
+                if after == before:
+                    consecutive_empty_pages += 1
+                    if consecutive_empty_pages >= max_empty_closed_pages:
+                        print(
+                            f"  Incremental early-exit: {consecutive_empty_pages} consecutive closed-event "
+                            f"pages yielded no new markets (all filtered by since_date). "
+                            f"Stopped at offset {ev_offset}.",
+                            file=sys.stderr,
+                        )
+                        _save_closed_events_offset(conn, 0)
+                        break
+                else:
+                    consecutive_empty_pages = 0
 
                 ev_offset += len(events)
                 _save_closed_events_offset(conn, ev_offset)
@@ -382,6 +949,7 @@ def fetch_markets_since_date(
                 "ascending": "false",
             }
             ev_offset = 0
+            consecutive_empty_pages = 0
             while True:
                 ev_params["offset"] = ev_offset
                 time.sleep(requests_delay)
@@ -392,11 +960,22 @@ def fetch_markets_since_date(
                     break
                 if not events or not isinstance(events, list):
                     break
+                before = len(all_markets)
                 for ev in events:
                     for m in ev.get("markets", []):
-                        m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
-                        m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+                        _attach_event_meta_to_market(m, ev)
                         _add_market(m)
+                if len(all_markets) == before:
+                    consecutive_empty_pages += 1
+                    if consecutive_empty_pages >= max_empty_closed_pages:
+                        print(
+                            f"  Incremental early-exit: {consecutive_empty_pages} consecutive empty pages. "
+                            f"Stopped at offset {ev_offset}.",
+                            file=sys.stderr,
+                        )
+                        break
+                else:
+                    consecutive_empty_pages = 0
                 ev_offset += len(events)
                 if len(events) < 100:
                     break
@@ -435,6 +1014,7 @@ def _run_closed_events_only(
     cooldown_seconds: float = 60,
     max_fetches: Optional[int] = None,
     since_date: Optional[datetime] = None,
+    session_recycle_every: int = SESSION_RECYCLE_EVERY,
 ) -> int:
     """仅补充拉取 closed events，支持断点续传、周期性冷却与分批上限。可选 since_date 过滤 created_at。"""
     init_schema(db_path=db_path)
@@ -489,7 +1069,10 @@ def _run_closed_events_only(
             ev_params["offset"] = ev_offset
             time.sleep(requests_delay)
             try:
-                events = _fetch_with_retry(GAMMA_EVENTS_URL, dict(ev_params))
+                events = _fetch_with_retry(
+                    GAMMA_EVENTS_URL, dict(ev_params),
+                    session_recycle_every=session_recycle_every,
+                )
             except Exception as e:
                 print(f"Error fetching closed events (offset={ev_offset}): {e}", file=sys.stderr)
                 _save_closed_events_offset(conn, ev_offset)
@@ -511,8 +1094,7 @@ def _run_closed_events_only(
 
             for ev in events:
                 for m in ev.get("markets", []):
-                    m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
-                    m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+                    _attach_event_meta_to_market(m, ev)
                     _add_market(m)
 
             ev_offset += len(events)
@@ -552,13 +1134,10 @@ def fetch_closed_markets(limit: int = 500) -> List[Dict]:
     all_markets: List[Dict] = []
     offset = 0
 
-    session = _get_session()
     while len(all_markets) < limit:
         params["offset"] = offset
         try:
-            resp = session.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            events = resp.json()
+            events = _fetch_with_retry(url, dict(params))
         except Exception as e:
             print(f"Error fetching closed events: {e}", file=sys.stderr)
             break
@@ -567,11 +1146,8 @@ def fetch_closed_markets(limit: int = 500) -> List[Dict]:
             break
 
         for ev in events:
-            markets = ev.get("markets", [])
-            neg_risk = ev.get("negRisk", len(markets) > 1)
-            for m in markets:
-                m["_event_neg_risk"] = neg_risk
-                m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+            for m in ev.get("markets", []):
+                _attach_event_meta_to_market(m, ev)
                 all_markets.append(m)
             if len(all_markets) >= limit:
                 break
@@ -598,8 +1174,10 @@ def fetch_markets_by_event_slug(event_slug: str) -> List[Dict]:
     try:
         resp = _get_session().get(url, params=params, timeout=30)
         resp.raise_for_status()
-        events = resp.json()
+        events = _response_json(resp, f"GET {url}")
+        resp.close()
     except Exception as e:
+        _invalidate_session(str(e))
         print(f"Error fetching event: {e}", file=sys.stderr)
         return []
     
@@ -608,13 +1186,310 @@ def fetch_markets_by_event_slug(event_slug: str) -> List[Dict]:
     
     event = events[0]
     markets = event.get("markets", [])
-    neg_risk = event.get("negRisk", len(markets) > 1)
-    
     for m in markets:
-        m["_event_neg_risk"] = neg_risk
-        m["_event_slug"] = event_slug
-    
+        _attach_event_meta_to_market(m, event)
+
     return markets
+
+
+def fetch_markets_by_clob_token_ids(token_ids: List[str]) -> List[Dict]:
+    """
+    按 token_id 从 Gamma API 一键查询市场（GET /markets 支持 query 参数 clob_token_ids）。
+    OpenAPI: clob_token_ids 为 string 数组，返回包含任一该 token 的市场列表。
+    用于缺失市场补齐，无需分页扫 /events。
+    """
+    if not token_ids:
+        return []
+    token_ids = [str(t).strip() for t in token_ids if t and str(t).strip()]
+    if not token_ids:
+        return []
+    try:
+        # GET /markets 支持 clob_token_ids 数组，requests 会序列化为 clob_token_ids=id1&clob_token_ids=id2
+        params: Dict[str, Any] = {
+            "limit": min(100, max(len(token_ids) * 2, 10)),
+        }
+        session = _get_session()
+        resp = session.get(
+            GAMMA_MARKETS_URL,
+            params={"clob_token_ids": token_ids[:50], **params},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = _response_json(resp, f"GET {GAMMA_MARKETS_URL}")
+        resp.close()
+    except Exception as e:
+        _invalidate_session(str(e))
+        print(f"fetch_markets_by_clob_token_ids: {e}", file=sys.stderr)
+        return []
+    if isinstance(data, list):
+        if not data and token_ids:
+            print(
+                f"fetch_markets_by_clob_token_ids: GET /markets returned 0 markets for {len(token_ids)} token(s), will fall back to event-scan.",
+                file=sys.stderr,
+            )
+        return data
+    if isinstance(data, dict) and "markets" in data:
+        return data.get("markets") or []
+    return []
+
+
+def _enrich_market_with_event_by_slug(m: Dict) -> None:
+    """当 market 无 category/tags 时，用 GET /events?slug=... 拉取 event 并挂上 _event_*，便于 normalize 写出分类。"""
+    slug = (m.get("slug") or "").strip()
+    if not slug:
+        return
+    has_cat = m.get("category") or m.get("_event_category")
+    has_tags = m.get("tags") or m.get("_event_tags")
+    if has_cat and has_tags:
+        return
+    try:
+        resp = _get_session().get(GAMMA_EVENTS_URL, params={"slug": slug}, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        events = _response_json(resp, f"GET {GAMMA_EVENTS_URL}")
+        resp.close()
+    except Exception:
+        _invalidate_session(f"GET {GAMMA_EVENTS_URL}?slug={slug}")
+        return
+    if not events or not isinstance(events, list) or not events[0]:
+        return
+    ev = events[0]
+    m["_event_category"] = m.get("_event_category") or ev.get("category")
+    m["_event_subcategory"] = m.get("_event_subcategory") or ev.get("subcategory")
+    m["_event_categories"] = m.get("_event_categories") or ev.get("categories")
+    m["_event_tags"] = m.get("_event_tags") or ev.get("tags")
+
+
+def fetch_market_by_slug(slug: str) -> Optional[Dict]:
+    """
+    按市场 slug 从 Gamma API 一键查询单个市场（文档：Fetch by Slug）。
+    用于交易导入时用 market_slug 直接拉取缺失市场，无需分页扫描。
+    若返回的 market 无 category/tags，会再请求 events 按 slug 补全。
+    """
+    if not slug or not str(slug).strip():
+        return None
+    slug = str(slug).strip()
+    url = f"{GAMMA_MARKETS_URL}/slug/{slug}"
+    try:
+        resp = _get_session().get(url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = _response_json(resp, f"GET {url}")
+        resp.close()
+    except Exception as e:
+        _invalidate_session(str(e))
+        print(f"fetch_market_by_slug({slug!r}): {e}", file=sys.stderr)
+        return None
+    if not data or not isinstance(data, dict):
+        return None
+    _enrich_market_with_event_by_slug(data)
+    return data
+
+
+def fetch_and_upsert_markets_for_slugs(
+    slugs: List[str],
+    db_path: str,
+) -> int:
+    """
+    根据 market_slug 列表从 Gamma 一键查询并写入 DB。
+    每个 slug 一次请求 GET /markets/slug/{slug}，无分页、不卡顿。
+    """
+    if not slugs:
+        return 0
+    unique_slugs = list(dict.fromkeys(s for s in (str(x).strip() for x in slugs) if s))
+    if not unique_slugs:
+        return 0
+    conn = get_connection(db_path)
+    try:
+        norms: List[Dict] = []
+        for slug in unique_slugs:
+            slug = str(slug).strip()
+            raw = fetch_market_by_slug(slug)
+            if not raw:
+                continue
+            raw["_event_neg_risk"] = raw.get("negRisk", False)
+            raw["_event_slug"] = slug
+            n = normalize_market_from_gamma(raw)
+            if n:
+                norms.append(n)
+        if not norms:
+            return 0
+        return batch_upsert_markets(conn, norms)
+    finally:
+        conn.close()
+
+
+# 每批最多传多少个 token_id 给 GET /markets?clob_token_ids=...（API 承受能力）
+CLOB_TOKEN_IDS_BATCH = 50
+
+
+def fetch_and_upsert_markets_by_token_ids_via_api(
+    token_ids: List[str],
+    db_path: str,
+) -> int:
+    """
+    用 Gamma GET /markets?clob_token_ids=... 按 token_id 一键查询并写入 DB。
+    分批请求（每批 CLOB_TOKEN_IDS_BATCH 个），避免漏掉大量缺失 token。
+    """
+    if not token_ids:
+        return 0
+    seen_cid: set = set()
+    raw_list: List[Dict] = []
+    for i in range(0, len(token_ids), CLOB_TOKEN_IDS_BATCH):
+        chunk = token_ids[i : i + CLOB_TOKEN_IDS_BATCH]
+        batch = fetch_markets_by_clob_token_ids(chunk)
+        for m in batch or []:
+            cid = m.get("conditionId")
+            if cid and cid not in seen_cid:
+                seen_cid.add(cid)
+                raw_list.append(m)
+    if not raw_list:
+        return 0
+    conn = get_connection(db_path)
+    try:
+        norms: List[Dict] = []
+        for m in raw_list:
+            m.setdefault("_event_neg_risk", m.get("negRisk", False))
+            m.setdefault("_event_slug", m.get("slug", ""))
+            _enrich_market_with_event_by_slug(m)
+            n = normalize_market_from_gamma(m)
+            if n:
+                norms.append(n)
+        if not norms:
+            return 0
+        return batch_upsert_markets(conn, norms)
+    finally:
+        conn.close()
+
+
+def fetch_and_upsert_markets_for_token_ids(
+    token_ids: List[str],
+    db_path: str,
+    max_pages: int = 20,
+    requests_delay: float = 0.0,
+) -> int:
+    """
+    根据缺失的 token_id 从 Gamma API 拉取对应市场（含已关闭/历史），并写入 DB。
+    优先用 GET /markets?clob_token_ids=... 一键查询；若无结果再分页扫 /events。
+
+    策略：1) GET /markets?clob_token_ids=id1&clob_token_ids=id2 一键查
+         2) 若无结果再分页 /events?closed=true 与 /events?active=true&closed=false
+    """
+    if not token_ids:
+        return 0
+    # 1) 先按 token_id 直接查 Gamma（GET /markets?clob_token_ids=...）
+    total_upserted = fetch_and_upsert_markets_by_token_ids_via_api(token_ids, db_path)
+    # 计算仍未解析的 token（API 可能只返回了部分）
+    conn = get_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT yes_token_id, no_token_id FROM markets WHERE yes_token_id IS NOT NULL AND no_token_id IS NOT NULL")
+        resolved = set()
+        for row in cur.fetchall():
+            if row[0]:
+                resolved.add(str(row[0]))
+            if row[1]:
+                resolved.add(str(row[1]))
+    finally:
+        conn.close()
+    remaining = set(str(t) for t in token_ids) - resolved
+    if not remaining:
+        return total_upserted
+    # 2) 用链上 registry + CLOB condition 接口做确定性回填，覆盖 Gamma 漏掉的真实 market
+    total_upserted += fetch_and_upsert_markets_for_token_ids_via_onchain(list(remaining), db_path)
+    remaining = set(str(t) for t in token_ids) - _recompute_resolved_token_ids(db_path)
+    if not remaining:
+        return total_upserted
+    # 2) 仍未解析的再分页扫 /events
+    seen_condition_ids: set = set()
+    conn = get_connection(db_path)
+    try:
+        def _clob_ids(m: Dict) -> List[str]:
+            cids = m.get("clobTokenIds", [])
+            if isinstance(cids, str):
+                try:
+                    cids = json.loads(cids)
+                except Exception:
+                    cids = []
+            if not cids and m.get("tokens"):
+                cids = [t.get("tokenId") for t in m["tokens"] if t.get("tokenId")]
+            return [str(x) for x in cids if x]
+
+        def _fetch_events_once(stage: str, page: int, params: Dict) -> Optional[List[Dict]]:
+            """
+            仅用于按 token_id 补市场的轻量调用：
+            - 不使用全局 _fetch_with_retry 的指数退避，避免导入流程长时间卡住
+            - 单次请求失败直接返回 None，由调用方快速放弃 Gamma，交给本地 dataset 兜底
+            """
+            try:
+                session = _get_session()
+                resp = session.get(GAMMA_EVENTS_URL, params=params, timeout=REQUEST_TIMEOUT)
+                resp.raise_for_status()
+                data = _response_json(resp, f"GET {GAMMA_EVENTS_URL}")
+                resp.close()
+            except Exception as e:
+                _invalidate_session(str(e))
+                print(
+                    f"fetch_and_upsert_markets_for_token_ids[{stage}] page={page}: {e}",
+                    file=sys.stderr,
+                )
+                return None
+
+            # Gamma /events 通常直接返回 list；保守兼容 dict 包裹的情况
+            if isinstance(data, list):
+                events = data
+            elif isinstance(data, dict):
+                events = data.get("events") or []
+            else:
+                events = []
+
+            if not events or not isinstance(events, list):
+                return None
+            return events
+
+        for closed_first in (True, False):
+            if not remaining:
+                break
+            stage = "closed" if closed_first else "active"
+            params = {
+                "limit": 100,
+                "order": "volume",
+                "ascending": "false",
+            }
+            if closed_first:
+                params["closed"] = "true"
+            else:
+                params["active"] = "true"
+                params["closed"] = "false"
+            offset = 0
+            for page in range(max_pages):
+                params["offset"] = offset
+                events = _fetch_events_once(stage, page + 1, dict(params))
+                if not events:
+                    break
+                batch: List[Dict] = []
+                for ev in events:
+                    for m in ev.get("markets", []):
+                        cids = _clob_ids(m)
+                        if not (remaining & set(cids)):
+                            continue
+                        cid = m.get("conditionId")
+                        if not cid or cid in seen_condition_ids:
+                            continue
+                        _attach_event_meta_to_market(m, ev)
+                        norm = normalize_market_from_gamma(m)
+                        if norm:
+                            seen_condition_ids.add(cid)
+                            batch.append(norm)
+                            remaining -= set(cids)
+                if batch:
+                    total_upserted += batch_upsert_markets(conn, batch)
+                offset += len(events)
+                if len(events) < 100:
+                    break
+                if not remaining:
+                    break
+        return total_upserted
+    finally:
+        conn.close()
 
 
 def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
@@ -626,22 +1501,22 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     - NegRisk 市场直接采信 Gamma 的 clobTokenIds（Strategy A）
     - 标准二元市场优先使用本地计算，与 API 校验
     """
-    condition_id = m.get("conditionId")
+    condition_id = m.get("conditionId") or m.get("condition_id")
     if not condition_id:
         return None
+    gamma_market_id = m.get("id")
+    gamma_market_id = str(gamma_market_id).strip() if gamma_market_id is not None else ""
 
-    # Strategy B: 缺失关键字段的市场静默过滤，不输出警告
-    question_id = m.get("questionID") or m.get("questionId")
+    # 对齐 trade → market 的关键是 yes/no token_id；question_id/oracle 缺失不应直接丢弃市场。
+    # 否则会导致大量链上交易无法在本地 markets 表中找到匹配。
+    question_id = m.get("questionID") or m.get("questionId") or m.get("question_id")
     oracle = m.get("oracle")
     if isinstance(oracle, dict):
         oracle = oracle.get("address")
     if not oracle:
-        oracle = m.get("resolvedBy")
+        oracle = m.get("resolvedBy") or m.get("resolved_by")
 
-    if not question_id or not oracle:
-        return None
-
-    clob_token_ids = m.get("clobTokenIds", [])
+    clob_token_ids = m.get("clobTokenIds", []) or m.get("clob_token_ids", [])
     if isinstance(clob_token_ids, str):
         try:
             clob_token_ids = json.loads(clob_token_ids)
@@ -650,9 +1525,17 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
 
     tokens = m.get("tokens", [])
     if tokens and not clob_token_ids:
-        clob_token_ids = [t.get("tokenId") for t in tokens if t.get("tokenId")]
+        clob_token_ids = [
+            t.get("tokenId") or t.get("token_id")
+            for t in tokens
+            if t.get("tokenId") or t.get("token_id")
+        ]
 
-    is_neg_risk = m.get("_event_neg_risk", False) or m.get("negRisk", False)
+    is_neg_risk = (
+        m.get("_event_neg_risk", False)
+        or m.get("negRisk", False)
+        or m.get("neg_risk", False)
+    )
 
     # Strategy A：只要有 clobTokenIds 就优先采用，避免 conditionId/oracle 不匹配产生的 warning
     # 原因：Gamma 的 resolvedBy 常非 conditionId 公式中的 oracle，导致本地计算 conditionId 不一致；
@@ -661,6 +1544,9 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
         yes_token = str(clob_token_ids[0])
         no_token = str(clob_token_ids[1])
     else:
+        # 无 clobTokenIds 时只能通过本地计算得到 tokenId；计算需要 oracle + question_id
+        if not question_id or not oracle:
+            return None
         try:
             calculated = calculate_market_tokens(
                 condition_id=condition_id,
@@ -674,17 +1560,32 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
         yes_token = str(calculated["yesTokenId"])
         no_token = str(calculated["noTokenId"])
 
-    slug = m.get("slug") or f"market-{condition_id[:16]}"
+    slug = m.get("slug") or m.get("market_slug") or f"market-{condition_id[:16]}"
     created_at = m.get("createdAt") or m.get("created_at")
-    end_date = m.get("endDate") or m.get("end_date")
+    end_date = m.get("endDate") or m.get("end_date") or m.get("end_date_iso")
 
-    # category: 领域分类，如 Politics, Sports, Crypto
-    category = m.get("category") or ""
+    # category: 优先用 event 上的分类（/events 返回的 event 有 category、subcategory、categories），再 fallback 到 market 自身
+    category = (
+        m.get("_event_category")
+        or m.get("_event_subcategory")
+        or m.get("category")
+        or ""
+    )
     if isinstance(category, dict):
-        category = category.get("slug", "") or category.get("label", "") or ""
+        category = category.get("slug", "") or category.get("label", "") or str(category)
+    if not category and m.get("_event_categories"):
+        cats = m["_event_categories"]
+        if isinstance(cats, list) and cats and isinstance(cats[0], dict):
+            category = cats[0].get("slug", "") or cats[0].get("label", "") or ""
+        elif isinstance(cats, list) and cats:
+            category = str(cats[0])
+    if not category and m.get("categories"):
+        cats = m["categories"]
+        if isinstance(cats, list) and cats and isinstance(cats[0], dict):
+            category = cats[0].get("slug", "") or cats[0].get("label", "") or ""
 
-    # tags: 标签列表，从 market 或 events 提取
-    tags_raw = m.get("tags")
+    # tags: 优先用 event 的 tags（Polymarket 分类多在 event 层），再 market 自身或 market.events[0]
+    tags_raw = m.get("_event_tags") or m.get("tags")
     if tags_raw is None and m.get("events"):
         ev = m["events"][0] if m["events"] else {}
         tags_raw = ev.get("tags")
@@ -697,15 +1598,19 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
                 tags.append(str(t))
     elif tags_raw:
         tags = [str(tags_raw)]
+    if not category and tags:
+        category = tags[0]
 
     return {
+        "gamma_market_id": gamma_market_id,
         "slug": slug,
-        "condition_id": condition_id,
-        "question_id": question_id,
-        "oracle": oracle,
+        "condition_id": _ensure_0x(condition_id),
+        "question_id": question_id,  # may be None
+        "oracle": oracle,  # may be None
         "yes_token_id": yes_token,
         "no_token_id": no_token,
-        "title": m.get("question", ""),
+        "clob_token_ids": clob_token_ids,  # 完整列表，支持多选市场
+        "title": m.get("question") or m.get("title", ""),
         "description": m.get("description", ""),
         "enable_neg_risk": 1 if is_neg_risk else 0,
         "end_date": end_date,
@@ -715,10 +1620,334 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     }
 
 
+def _category_and_tags_from_event(ev: Dict) -> Tuple[str, str]:
+    """从 event 字典解析 category 字符串和 tags JSON 字符串，供 DB 更新用。"""
+    category = ev.get("category") or ev.get("subcategory") or ""
+    if isinstance(category, dict):
+        category = category.get("slug", "") or category.get("label", "") or ""
+    cats = ev.get("categories")
+    if not category and isinstance(cats, list) and cats and isinstance(cats[0], dict):
+        category = cats[0].get("slug", "") or cats[0].get("label", "") or ""
+    tags_raw = ev.get("tags")
+    tags = []
+    if isinstance(tags_raw, list):
+        for t in tags_raw:
+            if isinstance(t, dict):
+                tags.append(t.get("slug") or t.get("label") or str(t))
+            else:
+                tags.append(str(t))
+    elif tags_raw:
+        tags = [str(tags_raw)]
+    return (category or "", json.dumps(tags, ensure_ascii=False))
+
+
+def _event_has_category_or_tags(ev: Dict) -> bool:
+    """检查 event 是否包含有效的 category 或 tags。"""
+    if not ev:
+        return False
+    cat = ev.get("category") or ev.get("subcategory") or ev.get("categories")
+    if cat:
+        if isinstance(cat, list) and cat:
+            return True
+        if isinstance(cat, dict) and (cat.get("slug") or cat.get("label")):
+            return True
+        if isinstance(cat, str) and cat.strip():
+            return True
+    tags = ev.get("tags")
+    return bool(isinstance(tags, list) and len(tags) > 0)
+
+
+def _fetch_market_with_embedded_event(slug: str) -> Optional[Dict]:
+    """GET /markets?slug= 获取 market，返回带 embedded_event 的 market 或 None。"""
+    try:
+        resp = _get_session().get(
+            GAMMA_MARKETS_URL,
+            params={"slug": slug},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        resp.close()
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict) and data.get("slug"):
+            return data
+        return None
+    except Exception:
+        return None
+
+
+def _fetch_event_by_id_or_slug(event_id: Optional[str], event_slug: Optional[str]) -> Optional[Dict]:
+    """GET /events?id= 或 /events?slug= 获取完整 event（含 tags）。"""
+    params: Dict[str, str] = {}
+    if event_id:
+        params["id"] = str(event_id)
+    elif event_slug:
+        params["slug"] = str(event_slug)
+    else:
+        return None
+    try:
+        resp = _get_session().get(GAMMA_EVENTS_URL, params=params, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        events = resp.json()
+        resp.close()
+        if isinstance(events, list) and events:
+            return events[0]
+        return None
+    except Exception:
+        return None
+
+
+# 并发 worker 用：独立 requests.get，避免共享 Session（非线程安全）
+# 重试参数：应对瞬时超时/限流
+_REFRESH_FETCH_RETRIES = 3
+_REFRESH_FETCH_RETRY_DELAY = 0.3
+
+
+def _fetch_market_by_slug_standalone(slug: str) -> Optional[Dict]:
+    """线程安全：GET /markets?slug= 获取 market，失败时重试。"""
+    for attempt in range(_REFRESH_FETCH_RETRIES):
+        try:
+            resp = requests.get(
+                GAMMA_MARKETS_URL,
+                params={"slug": slug},
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            resp.close()
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict) and data.get("slug"):
+                return data
+            return None
+        except Exception:
+            if attempt < _REFRESH_FETCH_RETRIES - 1:
+                time.sleep(_REFRESH_FETCH_RETRY_DELAY)
+            else:
+                return None
+    return None
+
+
+def _fetch_event_by_id_or_slug_standalone(
+    event_id: Optional[str], event_slug: Optional[str]
+) -> Optional[Dict]:
+    """线程安全：GET /events?id= 或 ?slug= 获取完整 event，失败时重试。"""
+    params: Dict[str, str] = {}
+    if event_id:
+        params["id"] = str(event_id)
+    elif event_slug:
+        params["slug"] = str(event_slug)
+    else:
+        return None
+    for attempt in range(_REFRESH_FETCH_RETRIES):
+        try:
+            resp = requests.get(GAMMA_EVENTS_URL, params=params, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            events = resp.json()
+            resp.close()
+            if isinstance(events, list) and events:
+                return events[0]
+            return None
+        except Exception:
+            if attempt < _REFRESH_FETCH_RETRIES - 1:
+                time.sleep(_REFRESH_FETCH_RETRY_DELAY)
+            else:
+                return None
+    return None
+
+
+def _fetch_from_clob_by_condition_id(condition_id: str) -> Optional[Tuple[str, str]]:
+    """
+    当 Gamma slug 查不到时，用 condition_id 查 CLOB API（GET /markets/{condition_id}）。
+    CLOB 返回 tags 列表，可用于补全。返回 (category, tags_json) 或 None。
+    """
+    if not condition_id or not str(condition_id).strip().startswith("0x"):
+        return None
+    cid = str(condition_id).strip()
+    for attempt in range(_REFRESH_FETCH_RETRIES):
+        try:
+            url = f"{CLOB_API_BASE}/markets/{cid}"
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            resp.close()
+            if not isinstance(data, dict):
+                return None
+            tags = data.get("tags")
+            if not isinstance(tags, list) or not tags:
+                return None
+            tags_str = [str(t) for t in tags]
+            category = tags_str[0] if tags_str else ""
+            return (category, json.dumps(tags_str, ensure_ascii=False))
+        except Exception:
+            if attempt < _REFRESH_FETCH_RETRIES - 1:
+                time.sleep(_REFRESH_FETCH_RETRY_DELAY)
+            else:
+                return None
+    return None
+
+
+def _fetch_category_tags_for_market(slug: str, condition_id: Optional[str] = None) -> Optional[Tuple[str, str]]:
+    """
+    单条 market 的 API 拉取逻辑（供线程池调用）。
+    1) 先 GET /markets?slug= 查 Gamma
+    2) 若查不到且 condition_id 存在，用 CLOB GET /markets/{condition_id} 兜底（slug 可能已变更）
+    返回 (category, tags_json) 或 None（API 无数据则跳过）。
+    """
+    slug = (slug or "").strip()
+    market = _fetch_market_by_slug_standalone(slug) if slug else None
+    cid = (condition_id or "").strip() or None
+    if not cid and market:
+        cid = (market.get("conditionId") or "").strip() or None
+    if not market and cid:
+        return _fetch_from_clob_by_condition_id(cid)
+    if not market:
+        return None
+    evs = market.get("events") or []
+    ev = evs[0] if evs else None
+    if not ev:
+        if cid:
+            return _fetch_from_clob_by_condition_id(cid)
+        return None
+    if _event_has_category_or_tags(ev):
+        return _category_and_tags_from_event(ev)
+    event_id = ev.get("id")
+    event_slug = ev.get("slug") or ev.get("ticker")
+    full_ev = _fetch_event_by_id_or_slug_standalone(
+        str(event_id) if event_id else None,
+        str(event_slug) if event_slug else None,
+    )
+    if full_ev and _event_has_category_or_tags(full_ev):
+        return _category_and_tags_from_event(full_ev)
+    # Gamma GET /events 返回空或 event 无 tags 时，用 CLOB 兜底（event 可能已从 Gamma 下线）
+    if cid:
+        return _fetch_from_clob_by_condition_id(cid)
+    return None
+
+
+REFRESH_MAX_WORKERS = 10  # 并发数；失败由重试逻辑兜底
+
+
+def refresh_category_tags_in_db(
+    db_path: str,
+    limit: Optional[int] = None,
+    requests_delay: float = 0.5,
+    max_workers: int = REFRESH_MAX_WORKERS,
+) -> int:
+    """
+    为 DB 中 category 或 tags 为空的 market 补全并写回。仅使用 API 获取数据。
+
+    使用 ThreadPoolExecutor 并发请求，单次请求失败会自动重试 3 次。
+
+    查询链路：
+    1. Step A: GET /markets?slug={market_slug} 获取 market 及 embedded event
+    2. Step B: 从 market 提取 event_id、event_slug
+    3. Step C: 若 embedded_event 已有 category/tags，直接使用
+    4. Step D: 否则 GET /events?id={event_id} 或 ?slug={event_slug} 获取完整 event
+
+    API 无数据时跳过该记录（不更新），下次 refresh 会重试。
+    返回更新的行数。
+    """
+    init_schema(db_path=db_path)
+    conn = get_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, slug, condition_id, title FROM markets
+            WHERE (category IS NULL OR TRIM(COALESCE(category, '')) = '')
+               OR (tags IS NULL OR TRIM(COALESCE(tags, '')) = '' OR tags = '[]')
+            ORDER BY id
+            """
+            + (" LIMIT " + str(int(limit)) if limit is not None and limit > 0 else ""),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        print("No markets with empty category/tags.", file=sys.stderr)
+        return 0
+
+    print(f"Refreshing category/tags for {len(rows)} market(s) (workers={max_workers}) ...", file=sys.stderr)
+    updated = 0
+    progress_every = 50
+
+    def _worker(item: Tuple) -> Tuple[int, Optional[Tuple[str, str]]]:
+        market_id, slug, condition_id, _title = item
+        result = _fetch_category_tags_for_market((slug or "").strip(), condition_id=(condition_id or "").strip() or None)
+        return (market_id, result)
+
+    def _norm_result(category: str, tags_json: str) -> str:
+        """有 tags 无 category 时用第一个 tag 补 category。"""
+        if not category and tags_json != "[]":
+            try:
+                tags_list = json.loads(tags_json)
+                return tags_list[0] if tags_list else ""
+            except Exception:
+                pass
+        return category
+
+    conn = get_connection(db_path)
+    try:
+        batch: List[Tuple[int, str, str]] = []
+        failed_rows: List[Tuple] = []  # (market_id, slug, condition_id, title)
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            future_to_row = {ex.submit(_worker, row): row for row in rows}
+            for future in as_completed(future_to_row):
+                try:
+                    market_id, result = future.result()
+                    row = future_to_row[future]
+                    if result:
+                        category, tags_json = result
+                        category = _norm_result(category, tags_json) or category
+                        batch.append((category, tags_json, market_id))
+                    else:
+                        failed_rows.append(row)
+                except Exception as e:
+                    row = future_to_row.get(future)
+                    if row:
+                        failed_rows.append(row)
+                    print(f"  Worker error for market {row[0] if row else '?'}: {e}", file=sys.stderr)
+                completed += 1
+                if completed % progress_every == 0:
+                    print(f"  ... fetched {completed}/{len(rows)}, updated {len(batch)}", file=sys.stderr)
+
+        # 第二轮：对首轮未拿到结果的记录顺序重试一次，减少漏写
+        if failed_rows:
+            print(f"  Retrying {len(failed_rows)} failed record(s) sequentially (incl. CLOB by condition_id) ...", file=sys.stderr)
+            for market_id, slug, condition_id, _title in failed_rows:
+                result = _fetch_category_tags_for_market((slug or "").strip(), condition_id=(condition_id or "").strip() or None)
+                if result:
+                    category, tags_json = result
+                    category = _norm_result(category, tags_json) or category
+                    batch.append((category, tags_json, market_id))
+
+        for category, tags_json, market_id in batch:
+            try:
+                conn.execute(
+                    "UPDATE markets SET category = ?, tags = ? WHERE id = ?",
+                    (category, tags_json, market_id),
+                )
+            except Exception as e:
+                print(f"  UPDATE id={market_id}: {e}", file=sys.stderr)
+        conn.commit()
+    finally:
+        conn.close()
+
+    updated = len(batch)
+    print(f"Refreshed category/tags for {updated} market(s).", file=sys.stderr)
+    return updated
+
+
 def batch_upsert_markets(conn, markets: List[Dict]) -> int:
     """
     批量插入或更新市场记录，condition_id 唯一，自动去重。
     使用 executemany 一次提交，减轻 DB IO 压力。
+    category/tags 使用 COALESCE 保护：只在当前为空时才用新值覆盖，
+    避免 API 抓到的精准标签被后续无分类数据清空。
     Returns:
         成功写入的数量
     """
@@ -727,30 +1956,35 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
     rows = []
     for market in markets:
         tags_json = json.dumps(market.get("tags", []) or [])
+        cids = market.get("clob_token_ids", []) or []
+        clob_token_ids_json = json.dumps(cids, ensure_ascii=False) if isinstance(cids, list) else (cids if isinstance(cids, str) else "[]")
         rows.append((
-            market["slug"],
-            market["condition_id"],
-            market["question_id"],
-            market["oracle"],
-            market["yes_token_id"],
-            market["no_token_id"],
-            market["title"],
-            market["description"],
-            market["enable_neg_risk"],
-            market["end_date"],
-            market["created_at"],
+            market.get("gamma_market_id", "") or "",
+            market.get("slug"),
+            market.get("condition_id"),
+            market.get("question_id"),
+            market.get("oracle"),
+            market.get("yes_token_id"),
+            market.get("no_token_id"),
+            market.get("title", ""),
+            market.get("description", ""),
+            market.get("enable_neg_risk", 0),
+            market.get("end_date"),
+            market.get("created_at"),
             market.get("category", "") or "",
             tags_json,
+            clob_token_ids_json,
         ))
     cursor = conn.cursor()
     cursor.executemany(
         """
         INSERT INTO markets (
-            slug, condition_id, question_id, oracle,
+            gamma_market_id, slug, condition_id, question_id, oracle,
             yes_token_id, no_token_id, title, description,
-            enable_neg_risk, end_date, created_at, category, tags
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(condition_id) DO UPDATE SET
+            gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
             slug=excluded.slug,
             question_id=excluded.question_id,
             oracle=excluded.oracle,
@@ -761,8 +1995,9 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
             enable_neg_risk=excluded.enable_neg_risk,
             end_date=excluded.end_date,
             created_at=excluded.created_at,
-            category=excluded.category,
-            tags=excluded.tags
+            category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+            tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
+            clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
         """,
         rows,
     )
@@ -773,18 +2008,22 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
 def upsert_market(conn, market: Dict) -> int:
     """
     插入或更新市场记录，返回 market_id
-    不存储 collateral_token、status、updated_at；存储 category、tags
+    不存储 collateral_token、status、updated_at；存储 category、tags、clob_token_ids
+    category/tags 使用 COALESCE 保护，避免覆盖已有精准标签。
     """
     tags_json = json.dumps(market.get("tags", []) or [])
+    cids = market.get("clob_token_ids", []) or []
+    clob_token_ids_json = json.dumps(cids, ensure_ascii=False) if isinstance(cids, list) else (cids if isinstance(cids, str) else "[]")
     cursor = conn.cursor()
     cursor.execute(
         """
         INSERT INTO markets (
-            slug, condition_id, question_id, oracle,
+            gamma_market_id, slug, condition_id, question_id, oracle,
             yes_token_id, no_token_id, title, description,
-            enable_neg_risk, end_date, created_at, category, tags
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(condition_id) DO UPDATE SET
+            gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
             slug=excluded.slug,
             question_id=excluded.question_id,
             oracle=excluded.oracle,
@@ -795,23 +2034,26 @@ def upsert_market(conn, market: Dict) -> int:
             enable_neg_risk=excluded.enable_neg_risk,
             end_date=excluded.end_date,
             created_at=excluded.created_at,
-            category=excluded.category,
-            tags=excluded.tags
+            category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+            tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
+            clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
         """,
         (
-            market["slug"],
-            market["condition_id"],
-            market["question_id"],
-            market["oracle"],
-            market["yes_token_id"],
-            market["no_token_id"],
-            market["title"],
-            market["description"],
-            market["enable_neg_risk"],
-            market["end_date"],
-            market["created_at"],
+            market.get("gamma_market_id", "") or "",
+            market.get("slug"),
+            market.get("condition_id"),
+            market.get("question_id"),
+            market.get("oracle"),
+            market.get("yes_token_id"),
+            market.get("no_token_id"),
+            market.get("title", ""),
+            market.get("description", ""),
+            market.get("enable_neg_risk", 0),
+            market.get("end_date"),
+            market.get("created_at"),
             market.get("category", "") or "",
             tags_json,
+            clob_token_ids_json,
         ),
     )
     conn.commit()
@@ -864,21 +2106,10 @@ def estimate_full_markets(
             extrapolated = True
             break
         params["offset"] = offset
-        ok = False
-        session = _get_session()
-        for attempt in range(3):
-            try:
-                resp = session.get(api_url, params=params, timeout=30)
-                resp.raise_for_status()
-                data = resp.json()
-                ok = True
-                break
-            except Exception as e:
-                if attempt < 2:
-                    print(f"  Retry {attempt + 1}/2 after: {e}", file=sys.stderr)
-                else:
-                    print(f"Error during estimate: {e}", file=sys.stderr)
-        if not ok:
+        try:
+            data = _fetch_with_retry(api_url, dict(params))
+        except Exception as e:
+            print(f"Error during estimate: {e}", file=sys.stderr)
             break
 
         events_list: List[Dict] = []
@@ -888,8 +2119,7 @@ def estimate_full_markets(
             batch = []
             for ev in events_list:
                 for m in ev.get("markets", []):
-                    m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
-                    m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+                    _attach_event_meta_to_market(m, ev)
                     batch.append(m)
         else:
             if isinstance(data, list):
@@ -915,11 +2145,11 @@ def estimate_full_markets(
                         sum(len(str(v) or "") for v in norm.values()) + 200
                     )
 
-        offset += len(batch)
-        if pages % 10 == 0 and pages > 0:
-            print(f"  ... {pages} pages, {total_raw} raw, {total_normalized} normalized", file=sys.stderr)
+        # 修复：使用单一 page_size 推进 offset，避免原来 offset += len(batch) 与 offset += page_size 双重累加
         page_size = len(events_list) if closed_only else len(batch)
         offset += page_size
+        if pages % 10 == 0 and pages > 0:
+            print(f"  ... {pages} pages, {total_raw} raw, {total_normalized} normalized", file=sys.stderr)
         if page_size < 100:
             break
 
@@ -951,6 +2181,8 @@ def run_market_discovery(
     cooldown_every: Optional[int] = None,
     cooldown_seconds: float = 60,
     max_fetches: Optional[int] = None,
+    session_recycle_every: int = SESSION_RECYCLE_EVERY,
+    sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT,
 ) -> int:
     """
     执行市场发现流程
@@ -967,7 +2199,7 @@ def run_market_discovery(
 
     if closed_events_only:
         if not db_path:
-            print("Error: --closed-events-only requires --db", file=sys.stderr)
+            print("Error: --closed-events-only requires database output mode.", file=sys.stderr)
             return 0
         return _run_closed_events_only(
             db_path=db_path,
@@ -978,6 +2210,7 @@ def run_market_discovery(
             cooldown_seconds=cooldown_seconds,
             max_fetches=max_fetches,
             since_date=since_date,
+            session_recycle_every=session_recycle_every,
         )
 
     if since_date is not None:
@@ -996,27 +2229,48 @@ def run_market_discovery(
             if not output_json:
                 return pre_written
     else:
-        if event_slugs:
-            for slug in event_slugs:
-                ms = fetch_markets_by_event_slug(slug)
-                markets_to_process.extend(ms)
-
-        if not event_slugs or limit > len(markets_to_process):
-            ms = fetch_all_markets(
-                limit=limit, active_only=active_only, closed_only=closed_only
+        if db_path and not active_only and not closed_only and not event_slugs:
+            ancient = datetime(1970, 1, 1, tzinfo=timezone.utc)
+            markets_to_process, pre_written = fetch_markets_since_date(
+                since_date=ancient,
+                include_active=True,
+                include_closed=True,
+                db_path=db_path,
+                batch_size=batch_size,
+                requests_delay=requests_delay,
             )
-            seen = {m.get("conditionId") for m in markets_to_process}
-            for m in ms:
-                if m.get("conditionId") not in seen:
-                    markets_to_process.append(m)
+            print("Fetched full market history from Gamma events (active + closed).", file=sys.stderr)
+        else:
+            if event_slugs:
+                for slug in event_slugs:
+                    ms = fetch_markets_by_event_slug(slug)
+                    markets_to_process.extend(ms)
 
+            if not event_slugs or limit > len(markets_to_process):
+                ms = fetch_all_markets(
+                    limit=limit,
+                    active_only=active_only,
+                    closed_only=closed_only,
+                    db_path=db_path,
+                    batch_size=batch_size,
+                    requests_delay=requests_delay,
+                )
+                seen = {m.get("conditionId") or m.get("condition_id") for m in markets_to_process}
+                for m in ms:
+                    condition_id = m.get("conditionId") or m.get("condition_id")
+                    if condition_id not in seen:
+                        markets_to_process.append(m)
+
+    # 如果 fetch_all_markets 以 streaming-to-DB 模式运行，则 markets_to_process 可能为空，
+    # 此时无需再做一次性 norms/upsert（避免重复写入和占用内存）
     norms: List[Dict] = []
-    for m in markets_to_process:
-        norm = normalize_market_from_gamma(m)
-        if norm:
-            norms.append(norm)
+    if markets_to_process:
+        for m in markets_to_process:
+            norm = normalize_market_from_gamma(m)
+            if norm:
+                norms.append(norm)
 
-    if db_path and pre_written == 0:
+    if db_path and pre_written == 0 and norms:
         init_schema(db_path=db_path)
         with get_db(db_path) as conn:
             batch_upsert_markets(conn, norms)
@@ -1026,13 +2280,27 @@ def run_market_discovery(
             json.dump(norms, f, ensure_ascii=False, indent=2)
         print(f"Results saved to: {out_path}", file=sys.stderr)
 
+    # 记录本次成功完成时间，供下次 --incremental 读取
+    if db_path:
+        try:
+            with get_db(db_path) as conn:
+                _save_last_discovery_at(conn, datetime.now(timezone.utc), sync_state_key=sync_state_key)
+        except Exception:
+            pass
+        pre_written += supplement_missing_markets_from_onchain_registry(
+            db_path=db_path,
+            batch_blocks=DEFAULT_CHAIN_BATCH_BLOCKS,
+            requests_delay=DEFAULT_CHAIN_REQUESTS_DELAY,
+        )
+
     return pre_written + len(norms)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Polymarket Market Discovery Service")
-    parser.add_argument("--db", default=None, help="数据库路径；不指定则输出为 JSON 文件")
-    parser.add_argument("--output", "-o", help="JSON 输出路径（仅在未指定 --db 时生效，默认 market_discovery.json）")
+    add_db_cli_args(parser)
+    parser.add_argument("--no-db", action="store_true", help="不写数据库，改为输出 JSON 文件")
+    parser.add_argument("--output", "-o", help="JSON 输出路径（仅在 --no-db 时生效，默认 market_discovery.json）")
     parser.add_argument("--limit", type=int, default=500, help="最多获取市场数（仅在未使用 --since-date 时生效）")
     parser.add_argument("--active-only", action="store_true", help="仅获取活跃市场（与 --since-date 互斥时被忽略）")
     parser.add_argument("--closed-only", action="store_true", help="仅获取已结束市场（与 --since-date 互斥时被忽略）")
@@ -1046,12 +2314,12 @@ def main():
         "--batch-size",
         type=int,
         default=500,
-        help="与 --since-date 和 --db 联用：每批写入数据库的市场数量（默认 500）",
+        help="与 --since-date 和数据库输出联用：每批写入数据库的市场数量（默认 500）",
     )
     parser.add_argument(
         "--closed-events-only",
         action="store_true",
-        help="仅补充拉取 closed events，用于断点续传；需同时指定 --db",
+        help="仅补充拉取 closed events，用于断点续传；需启用数据库输出",
     )
     parser.add_argument(
         "--closed-events-start-offset",
@@ -1088,9 +2356,45 @@ def main():
         help="与 --closed-events-only 联用：最多请求 N 次后停止并保存进度，可多次运行分批完成",
     )
     parser.add_argument(
+        "--session-recycle-every",
+        type=int,
+        default=SESSION_RECYCLE_EVERY,
+        metavar="N",
+        help=(
+            f"每 N 次 HTTP 请求后自动关闭并重建 Session，清除僵死连接，防止连接池耗尽（默认 {SESSION_RECYCLE_EVERY}）；"
+            "爬取量极大时可适当调小（如 100）"
+        ),
+    )
+    parser.add_argument(
         "--event-slugs",
         nargs="*",
         help="指定事件 slug 列表，如 fed-decision-in-january",
+    )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "增量模式：自动从数据库推断起始日期（优先读取上次同步完成时间，"
+            "否则取 DB 中最新市场的 created_at），只拉取新市场。"
+            "需启用数据库输出；首次运行若 DB 为空则自动降级为全量同步。"
+            "与 --since-date 互斥（--incremental 优先）。"
+        ),
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help=(
+            "守护进程模式：持续循环运行市场发现，每次完成后等待 --interval 秒再次执行。"
+            "与 --incremental 联用可实现真正的增量定时同步。"
+            "按 Ctrl+C 退出。"
+        ),
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=3600,
+        metavar="SECONDS",
+        help="与 --watch 联用：两次同步之间的等待秒数（默认 3600，即 1 小时）",
     )
     parser.add_argument(
         "--estimate",
@@ -1103,8 +2407,38 @@ def main():
         default=None,
         help="与 --estimate 联用：最多拉取页数，用于快速抽样（默认不限）",
     )
+    parser.add_argument(
+        "--refresh-category-tags",
+        action="store_true",
+        help="为 DB 中 category/tags 为空的 market 按 slug 请求 Gamma 事件补全并写回；需启用数据库输出",
+    )
+    parser.add_argument(
+        "--refresh-category-tags-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="与 --refresh-category-tags 联用：仅处理前 N 条空记录（默认全部）",
+    )
+    parser.add_argument(
+        "--no-refresh-category-tags",
+        action="store_true",
+        help="启用数据库输出时默认在 discovery 结束后补全已有市场的 category/tags；本选项可关闭该补全",
+    )
 
     args = parser.parse_args()
+    configure_db_from_args(args)
+    db_path = None if args.no_db else args.sqlite_path
+
+    if getattr(args, "refresh_category_tags", False):
+        if not db_path:
+            print("Error: --refresh-category-tags requires database output mode.", file=sys.stderr)
+            sys.exit(1)
+        refresh_category_tags_in_db(
+            db_path=db_path,
+            limit=args.refresh_category_tags_limit,
+            requests_delay=(args.delay if args.delay is not None else DEFAULT_REQUESTS_DELAY),
+        )
+        return
 
     if args.estimate:
         print("Estimating full market count and DB size...", file=sys.stderr)
@@ -1127,44 +2461,141 @@ def main():
         print("Error: --active-only and --closed-only cannot be used together.", file=sys.stderr)
         sys.exit(1)
 
-    since_date = None
+    if args.incremental and not db_path:
+        print("Error: --incremental requires database output mode.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.watch and not db_path:
+        print("Error: --watch requires database output mode.", file=sys.stderr)
+        sys.exit(1)
+
+    # 解析手动指定的 --since-date（与 --incremental 互斥时，--incremental 优先）
+    manual_since_date = None
     if args.since_date:
         try:
-            since_date = datetime.strptime(args.since_date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            manual_since_date = datetime.strptime(args.since_date.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
             print(f"Error: Invalid --since-date format. Use YYYY-MM-DD, e.g. 2024-09-01", file=sys.stderr)
             sys.exit(1)
-        print(f"Fetching markets since {since_date.date()} (active + closed, chronological)...", file=sys.stderr)
 
     requests_delay = (args.delay if args.delay is not None else DEFAULT_REQUESTS_DELAY)
 
-    if args.closed_events_only:
-        msg = "Running Closed Events Supplement Only"
-        if since_date is not None:
-            msg += f" (created_at >= {since_date.date()})"
-        print(msg + "...", file=sys.stderr)
+    def _run_once() -> int:
+        """执行一次市场发现，返回写入数量。支持 --incremental 自动推断起点。"""
+        since_date = manual_since_date
+
+        if args.incremental:
+            since_date = resolve_incremental_since_date(db_path)
+            if since_date is not None:
+                print(
+                    f"[incremental] Resuming from last sync: {since_date.isoformat()}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "[incremental] No previous sync found in DB — running full discovery.",
+                    file=sys.stderr,
+                )
+
+        # 如果启用了数据库输出且未使用 since-date / incremental / event-slugs，
+        # 则默认做“全量发现”以最大化覆盖链上交易所需的 tokenId。
+        # （此前默认 --limit=500 容易导致 markets 覆盖不足，从而 trade 导入时出现大量 missing market）
+        limit = args.limit
+        if (
+            db_path
+            and since_date is None
+            and not args.incremental
+            and not args.event_slugs
+            and not args.active_only
+            and not args.closed_only
+            and limit == 500
+        ):
+            limit = 10_000_000
+            print(
+                "[discovery] --db provided with default --limit=500. "
+                "Upgrading to full discovery (limit=10_000_000) to maximize market coverage.",
+                file=sys.stderr,
+            )
+
+        if args.closed_events_only:
+            msg = "Running Closed Events Supplement Only"
+            if since_date is not None:
+                msg += f" (created_at >= {since_date.date()})"
+            print(msg + "...", file=sys.stderr)
+        else:
+            if since_date is not None:
+                print(
+                    f"Fetching markets since {since_date.date()} (active + closed, chronological)...",
+                    file=sys.stderr,
+                )
+            else:
+                print("Running Market Discovery (full)...", file=sys.stderr)
+
+        return run_market_discovery(
+            db_path=db_path,
+            output_json=args.output,
+            limit=limit,
+            active_only=args.active_only,
+            closed_only=args.closed_only,
+            event_slugs=args.event_slugs,
+            since_date=since_date,
+            batch_size=args.batch_size,
+            closed_events_only=args.closed_events_only,
+            closed_events_start_offset=args.closed_events_start_offset,
+            requests_delay=requests_delay,
+            cooldown_every=args.cooldown_every,
+            cooldown_seconds=args.cooldown_seconds,
+            max_fetches=args.max_fetches,
+            session_recycle_every=args.session_recycle_every,
+        )
+
+    if args.watch:
+        print(
+            f"[watch] Starting daemon mode. Interval: {args.interval}s. Press Ctrl+C to stop.",
+            file=sys.stderr,
+        )
+        print(f"[watch] Database target: {describe_db_target()}", file=sys.stderr)
+        run_index = 0
+        try:
+            while True:
+                run_index += 1
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+                print(f"\n[watch] Run #{run_index} at {ts}", file=sys.stderr)
+                count = _run_once()
+                if db_path:
+                    print(f"[watch] Done. Stored/updated {count} markets.", file=sys.stderr)
+                    if not getattr(args, "no_refresh_category_tags", False):
+                        print("[watch] Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
+                        refresh_category_tags_in_db(
+                            db_path=db_path,
+                            limit=args.refresh_category_tags_limit,
+                            requests_delay=requests_delay,
+                        )
+                else:
+                    print(f"[watch] Done. Saved {count} markets to JSON.", file=sys.stderr)
+                next_ts = datetime.now(timezone.utc)
+                print(
+                    f"[watch] Sleeping {args.interval}s until next run "
+                    f"(~{(next_ts.replace(second=0, microsecond=0)).strftime('%H:%M')} + {args.interval//60}m)...",
+                    file=sys.stderr,
+                )
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\n[watch] Interrupted by user. Exiting.", file=sys.stderr)
     else:
-        print("Running Market Discovery...", file=sys.stderr)
-    count = run_market_discovery(
-        db_path=args.db,
-        output_json=args.output,
-        limit=args.limit,
-        active_only=args.active_only,
-        closed_only=args.closed_only,
-        event_slugs=args.event_slugs,
-        since_date=since_date,
-        batch_size=args.batch_size,
-        closed_events_only=args.closed_events_only,
-        closed_events_start_offset=args.closed_events_start_offset,
-        requests_delay=requests_delay,
-        cooldown_every=args.cooldown_every,
-        cooldown_seconds=args.cooldown_seconds,
-        max_fetches=args.max_fetches,
-    )
-    if args.db:
-        print(f"Done. Stored/updated {count} markets to database.", file=sys.stderr)
-    else:
-        print(f"Done. Saved {count} markets to JSON.", file=sys.stderr)
+        count = _run_once()
+        if db_path:
+            print(f"Database target: {describe_db_target()}", file=sys.stderr)
+            print(f"Done. Stored/updated {count} markets to database.", file=sys.stderr)
+            if not getattr(args, "no_refresh_category_tags", False):
+                print("Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
+                refresh_category_tags_in_db(
+                    db_path=db_path,
+                    limit=args.refresh_category_tags_limit,
+                    requests_delay=requests_delay,
+                )
+        else:
+            print(f"Done. Saved {count} markets to JSON.", file=sys.stderr)
 
 
 if __name__ == "__main__":

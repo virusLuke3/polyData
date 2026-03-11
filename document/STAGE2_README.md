@@ -165,3 +165,31 @@ python test_db_coverage.py
 
 结论: 所有采样日期均有数据，区间内覆盖良好。
 
+一次性全历史导入（推荐命令）
+假设你使用默认数据库路径（database/polymarket_indexer.db）：
+cd /home/jiahuaiyu/develop/polymarket/githubProjects/polyDatapython scripts/market/market_discovery.py \  --db database/polymarket_indexer.db \  --since-date 2020-01-01
+说明：
+--since-date 2020-01-01：从 2020-01-01 开始往后拉取。这个日期早于 Polymarket 实际上线时间即可，脚本会自动按 created_at >= since_date 过滤。
+默认会：
+从 /markets 分页拉取（按 createdAt 降序）
+再从 /events?closed=true 拉取已关闭市场补全
+使用你已有的 DB 数据做去重，不会重复插入已存在市场，只会 UPDATE。
+之后如果你怀疑 closed events 还有没补全，也可以单独跑一轮补充（可选）：
+python scripts/market/market_discovery.py \  --db database/polymarket_indexer.db \  --closed-events-only
+后续只拉新增数据（增量同步）
+全历史导入完成后，后面就不需要再从 2020 开始了，可以用 增量模式：
+python scripts/market/market_discovery.py \  --db database/polymarket_indexer.db \  --incremental
+--incremental 会自动：
+优先从 sync_state 里读上一次成功同步时间 last_market_discovery_at
+如果没有这条记录，则回退到 DB 中 MAX(created_at) 作为起点
+只拉「这次时间点之后的新市场」
+是否支持定时执行？（有）
+是的，已经内置了定时参数：
+--watch：循环守护模式，不停跑
+--interval：两次同步之间的间隔秒数（默认 3600 秒 = 1 小时）
+典型用法（每小时自动增量同步一次）：
+python scripts/market/market_discovery.py \  --db database/polymarket_indexer.db \  --incremental \  --watch \  --interval 3600
+进程会：
+每次根据 DB 自动推断起点，只拉新增市场
+运行完休眠 3600 秒，再跑下一轮
+在 stderr 打日志，Ctrl+C 即可干净退出
