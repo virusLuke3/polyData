@@ -1,4 +1,5 @@
 import type { VNode } from 'preact';
+import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type {
   ChartPoint,
@@ -160,6 +161,16 @@ function marketOutcomeLabel(market: MarketListItem) {
   return 'binary';
 }
 
+function marketAccent(market: MarketListItem) {
+  const topic = marketTopic(market);
+  if (topic.includes('crypto')) return '#f59e0b';
+  if (topic.includes('sport')) return '#22c55e';
+  if (topic.includes('politic') || topic.includes('election')) return '#60a5fa';
+  if (topic.includes('finance') || topic.includes('fed') || topic.includes('macro')) return '#eab308';
+  if (topic.includes('tech') || topic.includes('ai')) return '#a78bfa';
+  return '#22c55e';
+}
+
 function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
   if (!markets.length) return emptyState('No active markets yet.');
   return (
@@ -172,6 +183,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
           onClick={() => setSelectedMarketId(market.id)}
           aria-pressed={selectedMarketId === market.id}
           title={market.title}
+          style={{ borderLeftColor: marketAccent(market) }}
         >
           <div className="wm-poly-market-card-main">
             <div className="wm-poly-market-meta">
@@ -194,6 +206,86 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
         </button>
       ))}
     </div>
+  );
+}
+
+type ActiveMarketSort = 'impact' | 'volume' | 'new';
+
+function ActiveMarketsPanel({
+  markets,
+  selectedMarketId,
+  setSelectedMarketId,
+}: {
+  markets: MarketListItem[];
+  selectedMarketId: number | null;
+  setSelectedMarketId: (marketId: number) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState<ActiveMarketSort>('impact');
+
+  const visibleMarkets = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const filtered = query
+      ? markets.filter((market) => {
+          const haystack = [
+            market.title,
+            market.slug,
+            market.category,
+            market.status,
+            ...(market.tags || []),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(query);
+        })
+      : [...markets];
+
+    if (sortOrder === 'volume') {
+      return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
+    }
+    if (sortOrder === 'new') {
+      return filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    }
+    return filtered;
+  }, [markets, search, sortOrder]);
+
+  return (
+    <Panel
+      title="MARKETS"
+      badge="LIVE"
+      status="live"
+      count={visibleMarkets.length}
+      className="wm-market-panel"
+      controls={
+        <div className="wm-market-panel-controls">
+          <label className="wm-market-search" aria-label="Search markets">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.8" />
+              <path d="M10.8 10.8 14 14" />
+            </svg>
+            <input
+              type="search"
+              value={search}
+              onInput={(event) => setSearch(event.currentTarget.value)}
+              placeholder="search..."
+            />
+          </label>
+          <select
+            className="wm-market-sort"
+            value={sortOrder}
+            onInput={(event) => setSortOrder(event.currentTarget.value as ActiveMarketSort)}
+            aria-label="Sort markets"
+          >
+            <option value="impact">Impact</option>
+            <option value="volume">Volume</option>
+            <option value="new">Newest</option>
+          </select>
+        </div>
+      }
+    >
+      {activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}
+    </Panel>
   );
 }
 
@@ -721,9 +813,11 @@ export const PANEL_REGISTRY: Record<string, RegistryEntry> = {
   'active-markets': {
     ...PANEL_LIBRARY.find((panel) => panel.id === 'active-markets')!,
     render: (ctx) => (
-      <Panel title="ACTIVE MARKETS" badge="LIVE" status="live" count={globalMarkets(ctx).length}>
-        {activeMarketsList(globalMarkets(ctx), ctx.selectedMarketId, ctx.setSelectedMarketId)}
-      </Panel>
+      <ActiveMarketsPanel
+        markets={globalMarkets(ctx)}
+        selectedMarketId={ctx.selectedMarketId}
+        setSelectedMarketId={ctx.setSelectedMarketId}
+      />
     ),
   },
   'global-orderfilled': {
