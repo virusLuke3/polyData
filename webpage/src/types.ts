@@ -64,6 +64,7 @@ export type MarketListItem = {
   outcomeCount?: number | null;
   volume24h?: string | number | null;
   tradeCount24h?: number | null;
+  change24h?: string | number | null;
   lastTradeAt?: string | null;
 };
 

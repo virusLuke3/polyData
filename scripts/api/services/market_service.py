@@ -291,6 +291,54 @@ def enrich_market_rows_with_runtime_prices(ctx: dict, rows: List[Dict[str, Any]]
     return enriched_rows
 
 
+def enrich_market_rows_with_24h_change(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    market_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
+    if not market_ids:
+        return rows
+    trade_source = ctx["get_existing_trade_read_source"]()
+    if trade_source is None:
+        return rows
+
+    placeholders = ", ".join("?" for _ in market_ids)
+    threshold = ctx["utc_date_days_ago"](1)
+    if ctx["_identifier_name"](trade_source) == ctx["TRADE_V2_CORE_TABLE"]:
+        time_column = "block_time"
+        order_columns = "block_time DESC, block_number DESC, log_index DESC"
+        yes_price_expr = "CASE WHEN outcome_code = 2 THEN 1 - price ELSE price END"
+    else:
+        time_column = "timestamp"
+        order_columns = "timestamp DESC, block_number DESC, log_index DESC"
+        yes_price_expr = "CASE WHEN UPPER(COALESCE(outcome, '')) = 'NO' THEN 1 - price ELSE price END"
+
+    price_rows = ctx["query_all"](
+        f"""
+        SELECT market_id, price
+        FROM (
+            SELECT
+                market_id,
+                {yes_price_expr} AS price,
+                ROW_NUMBER() OVER (
+                    PARTITION BY market_id
+                    ORDER BY {order_columns}
+                ) AS row_num
+            FROM {trade_source}
+            WHERE market_id IN ({placeholders}) AND {time_column} <= ?
+        ) ranked_prices
+        WHERE row_num = 1
+        """,
+        (*market_ids, threshold),
+    )
+    price_map = {int(row["market_id"]): row.get("price") for row in price_rows if row.get("market_id") is not None}
+    enriched_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        normalized = dict(row)
+        market_id = normalized.get("id")
+        if market_id is not None:
+            normalized["price_24h_ago"] = price_map.get(int(market_id))
+        enriched_rows.append(normalized)
+    return enriched_rows
+
+
 def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
     token_ids = ctx["parse_json_list"](row.get("clob_token_ids"))
     if token_ids:
@@ -298,6 +346,16 @@ def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
     yes_token = row.get("yes_token_id")
     no_token = row.get("no_token_id")
     return int(bool(yes_token)) + int(bool(no_token))
+
+
+def _market_change(ctx: dict, current: Any, past: Any) -> Any:
+    if current in (None, "") or past in (None, ""):
+        return None
+    try:
+        delta = Decimal(str(current)) - Decimal(str(past))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return ctx["format_trade_decimal"](delta)
 
 
 def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
@@ -316,6 +374,7 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "outcomeCount": _market_outcome_count(ctx, row),
         "volume24h": ctx["format_trade_decimal"](row.get("volume_24h")),
         "tradeCount24h": int(row.get("trade_count_24h") or 0),
+        "change24h": row.get("change_24h") or _market_change(ctx, row.get("latest_price"), row.get("price_24h_ago")),
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
     }
 
@@ -350,7 +409,7 @@ def get_markets_payload(
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     stats_since = ctx["utc_date_days_ago"](1)
-    row_params = [now_iso, *params, page_size + 1, offset, stats_since]
+    row_params = [stats_since, now_iso, *params, page_size + 1, offset]
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
@@ -368,6 +427,16 @@ def get_markets_payload(
                 SELECT DISTINCT market_id
                 FROM oracle_events
                 WHERE event_status = 'propose' AND market_id IS NOT NULL
+            ),
+            stats_24h AS (
+                SELECT
+                    market_id,
+                    SUM(trade_count) AS trade_count_24h,
+                    SUM(volume_notional) AS volume_24h,
+                    MAX(last_trade_at) AS last_trade_at
+                FROM market_trade_daily_stats
+                WHERE trade_date >= ?
+                GROUP BY market_id
             ),
             filtered_markets AS (
                 SELECT
@@ -388,27 +457,24 @@ def get_markets_payload(
                         WHEN proposed.market_id IS NOT NULL THEN 'Proposed'
                         WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
                         ELSE 'Active'
-                    END AS status
+                    END AS status,
+                    mlp.latest_yes_price AS latest_price,
+                    mlp.latest_trade_at,
+                    stats_24h.trade_count_24h,
+                    stats_24h.volume_24h,
+                    stats_24h.last_trade_at
                 FROM markets m
                 LEFT JOIN settled_markets settled ON settled.market_id = m.id
                 LEFT JOIN proposed_markets proposed ON proposed.market_id = m.id
+                LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+                LEFT JOIN stats_24h ON stats_24h.market_id = m.id
                 {where_clause}
             ),
             paged_markets AS (
                 SELECT *
                 FROM filtered_markets
-                ORDER BY end_date DESC, created_at DESC
+                ORDER BY COALESCE(volume_24h, 0) DESC, COALESCE(trade_count_24h, 0) DESC, last_trade_at DESC, created_at DESC
                 LIMIT ? OFFSET ?
-            ),
-            stats_24h AS (
-                SELECT
-                    market_id,
-                    SUM(trade_count) AS trade_count_24h,
-                    SUM(volume_notional) AS volume_24h,
-                    MAX(last_trade_at) AS last_trade_at
-                FROM market_trade_daily_stats
-                WHERE trade_date >= ?
-                GROUP BY market_id
             )
             SELECT
                 pm.id,
@@ -424,21 +490,20 @@ def get_markets_payload(
                 pm.end_date,
                 pm.created_at,
                 pm.status,
-                mlp.latest_yes_price AS latest_price,
-                mlp.latest_trade_at,
-                stats_24h.trade_count_24h,
-                stats_24h.volume_24h,
-                stats_24h.last_trade_at
+                pm.latest_price,
+                pm.latest_trade_at,
+                pm.trade_count_24h,
+                pm.volume_24h,
+                pm.last_trade_at
             FROM paged_markets pm
-            LEFT JOIN market_latest_prices mlp ON mlp.market_id = pm.id
-            LEFT JOIN stats_24h ON stats_24h.market_id = pm.id
-            ORDER BY pm.end_date DESC, pm.created_at DESC
+            ORDER BY COALESCE(pm.volume_24h, 0) DESC, COALESCE(pm.trade_count_24h, 0) DESC, pm.last_trade_at DESC, pm.created_at DESC
             """,
             row_params,
         )
         has_more = len(rows) > page_size
         max_runtime_updates = min(page_size, 8 if page_size >= 120 else (10 if page_size >= 60 else 16))
         visible_rows = enrich_market_rows_with_runtime_prices(ctx, rows[:page_size], max_updates=max_runtime_updates)
+        visible_rows = enrich_market_rows_with_24h_change(ctx, visible_rows)
         return {
             "items": [_market_list_item(ctx, row) for row in visible_rows],
             "pagination": {
@@ -489,7 +554,7 @@ def build_active_markets_payload(ctx: dict, page_size: int = 40) -> Dict[str, An
             GROUP BY market_id
         ) stats_24h ON stats_24h.market_id = m.id
         WHERE m.end_date IS NULL OR m.end_date >= ?
-        ORDER BY m.end_date DESC, m.created_at DESC
+        ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
         LIMIT ?
         """,
         (ctx["utc_date_days_ago"](1), now_iso, raw_limit),
@@ -529,6 +594,7 @@ def build_active_markets_payload(ctx: dict, page_size: int = 40) -> Dict[str, An
         if len(rows) >= page_size:
             break
     rows = enrich_market_rows_with_runtime_prices(ctx, rows, max_updates=min(page_size, 10 if page_size >= 40 else 16))
+    rows = enrich_market_rows_with_24h_change(ctx, rows)
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
         "pagination": {"page": 1, "pageSize": page_size, "total": len(rows), "totalPages": 1, "hasMore": False},

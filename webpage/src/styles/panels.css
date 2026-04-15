@@ -426,6 +426,23 @@
   font-weight: 700;
 }
 
+.wm-poly-market-change {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+.wm-poly-market-change.up {
+  color: var(--wm-green);
+}
+
+.wm-poly-market-change.down {
+  color: var(--wm-red);
+}
+
+.wm-poly-market-change.flat {
+  color: #747a75;
+}
+
 .wm-poly-market-trades {
   flex: 0 0 auto;
   color: #747a75;

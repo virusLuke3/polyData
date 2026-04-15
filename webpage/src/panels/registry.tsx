@@ -32,6 +32,20 @@ function formatCurrencyCompact(value?: string | number | null) {
   return `$${formatCompact(value)}`;
 }
 
+function formatSignedPercent(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return '--';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  const sign = numeric > 0 ? '+' : '';
+  return `${sign}${(numeric * 100).toFixed(1)}%`;
+}
+
+function signedClass(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric === 0) return 'flat';
+  return numeric > 0 ? 'up' : 'down';
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '--';
   const parsed = new Date(value);
@@ -198,6 +212,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
             <div className="wm-poly-market-bottom">
               <span className="wm-poly-market-prob">{formatPercent(market.latestPrice)}</span>
               <span className="wm-poly-market-outcome">{shortHash(market.slug || market.conditionId || '', 18, 0)}</span>
+              <span className={`wm-poly-market-change ${signedClass(market.change24h)}`}>{formatSignedPercent(market.change24h)}</span>
               <span className="wm-poly-market-volume">vol {formatCurrencyCompact(market.volume24h)} 24h</span>
               <span className="wm-poly-market-trades">{formatCompact(market.tradeCount24h)} tx</span>
             </div>
@@ -242,7 +257,12 @@ function ActiveMarketsPanel({
       : [...markets];
 
     if (sortOrder === 'volume') {
-      return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
+      return filtered.sort(
+        (a, b) =>
+          Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
+          Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
+          new Date(b.lastTradeAt || 0).getTime() - new Date(a.lastTradeAt || 0).getTime()
+      );
     }
     if (sortOrder === 'new') {
       return filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
