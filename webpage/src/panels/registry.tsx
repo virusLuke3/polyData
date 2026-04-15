@@ -26,6 +26,11 @@ function formatCompact(value?: string | number | null) {
   return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(numeric);
 }
 
+function formatCurrencyCompact(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return '--';
+  return `$${formatCompact(value)}`;
+}
+
 function formatDate(value?: string | null) {
   if (!value) return '--';
   const parsed = new Date(value);
@@ -36,6 +41,22 @@ function formatDate(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatRelative(value?: string | null) {
+  if (!value) return '--';
+  const parsed = new Date(value);
+  const time = parsed.getTime();
+  if (Number.isNaN(time)) return '--';
+  const diffMs = time - Date.now();
+  const absMs = Math.abs(diffMs);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const suffix = diffMs >= 0 ? '' : ' ago';
+  if (absMs < hour) return `${Math.max(1, Math.round(absMs / minute))}m${suffix}`;
+  if (absMs < day) return `${Math.round(absMs / hour)}h${suffix}`;
+  return `${Math.round(absMs / day)}d${suffix}`;
 }
 
 function shortHash(value?: string | null, leading = 10, trailing = 6) {
@@ -121,22 +142,55 @@ function sparkline(points: Array<{ value?: number | null }>, color = '#39ff73') 
   );
 }
 
+function marketTopic(market: MarketListItem) {
+  const tag = market.tags?.find((item) => String(item || '').trim());
+  return String(tag || market.category || market.status || 'market').toLowerCase();
+}
+
+function marketTiming(market: MarketListItem) {
+  if (market.endDate) return formatRelative(market.endDate);
+  if (market.lastTradeAt) return `${formatRelative(market.lastTradeAt)} trade`;
+  if (market.createdAt) return `${formatRelative(market.createdAt)} old`;
+  return '--';
+}
+
+function marketOutcomeLabel(market: MarketListItem) {
+  const count = Number(market.outcomeCount || 0);
+  if (count > 0) return `${count} outcomes`;
+  return 'binary';
+}
+
 function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
   if (!markets.length) return emptyState('No active markets yet.');
   return (
-    <div className="wm-panel-list">
+    <div className="wm-poly-market-list">
       {markets.map((market) => (
         <button
           key={market.id}
           type="button"
-          className={`wm-list-row ${selectedMarketId === market.id ? 'active' : ''}`}
+          className={`wm-poly-market-card ${selectedMarketId === market.id ? 'active' : ''}`}
           onClick={() => setSelectedMarketId(market.id)}
+          aria-pressed={selectedMarketId === market.id}
+          title={market.title}
         >
-          <div>
-            <strong>{market.title}</strong>
-            <span>{market.category || market.status || 'market'}</span>
+          <div className="wm-poly-market-card-main">
+            <div className="wm-poly-market-meta">
+              <span className="wm-poly-market-dot" />
+              <span>{marketTopic(market)}</span>
+              <span>·</span>
+              <span>{marketTiming(market)}</span>
+              <span>·</span>
+              <span>{marketOutcomeLabel(market)}</span>
+            </div>
+            <strong className="wm-poly-market-title">{market.title}</strong>
+            <div className="wm-poly-market-bottom">
+              <span className="wm-poly-market-prob">{formatPercent(market.latestPrice)}</span>
+              <span className="wm-poly-market-outcome">{shortHash(market.slug || market.conditionId || '', 18, 0)}</span>
+              <span className="wm-poly-market-volume">{formatCurrencyCompact(market.volume24h)} 24h</span>
+              <span className="wm-poly-market-trades">{formatCompact(market.tradeCount24h)} tx</span>
+            </div>
           </div>
-          <em>{formatPercent(market.latestPrice)}</em>
+          <span className="wm-poly-market-star" aria-hidden="true">☆</span>
         </button>
       ))}
     </div>
@@ -277,41 +331,100 @@ function marketTickerList(items: RuntimeMarketTicker[], emptyMessage: string) {
   );
 }
 
-function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string) {
+function signalMetric(value?: string | number | null, formatter: (value?: string | number | null) => string = String) {
+  if (value === null || value === undefined || value === '') return '--';
+  return formatter(value);
+}
+
+function signalBias(item: RuntimeTradeSignal) {
+  const explicit = String(item.bias || '').toLowerCase();
+  if (explicit === 'bearish' || explicit === 'bullish') return explicit;
+  return String(item.side || '').toUpperCase() === 'SELL' ? 'bearish' : 'bullish';
+}
+
+function signalAction(item: RuntimeTradeSignal) {
+  const side = item.action?.label || (String(item.side || '').toUpperCase() === 'SELL' ? 'Sell' : 'Buy');
+  const outcome = item.action?.outcome || (String(item.outcome || '').toUpperCase() === 'NO' ? 'No' : 'Yes');
+  return { side, outcome };
+}
+
+function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
   return (
     <div className="wm-signal-list">
-      {items.map((item, index) => (
-        <article
-          className={`wm-signal-card ${item.severity === 'critical' ? 'critical' : item.severity === 'elevated' ? 'elevated' : 'watch'}`}
-          key={`${item.title || item.marketTitle || 'signal'}-${index}`}
-        >
-          <div className="wm-signal-rail" />
-          <div className="wm-signal-content">
-            <div className="wm-signal-head">
-              <div className="wm-signal-chip-row">
-                <span className="wm-signal-kind">{String(item.kind || item.severity || 'signal').toUpperCase()}</span>
-                <em className={`wm-signal-severity ${String(item.severity || 'watch').toLowerCase()}`}>
-                  {String(item.severity || 'watch').toUpperCase()}
-                </em>
+      {items.map((item, index) => {
+        const severity = item.severity === 'critical' ? 'critical' : item.severity === 'elevated' ? 'elevated' : 'watch';
+        const metrics = item.metrics || null;
+        const bias = signalBias(item);
+        const action = signalAction(item);
+        const hasPolybeatsShape = Boolean(metrics || item.addresses?.length || item.relatedContent?.length);
+        return (
+          <article
+            className={`wm-signal-card ${severity} ${hasPolybeatsShape ? 'polybeats' : ''} ${bias}`}
+            key={`${item.title || item.marketTitle || 'signal'}-${index}`}
+          >
+            <div className="wm-signal-content">
+              <div className="wm-signal-topline">
+                <div className="wm-signal-source">
+                  <span className="wm-signal-icon">N</span>
+                  <strong>{item.sourceLabel || (item.relatedContent?.length ? 'NEWS+$' : 'CHAIN+$')}</strong>
+                  <em className={bias}>{bias}</em>
+                </div>
+                {!!item.timestamp && <span className="wm-signal-age">{formatRelative(item.timestamp)}</span>}
               </div>
-              <span className="wm-signal-rank">{index + 1}</span>
-              {!!item.timestamp && <span className="wm-signal-time">{formatDate(item.timestamp)}</span>}
+
+              <div className="wm-signal-copy-row">
+                <span className="wm-signal-source-tag">{item.sourceTag || 'SIG'}</span>
+                <p className="wm-signal-copy">
+                  {item.headline || item.title || item.summary || 'Signal activity detected'}
+                </p>
+              </div>
+
+              <button
+                className="wm-signal-market-strip"
+                type="button"
+                onClick={() => item.marketId && onMarketSelect?.(item.marketId)}
+                disabled={!item.marketId || !onMarketSelect}
+                title={item.marketTitle || item.title || 'Open market'}
+              >
+                <span>{bias === 'bearish' ? 'v' : '^'}</span>
+                <strong>{item.marketTitle || item.title || 'Market signal'}</strong>
+              </button>
+
+              <div className="wm-signal-bottom">
+                <div className="wm-signal-stat"><strong>${formatCompact(metrics?.totalNotional || item.notional)}</strong><span>vol</span></div>
+                <div className="wm-signal-stat"><strong>{signalMetric(metrics?.tradeCount)}</strong><span>trades</span></div>
+                <div className="wm-signal-stat"><strong>{signalMetric(metrics?.accountCount || item.addresses?.length)}</strong><span>wallet(s)</span></div>
+                <div className="wm-signal-stat"><strong>@{formatPercent(metrics?.currentProbability || metrics?.avgPrice || item.price)}</strong><span>prob</span></div>
+                <button className="wm-signal-action" type="button" onClick={() => item.marketId && onMarketSelect?.(item.marketId)} disabled={!item.marketId || !onMarketSelect}>
+                  <strong>{action.side}</strong>
+                  <span>{action.outcome}</span>
+                </button>
+              </div>
+
+              {!!item.addresses?.length && (
+                <div className="wm-signal-addresses">
+                  {item.addresses.slice(0, 4).map((address) => (
+                    <div className="wm-signal-address" key={address.address || address.shortAddress || `${item.title}-${index}`}>
+                      <strong>{address.shortAddress || shortHash(address.address, 6, 4)}</strong>
+                      <span>{(address.labels || []).slice(0, 2).join(' / ') || 'tracked'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!!item.contributors?.length && (
+                <div className="wm-signal-contributors">
+                  {item.contributors.slice(0, 4).map((contributor: string) => (
+                    <span className="wm-signal-contributor" key={`${item.title || index}-${contributor}`}>
+                      {String(contributor).toUpperCase()}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="wm-signal-title">{item.title || item.marketTitle || 'Signal'}</p>
-            <div className="wm-signal-summary">{item.summary || item.notional || '--'}</div>
-            {!!item.contributors?.length && (
-              <div className="wm-signal-contributors">
-                {item.contributors.slice(0, 4).map((contributor: string) => (
-                  <span className="wm-signal-contributor" key={`${item.title || index}-${contributor}`}>
-                    {String(contributor).toUpperCase()}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -548,10 +661,6 @@ function globalMarkets(ctx: PanelRenderContext) {
   return ctx.markets.length ? ctx.markets : (ctx.bootstrap?.activeMarketsPreview || []);
 }
 
-function globalTrades(ctx: PanelRenderContext) {
-  return ctx.globalTrades.length ? ctx.globalTrades : (ctx.bootstrap?.globalTradesPreview || []);
-}
-
 function globalOracle(ctx: PanelRenderContext) {
   return ctx.globalOracle.length ? ctx.globalOracle : (ctx.bootstrap?.globalOraclePreview || []);
 }
@@ -620,8 +729,8 @@ export const PANEL_REGISTRY: Record<string, RegistryEntry> = {
   'global-orderfilled': {
     ...PANEL_LIBRARY.find((panel) => panel.id === 'global-orderfilled')!,
     render: (ctx) => (
-      <Panel title="ORDERFILLED FLOW" badge="CHAIN" status="live" count={globalTrades(ctx).length}>
-        {tradeList(globalTrades(ctx), 10)}
+      <Panel title="ORDERFILLED FLOW" badge="FOCUSED" status="live" count={focusedTrades(ctx).length}>
+        {tradeList(focusedTrades(ctx), 10)}
       </Panel>
     ),
   },
@@ -821,7 +930,7 @@ export const PANEL_REGISTRY: Record<string, RegistryEntry> = {
     ...PANEL_LIBRARY.find((panel) => panel.id === 'alpha-signal')!,
     render: (ctx) => (
       <Panel title="ALPHA SIGNAL" badge="LIVE" status="live" count={ctx.alphaSignals?.items.length || 0}>
-        {alphaSignalList(ctx.alphaSignals?.items || [], 'No alpha signals loaded.')}
+        {alphaSignalList(ctx.alphaSignals?.items || [], 'No alpha signals loaded.', ctx.setSelectedMarketId)}
       </Panel>
     ),
   },

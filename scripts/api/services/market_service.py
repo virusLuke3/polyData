@@ -291,6 +291,35 @@ def enrich_market_rows_with_runtime_prices(ctx: dict, rows: List[Dict[str, Any]]
     return enriched_rows
 
 
+def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
+    token_ids = ctx["parse_json_list"](row.get("clob_token_ids"))
+    if token_ids:
+        return len(token_ids)
+    yes_token = row.get("yes_token_id")
+    no_token = row.get("no_token_id")
+    return int(bool(yes_token)) + int(bool(no_token))
+
+
+def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "slug": row.get("slug"),
+        "title": row.get("title"),
+        "conditionId": row.get("condition_id"),
+        "questionId": row.get("question_id"),
+        "endDate": row.get("end_date"),
+        "createdAt": row.get("created_at"),
+        "latestPrice": row.get("latest_price"),
+        "status": row.get("status"),
+        "category": row.get("category") or "Uncategorized",
+        "tags": ctx["parse_json_list"](row.get("tags")),
+        "outcomeCount": _market_outcome_count(ctx, row),
+        "volume24h": ctx["format_trade_decimal"](row.get("volume_24h")),
+        "tradeCount24h": int(row.get("trade_count_24h") or 0),
+        "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
+    }
+
+
 def get_markets_payload(
     ctx: dict,
     *,
@@ -320,7 +349,8 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    row_params = [now_iso, *params, page_size + 1, offset]
+    stats_since = ctx["utc_date_days_ago"](1)
+    row_params = [now_iso, *params, page_size + 1, offset, stats_since]
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
@@ -350,6 +380,7 @@ def get_markets_payload(
                     m.no_token_id,
                     m.category,
                     m.tags,
+                    m.clob_token_ids,
                     m.end_date,
                     m.created_at,
                     CASE
@@ -368,6 +399,16 @@ def get_markets_payload(
                 FROM filtered_markets
                 ORDER BY end_date DESC, created_at DESC
                 LIMIT ? OFFSET ?
+            ),
+            stats_24h AS (
+                SELECT
+                    market_id,
+                    SUM(trade_count) AS trade_count_24h,
+                    SUM(volume_notional) AS volume_24h,
+                    MAX(last_trade_at) AS last_trade_at
+                FROM market_trade_daily_stats
+                WHERE trade_date >= ?
+                GROUP BY market_id
             )
             SELECT
                 pm.id,
@@ -379,12 +420,18 @@ def get_markets_payload(
                 pm.no_token_id,
                 pm.category,
                 pm.tags,
+                pm.clob_token_ids,
                 pm.end_date,
+                pm.created_at,
                 pm.status,
                 mlp.latest_yes_price AS latest_price,
-                mlp.latest_trade_at
+                mlp.latest_trade_at,
+                stats_24h.trade_count_24h,
+                stats_24h.volume_24h,
+                stats_24h.last_trade_at
             FROM paged_markets pm
             LEFT JOIN market_latest_prices mlp ON mlp.market_id = pm.id
+            LEFT JOIN stats_24h ON stats_24h.market_id = pm.id
             ORDER BY pm.end_date DESC, pm.created_at DESC
             """,
             row_params,
@@ -393,21 +440,7 @@ def get_markets_payload(
         max_runtime_updates = min(page_size, 8 if page_size >= 120 else (10 if page_size >= 60 else 16))
         visible_rows = enrich_market_rows_with_runtime_prices(ctx, rows[:page_size], max_updates=max_runtime_updates)
         return {
-            "items": [
-                {
-                    "id": row.get("id"),
-                    "slug": row.get("slug"),
-                    "title": row.get("title"),
-                    "conditionId": row.get("condition_id"),
-                    "questionId": row.get("question_id"),
-                    "endDate": row.get("end_date"),
-                    "latestPrice": row.get("latest_price"),
-                    "status": row.get("status"),
-                    "category": row.get("category") or "Uncategorized",
-                    "tags": ctx["parse_json_list"](row.get("tags")),
-                }
-                for row in visible_rows
-            ],
+            "items": [_market_list_item(ctx, row) for row in visible_rows],
             "pagination": {
                 "page": page,
                 "pageSize": page_size,
@@ -435,17 +468,31 @@ def build_active_markets_payload(ctx: dict, page_size: int = 40) -> Dict[str, An
             m.no_token_id,
             m.category,
             m.tags,
+            m.clob_token_ids,
             m.end_date,
             m.created_at,
             mlp.latest_yes_price AS latest_price,
-            mlp.latest_trade_at
+            mlp.latest_trade_at,
+            stats_24h.trade_count_24h,
+            stats_24h.volume_24h,
+            stats_24h.last_trade_at
         FROM markets m
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN (
+            SELECT
+                market_id,
+                SUM(trade_count) AS trade_count_24h,
+                SUM(volume_notional) AS volume_24h,
+                MAX(last_trade_at) AS last_trade_at
+            FROM market_trade_daily_stats
+            WHERE trade_date >= ?
+            GROUP BY market_id
+        ) stats_24h ON stats_24h.market_id = m.id
         WHERE m.end_date IS NULL OR m.end_date >= ?
         ORDER BY m.end_date DESC, m.created_at DESC
         LIMIT ?
         """,
-        (now_iso, raw_limit),
+        (ctx["utc_date_days_ago"](1), now_iso, raw_limit),
     )
     candidate_market_ids = [int(row["id"]) for row in candidate_rows if row.get("id") is not None]
     status_map: Dict[int, Dict[str, bool]] = {}
@@ -483,21 +530,7 @@ def build_active_markets_payload(ctx: dict, page_size: int = 40) -> Dict[str, An
             break
     rows = enrich_market_rows_with_runtime_prices(ctx, rows, max_updates=min(page_size, 10 if page_size >= 40 else 16))
     return {
-        "items": [
-            {
-                "id": row.get("id"),
-                "slug": row.get("slug"),
-                "title": row.get("title"),
-                "conditionId": row.get("condition_id"),
-                "questionId": row.get("question_id"),
-                "endDate": row.get("end_date"),
-                "latestPrice": row.get("latest_price"),
-                "status": row.get("status"),
-                "category": row.get("category") or "Uncategorized",
-                "tags": ctx["parse_json_list"](row.get("tags")),
-            }
-            for row in rows
-        ],
+        "items": [_market_list_item(ctx, row) for row in rows],
         "pagination": {"page": 1, "pageSize": page_size, "total": len(rows), "totalPages": 1, "hasMore": False},
     }
 

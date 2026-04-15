@@ -5,6 +5,8 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List
 
+from . import address_intel_service, signal_cluster_service
+
 
 CRITICAL_NOTIONAL = Decimal("2500")
 ELEVATED_NOTIONAL = Decimal("1000")
@@ -91,7 +93,15 @@ def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7
                 break
         return {"items": items, "generatedAt": ctx["utc_now_iso"]()}
 
-    return ctx["get_snapshot_payload"]("snapshot:trades:whales", cache_key, _builder, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])
+    cached = ctx["get_cached_runtime_payload"]("runtime:trades:whales", cache_key)
+    if cached is not None:
+        return cached
+    return ctx["set_cached_runtime_payload"](
+        "runtime:trades:whales",
+        cache_key,
+        _builder(),
+        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+    )
 
 
 def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
@@ -114,87 +124,95 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
 def get_suspicious_trades_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
 
-    def _builder() -> Dict[str, Any]:
-        oracle_events = _recent_oracle_candidates(ctx, limit)
-        recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
-        items: List[Dict[str, Any]] = []
-        seen_hashes: set[str] = set()
-        oracle_by_market: Dict[Any, List[Dict[str, Any]]] = {}
-        for event in oracle_events:
-            market_id = event.get("marketId") or event.get("market_id")
-            if market_id is None:
-                continue
-            oracle_by_market.setdefault(market_id, []).append(event)
+    cached = ctx["get_cached_runtime_payload"]("runtime:trades:suspicious", cache_key)
+    if cached is not None:
+        return cached
+    return ctx["set_cached_runtime_payload"](
+        "runtime:trades:suspicious",
+        cache_key,
+        {"items": _build_suspicious_trade_items(ctx, limit), "generatedAt": ctx["utc_now_iso"]()},
+        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+    )
 
-        for trade in recent_trades:
-            market_id = trade.get("marketId") or trade.get("market_id")
-            if market_id is None or market_id not in oracle_by_market:
-                continue
-            trade_time = ctx["parse_iso_datetime"](trade.get("timestamp"))
-            if trade_time is None:
-                continue
-            for event in oracle_by_market[market_id]:
-                event_time = event.get("eventTime") or event.get("event_time")
-                event_dt = ctx["parse_iso_datetime"](event_time)
-                if event_dt is None:
-                    continue
-                if not (event_dt - timedelta(hours=6) <= trade_time <= event_dt):
-                    continue
-                tx_hash = str(trade.get("txHash") or trade.get("tx_hash") or "")
-                if tx_hash and tx_hash in seen_hashes:
-                    continue
-                if tx_hash:
-                    seen_hashes.add(tx_hash)
-                price = ctx["_safe_decimal"](trade.get("price"))
-                size = ctx["_safe_decimal"](trade.get("size"))
-                notional = ctx["_safe_decimal"](trade.get("notional"))
-                if notional is None and price is not None and size is not None:
-                    notional = price * size
-                item = _format_trade_item(
-                    ctx,
-                    {
-                        "market_id": market_id,
-                        "market_title": trade.get("marketTitle") or trade.get("market_title") or event.get("marketTitle") or event.get("market_title"),
-                        "timestamp": trade.get("timestamp"),
-                        "tx_hash": tx_hash,
-                        "outcome": trade.get("outcome"),
-                        "side": trade.get("side"),
-                        "price": price,
-                        "size": size,
-                        "notional": notional,
-                        "maker": trade.get("maker"),
-                        "taker": trade.get("taker"),
-                    },
-                )
-                item.update(
-                    {
-                        "eventStatus": event.get("eventStatus") or event.get("event_status"),
-                        "eventTime": event_time,
-                        "summary": f"{event.get('eventStatus') or event.get('event_status') or 'oracle'} window trade near oracle event",
-                    }
-                )
-                items.append(item)
-                break
-            if len(items) >= limit:
-                break
 
-        if items:
-            items.sort(key=lambda item: (ctx["_safe_decimal"](item.get("notional")) or Decimal("0")), reverse=True)
-            return {"items": items[:limit], "generatedAt": ctx["utc_now_iso"]()}
+def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, Any]]:
+    oracle_events = _recent_oracle_candidates(ctx, limit)
+    recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
+    items: List[Dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    oracle_by_market: Dict[Any, List[Dict[str, Any]]] = {}
+    for event in oracle_events:
+        market_id = event.get("marketId") or event.get("market_id")
+        if market_id is None:
+            continue
+        oracle_by_market.setdefault(market_id, []).append(event)
 
-        whales = get_whale_trades_snapshot(ctx, limit=limit, lookback_days=1).get("items", [])
-        fallback_items = []
-        for item in whales[:limit]:
-            fallback_items.append(
+    for trade in recent_trades:
+        market_id = trade.get("marketId") or trade.get("market_id")
+        if market_id is None or market_id not in oracle_by_market:
+            continue
+        trade_time = ctx["parse_iso_datetime"](trade.get("timestamp"))
+        if trade_time is None:
+            continue
+        for event in oracle_by_market[market_id]:
+            event_time = event.get("eventTime") or event.get("event_time")
+            event_dt = ctx["parse_iso_datetime"](event_time)
+            if event_dt is None:
+                continue
+            if not (event_dt - timedelta(hours=6) <= trade_time <= event_dt):
+                continue
+            tx_hash = str(trade.get("txHash") or trade.get("tx_hash") or "")
+            if tx_hash and tx_hash in seen_hashes:
+                continue
+            if tx_hash:
+                seen_hashes.add(tx_hash)
+            price = ctx["_safe_decimal"](trade.get("price"))
+            size = ctx["_safe_decimal"](trade.get("size"))
+            notional = ctx["_safe_decimal"](trade.get("notional"))
+            if notional is None and price is not None and size is not None:
+                notional = price * size
+            item = _format_trade_item(
+                ctx,
                 {
-                    **item,
-                    "eventStatus": "heuristic",
-                    "summary": "Large live trade surfaced by fallback heuristic",
+                    "market_id": market_id,
+                    "market_title": trade.get("marketTitle") or trade.get("market_title") or event.get("marketTitle") or event.get("market_title"),
+                    "timestamp": trade.get("timestamp"),
+                    "tx_hash": tx_hash,
+                    "outcome": trade.get("outcome"),
+                    "side": trade.get("side"),
+                    "price": price,
+                    "size": size,
+                    "notional": notional,
+                    "maker": trade.get("maker"),
+                    "taker": trade.get("taker"),
+                },
+            )
+            item.update(
+                {
+                    "eventStatus": event.get("eventStatus") or event.get("event_status"),
+                    "eventTime": event_time,
+                    "summary": f"{event.get('eventStatus') or event.get('event_status') or 'oracle'} window trade near oracle event",
                 }
             )
-        return {"items": fallback_items, "generatedAt": ctx["utc_now_iso"]()}
+            items.append(item)
+            break
+        if len(items) >= limit:
+            break
 
-    return ctx["get_snapshot_payload"]("snapshot:trades:suspicious", cache_key, _builder, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])
+    if items:
+        items.sort(key=lambda item: (ctx["_safe_decimal"](item.get("notional")) or Decimal("0")), reverse=True)
+        return items[:limit]
+
+    fallback_items = []
+    for row in _query_whale_rows(ctx, limit=limit, lookback_days=1)[:limit]:
+        fallback_items.append(
+            {
+                **_format_trade_item(ctx, row),
+                "eventStatus": "heuristic",
+                "summary": "Large live trade surfaced by fallback heuristic",
+            }
+        )
+    return fallback_items
 
 
 def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, title: Any, summary: str, timestamp: Any, contributors: Iterable[str] | None = None) -> None:
@@ -214,11 +232,35 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
 
     def _builder() -> Dict[str, Any]:
-        whales = get_whale_trades_snapshot(ctx, limit=6).get("items", [])
-        suspicious = get_suspicious_trades_snapshot(ctx, limit=6).get("items", [])
-        signals: List[Dict[str, Any]] = []
+        recent_trades = ctx["get_recent_trades"](limit=max(260, limit * 40))
+        addresses_by_market: Dict[int, set[str]] = {}
+        for trade in recent_trades:
+            market_id = trade.get("marketId") or trade.get("market_id")
+            if market_id is None:
+                continue
+            try:
+                market_id_int = int(market_id)
+            except (TypeError, ValueError):
+                continue
+            addresses_by_market.setdefault(market_id_int, set()).update(signal_cluster_service.collect_trade_addresses(ctx, [trade]))
+        address_profiles_by_market = {
+            market_id: address_intel_service.get_address_profiles(ctx, addresses, market_id=market_id)
+            for market_id, addresses in addresses_by_market.items()
+            if addresses
+        }
+        polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
+            ctx,
+            recent_trades,
+            address_profiles_by_market,
+            limit=limit,
+        )
 
+        signals: List[Dict[str, Any]] = list(polybeats_clusters)
+
+        whales = [_format_trade_item(ctx, row) for row in _query_whale_rows(ctx, limit=6, lookback_days=7)[:6]] if len(signals) < limit else []
         for trade in whales[:3]:
+            if len(signals) >= limit:
+                break
             _append_signal(
                 signals,
                 kind="whale",
@@ -229,7 +271,10 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 contributors=["whale", "onchain"],
             )
 
+        suspicious = _build_suspicious_trade_items(ctx, limit=6) if len(signals) < limit else []
         for trade in suspicious[:3]:
+            if len(signals) >= limit:
+                break
             _append_signal(
                 signals,
                 kind="suspicious",
@@ -241,6 +286,8 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             )
 
         for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:2]:
+            if len(signals) >= limit:
+                break
             price = ctx["_safe_decimal"](market.get("latestPrice"))
             change_24h = ctx["_safe_decimal"](market.get("change24h"))
             if price is None:
@@ -300,4 +347,12 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 break
         return {"items": deduped, "generatedAt": ctx["utc_now_iso"]()}
 
-    return ctx["get_snapshot_payload"]("snapshot:signals:alpha", cache_key, _builder, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])
+    cached = ctx["get_cached_runtime_payload"]("runtime:signals:alpha", cache_key)
+    if cached is not None:
+        return cached
+    return ctx["set_cached_runtime_payload"](
+        "runtime:signals:alpha",
+        cache_key,
+        _builder(),
+        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+    )

@@ -56,10 +56,15 @@ export type MarketListItem = {
   conditionId?: string | null;
   questionId?: string | null;
   endDate?: string | null;
+  createdAt?: string | null;
   latestPrice?: string | number | null;
   status?: string;
   category?: string;
   tags?: string[];
+  outcomeCount?: number | null;
+  volume24h?: string | number | null;
+  tradeCount24h?: number | null;
+  lastTradeAt?: string | null;
 };
 
 export type TradeRow = {
@@ -297,7 +302,53 @@ export type RuntimeTradeSignal = {
   title?: string | null;
   summary?: string | null;
   kind?: string | null;
+  bias?: string | null;
+  sourceLabel?: string | null;
+  sourceTag?: string | null;
+  headline?: string | null;
+  action?: RuntimeSignalAction | null;
   contributors?: string[];
+  addresses?: RuntimeSignalAddress[];
+  relatedContent?: RuntimeSignalContent[];
+  metrics?: RuntimeSignalMetrics | null;
+};
+
+export type RuntimeSignalAction = {
+  label?: string | null;
+  outcome?: string | null;
+};
+
+export type RuntimeSignalAddress = {
+  address?: string | null;
+  shortAddress?: string | null;
+  labels?: string[];
+  tradeCount?: number | string | null;
+  volumeNotional?: string | null;
+  marketTradeCount?: number | string | null;
+  marketVolumeNotional?: string | null;
+  firstTradeAt?: string | null;
+  firstMarketTradeAt?: string | null;
+  isNewAddress?: boolean;
+  isNewToMarket?: boolean;
+};
+
+export type RuntimeSignalContent = {
+  source?: string | null;
+  title?: string | null;
+  url?: string | null;
+  publishedAt?: string | null;
+  summary?: string | null;
+};
+
+export type RuntimeSignalMetrics = {
+  totalNotional?: string | null;
+  avgPrice?: string | null;
+  currentProbability?: string | null;
+  accountCount?: number | string | null;
+  newAccountCount?: number | string | null;
+  newToMarketCount?: number | string | null;
+  tradeCount?: number | string | null;
+  score?: string | null;
 };
 
 export type RuntimeSignalPayload = {
