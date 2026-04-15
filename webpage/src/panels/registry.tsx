@@ -198,7 +198,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
             <div className="wm-poly-market-bottom">
               <span className="wm-poly-market-prob">{formatPercent(market.latestPrice)}</span>
               <span className="wm-poly-market-outcome">{shortHash(market.slug || market.conditionId || '', 18, 0)}</span>
-              <span className="wm-poly-market-volume">{formatCurrencyCompact(market.volume24h)} 24h</span>
+              <span className="wm-poly-market-volume">vol {formatCurrencyCompact(market.volume24h)} 24h</span>
               <span className="wm-poly-market-trades">{formatCompact(market.tradeCount24h)} tx</span>
             </div>
           </div>

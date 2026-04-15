@@ -309,12 +309,12 @@
 .wm-poly-market-card {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 26px;
-  gap: 9px;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  gap: 7px;
   width: 100%;
-  min-height: 94px;
-  margin: 0 0 6px;
-  padding: 9px 9px 9px 12px;
+  min-height: 78px;
+  margin: 0 0 5px;
+  padding: 8px 8px 7px 11px;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -345,22 +345,22 @@
 .wm-poly-market-meta {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   color: var(--wm-text-dim);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .wm-poly-market-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   flex: 0 0 auto;
   background: #ff505d;
@@ -374,52 +374,45 @@
 
 .wm-poly-market-title {
   display: -webkit-box;
-  min-height: 36px;
-  margin-bottom: 8px;
+  min-height: 31px;
+  margin-bottom: 5px;
   overflow: hidden;
   color: var(--wm-text);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
-  line-height: 1.32;
+  line-height: 1.28;
   letter-spacing: 0;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
 .wm-poly-market-bottom {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   color: var(--wm-text-dim);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.35px;
+  white-space: nowrap;
 }
 
 .wm-poly-market-prob {
   color: var(--wm-text);
-  font-size: 13px;
+  flex: 0 0 auto;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
 }
 
 .wm-poly-market-prob::after {
-  content: '';
-  display: inline-block;
-  width: 14px;
-  height: 12px;
-  margin-left: 6px;
-  vertical-align: -1px;
-  background:
-    linear-gradient(135deg, transparent 0 40%, var(--wm-green) 42% 58%, transparent 60%),
-    linear-gradient(45deg, transparent 0 42%, var(--wm-green) 44% 58%, transparent 60%);
-  opacity: 0.85;
+  content: none;
 }
 
 .wm-poly-market-outcome {
+  flex: 1 1 58px;
   min-width: 0;
   overflow: hidden;
   color: #8d918e;
@@ -428,11 +421,13 @@
 }
 
 .wm-poly-market-volume {
+  flex: 0 0 auto;
   color: var(--wm-green);
   font-weight: 700;
 }
 
 .wm-poly-market-trades {
+  flex: 0 0 auto;
   color: #747a75;
 }
 
@@ -440,7 +435,7 @@
   align-self: start;
   justify-self: end;
   color: #8f9692;
-  font-size: 26px;
+  font-size: 23px;
   line-height: 1;
 }
 
@@ -466,7 +461,7 @@
   }
 
   .wm-poly-market-bottom {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 5px;
   }
 
   .wm-poly-market-trades {
