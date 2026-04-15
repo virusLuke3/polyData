@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
+from hexbytes import HexBytes
 
 _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
@@ -49,17 +50,26 @@ from db import (
     get_connection,
     get_table_columns,
     init_schema,
+    is_mysql_backend,
 )
 
 # 合约地址（Polygon）
 DEFAULT_ORACLE_ADDRESSES = [
+    "0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1",  # OptimisticOracleV2 (older Polymarket deployment)
     "0xeE3Afe347D5C74317041E2618C49534dAf887c24",  # OptimisticOracleV2
-    "0xCB1822859cEF82Cd2Eb4E6276C7916e692995130",  # 历史/文档中出现的另一条 UMA 路径
 ]
 DEFAULT_ADAPTER_ADDRESSES = [
+    "0xCB1822859cEF82Cd2Eb4E6276C7916e692995130",  # UmaCtf Adapter V1
+    "0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7",  # UmaCtf Adapter (older OO deployment)
+    "0x69c47De9D4D3Dad79590d61b9e05918E03775f24",  # UmaCtf Adapter (neg-risk / older OO deployment)
+    "0xb21182d0494521Cf45DbbeEbb5A3ACAAb6d22093",  # UmaCtf Adapter (Polygon mainnet)
     "0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d",  # UmaCtf Adapter V3
     "0x6A9D222616C90FcA5754cd1333cFD9b7fb6a4F74",  # UmaCtf Adapter V2
     "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49",  # 文档中的 UmaCtfAdapter v3.0
+]
+DEFAULT_NEG_RISK_OPERATOR_ADDRESSES = [
+    "0x661992aebf6BecF7BA5abB66f6b0Bf62Aa7a2E93",  # NegRiskOperator -> oracle 0x69c47...
+    "0x71523d0f655B41E805Cec45b17163f528B59B820",  # NegRiskOperator -> oracle 0x2F5e...
 ]
 UMA_ORACLE_ADDRESS = DEFAULT_ORACLE_ADDRESSES[0]
 UMA_ADAPTER_ADDRESS = DEFAULT_ADAPTER_ADDRESSES[0]
@@ -70,6 +80,7 @@ EVENT_SIGNATURES = {
     "dispute": "DisputePrice(address,address,address,bytes32,uint256,bytes,int256)",
     "settle": "Settle(address,address,address,bytes32,uint256,bytes,int256,uint256)",
     "question_initialized": "QuestionInitialized(bytes32,uint256,address,bytes,address,uint256,uint256)",
+    "neg_risk_question_prepared": "QuestionPrepared(bytes32,bytes32,bytes32,uint256,bytes)",
 }
 
 # Growth 套餐 250 RPS，步长 2000 + 多线程可大幅提速
@@ -77,9 +88,17 @@ BATCH_BLOCKS_ORACLE = 2000
 BATCH_BLOCKS_ADAPTER = 2000
 MAX_RETRIES = 5
 RETRY_DELAY_BASE = 2
+RPC_CONNECT_RETRIES = 3
+RPC_CONNECT_RETRY_DELAY_SECONDS = 10
+RPC_RECOVERY_SLEEP_BASE_SECONDS = 30
+RPC_RECOVERY_SLEEP_MAX_SECONDS = 300
 MAX_LOGS: Optional[int] = None
 PARQUET_WRITE_BATCH = 5000
 ORACLE_SYNC_STATE_KEY = "oracle_sync"
+ADAPTER_FULL_HISTORY_START_BLOCK = 0
+CONTINUE_SYNC_REWIND_BLOCKS = 500
+WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
+WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
 
 POLYMARKET_DB = os.environ.get("POLYMARKET_DB", DEFAULT_DB_PATH)
 
@@ -203,8 +222,129 @@ def _parse_any_datetime(value: str) -> Optional[datetime]:
     return None
 
 
+def _format_rpc_error(exc: Exception) -> str:
+    msg = str(exc).strip()
+    return msg or exc.__class__.__name__
+
+
+def _call_with_retries(stage: str, func, max_retries: int = MAX_RETRIES):
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func()
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_retries or not _is_transient_rpc_error(exc):
+                raise
+            delay = RETRY_DELAY_BASE ** attempt
+            print(
+                f"[oracle] {stage} failed ({attempt}/{max_retries}): {_format_rpc_error(exc)}. "
+                f"Retrying in {delay}s...",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"{stage} failed without exception")
+
+
+def _build_web3(rpc_url: str) -> Web3:
+    last_error: Optional[Exception] = None
+    for attempt in range(1, RPC_CONNECT_RETRIES + 1):
+        try:
+            w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
+            if ExtraDataToPOAMiddleware:
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            if not w3.is_connected():
+                raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
+            return w3
+        except Exception as exc:
+            last_error = exc
+            if attempt >= RPC_CONNECT_RETRIES:
+                break
+            print(
+                f"[oracle] RPC connect failed ({attempt}/{RPC_CONNECT_RETRIES}): {_format_rpc_error(exc)}. "
+                f"Retrying in {RPC_CONNECT_RETRY_DELAY_SECONDS}s...",
+                file=sys.stderr,
+            )
+            time.sleep(RPC_CONNECT_RETRY_DELAY_SECONDS)
+    if last_error is None:
+        raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
+    raise ConnectionError(f"Cannot connect to RPC: {rpc_url}") from last_error
+
+
+def _compute_watch_error_backoff(interval_seconds: int, consecutive_failures: int) -> int:
+    base = max(WATCH_ERROR_BACKOFF_BASE_SECONDS, int(interval_seconds))
+    backoff = base * (2 ** max(0, consecutive_failures - 1))
+    return min(backoff, WATCH_ERROR_BACKOFF_MAX_SECONDS)
+
+
+def _is_transient_rpc_error(exc: Exception) -> bool:
+    msg = _format_rpc_error(exc).lower()
+    return any(
+        keyword in msg
+        for keyword in (
+            "cannot connect to rpc",
+            "connection aborted",
+            "connection reset",
+            "remote disconnected",
+            "temporarily unavailable",
+            "timed out",
+            "read timed out",
+            "max retries exceeded",
+            "503",
+            "502",
+            "504",
+            "429",
+            "network",
+            "header not found",
+        )
+    )
+
+
+def _sleep_for_rpc_recovery(stage: str, attempt: int, exc: Exception) -> None:
+    delay = min(
+        RPC_RECOVERY_SLEEP_BASE_SECONDS * (2 ** max(0, attempt - 1)),
+        RPC_RECOVERY_SLEEP_MAX_SECONDS,
+    )
+    print(
+        f"[oracle] {stage} failed due to transient RPC/network issue: {_format_rpc_error(exc)}. "
+        f"Sleeping {delay}s before retry...",
+        file=sys.stderr,
+    )
+    time.sleep(delay)
+
+
+def _should_split_range(exc: Exception, from_block: int, to_block: int) -> bool:
+    if from_block >= to_block:
+        return False
+    msg = _format_rpc_error(exc).lower()
+    return any(
+        keyword in msg
+        for keyword in (
+            "unterminated string",
+            "json",
+            "response ended",
+            "expecting value",
+            "413",
+            "payload",
+            "too large",
+            "timed out",
+            "read timed out",
+            "query returned more than",
+            "limit exceeded",
+        )
+    )
+
+
 def _connect_sqlite_readonly(db_path: str):
     return get_connection(db_path, readonly=True)
+
+
+def _db_target_available(db_path: str) -> bool:
+    if is_mysql_backend():
+        return True
+    return Path(db_path).exists()
 
 
 def _table_has_column(conn, table: str, column: str) -> bool:
@@ -378,11 +518,11 @@ def _parse_date_to_timestamp(s: str) -> int:
 def _block_at_timestamp(w3: Web3, target_ts: int, high: Optional[int] = None) -> int:
     low, result = 0, 0
     if high is None:
-        high = w3.eth.block_number
+        high = int(_call_with_retries("eth_blockNumber", lambda: w3.eth.block_number))
     while low <= high:
         mid = (low + high) // 2
         try:
-            blk = w3.eth.get_block(mid)
+            blk = _call_with_retries(f"eth_getBlockByNumber({mid})", lambda: w3.eth.get_block(mid))
             ts = blk.get("timestamp") or 0
             if ts <= target_ts:
                 result = mid
@@ -394,11 +534,111 @@ def _block_at_timestamp(w3: Web3, target_ts: int, high: Optional[int] = None) ->
     return result
 
 
+def _address_has_code_at_block(w3: Web3, address: str, block_number: int) -> bool:
+    try:
+        code = _call_with_retries(
+            f"eth_getCode({address}@{block_number})",
+            lambda: w3.eth.get_code(Web3.to_checksum_address(address), block_identifier=block_number),
+        )
+        return bool(code and code != b"" and code != HexBytes("0x"))
+    except Exception:
+        return False
+
+
+def _find_contract_deployment_block(
+    w3: Web3,
+    address: str,
+    *,
+    high: Optional[int] = None,
+) -> Optional[int]:
+    if high is None:
+        high = int(_call_with_retries("eth_blockNumber", lambda: w3.eth.block_number))
+    checksum_address = Web3.to_checksum_address(address)
+    if not _address_has_code_at_block(w3, checksum_address, high):
+        return None
+    low = 0
+    result = high
+    while low <= high:
+        mid = (low + high) // 2
+        if _address_has_code_at_block(w3, checksum_address, mid):
+            result = mid
+            high = mid - 1
+        else:
+            low = mid + 1
+    return result
+
+
+def _resolve_contract_family_start_block(
+    w3: Web3,
+    adapter_addresses: List[str],
+    oracle_addresses: List[str],
+    neg_risk_operator_addresses: List[str],
+    *,
+    high: Optional[int] = None,
+) -> Optional[int]:
+    addresses = []
+    for raw in adapter_addresses + oracle_addresses + neg_risk_operator_addresses:
+        address = _normalize_address(raw)
+        if address and address not in addresses:
+            addresses.append(address)
+    earliest: Optional[int] = None
+    for address in addresses:
+        deployment_block = _find_contract_deployment_block(w3, address, high=high)
+        if deployment_block is None:
+            continue
+        if earliest is None or deployment_block < earliest:
+            earliest = deployment_block
+    return earliest
+
+
+def resolve_auto_start_block(
+    w3: Web3,
+    db_path: str,
+    end_block: int,
+    adapter_addresses: List[str],
+    oracle_addresses: List[str],
+    neg_risk_operator_addresses: List[str],
+) -> int:
+    start_candidates: List[int] = []
+    earliest_market_created_at = _get_earliest_market_created_at(db_path) if db_path and _db_target_available(db_path) else None
+    if earliest_market_created_at:
+        earliest_dt = _parse_any_datetime(earliest_market_created_at)
+        if earliest_dt is not None:
+            market_start_block = _block_at_timestamp(w3, int(earliest_dt.timestamp()), high=end_block)
+            start_candidates.append(market_start_block)
+            print(
+                f"[oracle] earliest market created_at={earliest_market_created_at} -> block {market_start_block}",
+                file=sys.stderr,
+            )
+    contract_start_block = _resolve_contract_family_start_block(
+        w3,
+        adapter_addresses,
+        oracle_addresses,
+        neg_risk_operator_addresses,
+        high=end_block,
+    )
+    if contract_start_block is not None:
+        start_candidates.append(contract_start_block)
+        print(
+            f"[oracle] earliest configured oracle/adapter/operator deployment block={contract_start_block}",
+            file=sys.stderr,
+        )
+    if not start_candidates:
+        return max(0, end_block - 500_000)
+    resolved = max(start_candidates)
+    print(f"[oracle] auto-selected start block={resolved}", file=sys.stderr)
+    return resolved
+
+
 def get_block_timestamp(w3: Web3, block_number: int, max_retries: int = 3) -> Optional[str]:
     hex_block = hex(block_number)
     for attempt in range(max_retries):
         try:
-            block = w3.eth.get_block(block_number)
+            block = _call_with_retries(
+                f"eth_getBlockByNumber({block_number})",
+                lambda: w3.eth.get_block(block_number),
+                max_retries=max_retries,
+            )
             if block and block.get("timestamp") is not None:
                 return datetime.fromtimestamp(block["timestamp"], tz=timezone.utc).strftime(
                     "%Y-%m-%d %H:%M:%S.000 UTC"
@@ -443,7 +683,58 @@ def fetch_logs_with_retry(
 ) -> List[Dict]:
     limit = max_logs if max_logs is not None else MAX_LOGS
 
-    # 1. 切分任务区块
+    def _fetch_single_range(start_b: int, end_b: int) -> List[Dict]:
+        recovery_attempt = 0
+        while True:
+            last_err: Optional[Exception] = None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    batch = w3.eth.get_logs(
+                        {
+                            "address": Web3.to_checksum_address(address),
+                            "fromBlock": start_b,
+                            "toBlock": end_b,
+                            "topics": [topics],
+                        }
+                    )
+                    return [dict(l) for l in batch]
+                except Exception as e:
+                    last_err = e
+                    delay = RETRY_DELAY_BASE ** (attempt + 1)
+                    print(
+                        f"get_logs failed blocks {start_b}-{end_b} "
+                        f"(attempt {attempt + 1}/{MAX_RETRIES}): {_format_rpc_error(e)}, retry in {delay}s",
+                        file=sys.stderr,
+                    )
+                    time.sleep(delay)
+
+            if last_err is not None and _should_split_range(last_err, start_b, end_b):
+                mid = (start_b + end_b) // 2
+                print(
+                    f"get_logs failed repeatedly for blocks {start_b}-{end_b}; "
+                    f"split into {start_b}-{mid} and {mid + 1}-{end_b}",
+                    file=sys.stderr,
+                )
+                left = _fetch_single_range(start_b, mid)
+                right = _fetch_single_range(mid + 1, end_b)
+                return left + right
+
+            if last_err is not None and _is_transient_rpc_error(last_err):
+                recovery_attempt += 1
+                delay = min(RETRY_DELAY_BASE ** min(recovery_attempt, 6), 60)
+                print(
+                    f"get_logs transient failure blocks {start_b}-{end_b}: {_format_rpc_error(last_err)}. "
+                    f"Sleeping {delay}s before retrying whole range...",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                continue
+
+            raise RuntimeError(
+                f"Failed to fetch logs for blocks {start_b}-{end_b} on {address}: "
+                f"{_format_rpc_error(last_err or RuntimeError('unknown error'))}"
+            )
+
     ranges = []
     current = from_block
     while current <= to_block:
@@ -452,29 +743,13 @@ def fetch_logs_with_retry(
         current = end + 1
 
     total_tasks = len(ranges)
-    print(f"  ... 任务已切分为 {total_tasks} 个并发批次 (每批 {batch_blocks} 块)，启动 {max_workers} 个工作线程...", file=sys.stderr)
+    print(
+        f"  ... 任务已切分为 {total_tasks} 个并发批次 (每批 {batch_blocks} 块)，启动 {max_workers} 个工作线程...",
+        file=sys.stderr,
+    )
 
     logs: List[Dict] = []
     completed_tasks = 0
-
-    # 2. 单个子任务抓取逻辑
-    def _fetch_single_range(start_b: int, end_b: int) -> List[Dict]:
-        for attempt in range(MAX_RETRIES):
-            try:
-                batch = w3.eth.get_logs({
-                    "address": Web3.to_checksum_address(address),
-                    "fromBlock": start_b,
-                    "toBlock": end_b,
-                    "topics": [topics],
-                })
-                return [dict(l) for l in batch]
-            except Exception as e:
-                delay = RETRY_DELAY_BASE ** (attempt + 1)
-                time.sleep(delay)
-        print(f"get_logs {start_b}-{end_b} 彻底失败", file=sys.stderr)
-        return []
-
-    # 3. 多线程并发
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_range = {executor.submit(_fetch_single_range, r[0], r[1]): r for r in ranges}
         for future in as_completed(future_to_range):
@@ -484,7 +759,10 @@ def fetch_logs_with_retry(
             completed_tasks += 1
             if completed_tasks % max(1, total_tasks // 20) == 0 or completed_tasks == total_tasks:
                 progress = (completed_tasks / total_tasks) * 100
-                print(f"  ---> 抓取进度: {completed_tasks}/{total_tasks} 批次 ({progress:.1f}%) | 累计日志: {len(logs)} 条", file=sys.stderr)
+                print(
+                    f"  ---> 抓取进度: {completed_tasks}/{total_tasks} 批次 ({progress:.1f}%) | 累计日志: {len(logs)} 条",
+                    file=sys.stderr,
+                )
 
     logs.sort(key=lambda x: (x.get("blockNumber", 0), x.get("logIndex", 0)))
     return logs[:limit] if limit is not None else logs
@@ -552,8 +830,8 @@ def init_uma_adapter_mapping(conn) -> None:
 
 
 # ===================== Step 2: 增量同步适配器字典 =====================
-def _decode_question_initialized(w3: Web3, log: Dict) -> Optional[Tuple[str, str]]:
-    """返回 (ancillary_hex, question_id_hex)"""
+def _decode_question_initialized(w3: Web3, log: Dict) -> Optional[Tuple[str, str, str]]:
+    """返回 (ancillary_hex, question_id_hex, source_adapter)"""
     abi = {
         "anonymous": False,
         "inputs": [
@@ -579,7 +857,8 @@ def _decode_question_initialized(w3: Web3, log: Dict) -> Optional[Tuple[str, str
         qid_hex = qid.hex() if hasattr(qid, "hex") else str(qid)
         if not qid_hex.startswith("0x"):
             qid_hex = "0x" + qid_hex
-        return (_ancillary_to_hex(ad), qid_hex[:66])
+        source_adapter = str(log.get("_source_address") or log.get("address") or "").lower()
+        return (_ancillary_to_hex(ad), qid_hex[:66], source_adapter)
     except Exception as e:
         print(f"Decode QuestionInitialized error: {e}", file=sys.stderr)
         return None
@@ -608,11 +887,14 @@ def sync_adapter_mapping(
     for log in logs:
         res = _decode_question_initialized(w3, log)
         if res:
-            ancillary_hex, question_id = res
+            ancillary_hex, question_id, source_adapter = res
             try:
                 cur = conn.execute(
-                    "INSERT OR IGNORE INTO uma_adapter_mapping (ancillary_data, question_id) VALUES (?, ?)",
-                    (ancillary_hex, question_id),
+                    """
+                    INSERT OR IGNORE INTO uma_adapter_mapping (ancillary_data, question_id, source_adapter)
+                    VALUES (?, ?, ?)
+                    """,
+                    (ancillary_hex, question_id, source_adapter),
                 )
                 if cur.rowcount > 0:
                     inserted += 1
@@ -625,27 +907,180 @@ def sync_adapter_mapping(
     return inserted
 
 
-def load_adapter_mapping(conn) -> Dict[str, str]:
-    """从 SQLite 加载 ancillary_data (hex) -> question_id 映射"""
-    cur = conn.execute("SELECT ancillary_data, question_id FROM uma_adapter_mapping")
-    return {row[0].lower() if row[0] else "": row[1] or "" for row in cur.fetchall()}
+def load_adapter_mapping(conn) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """加载 ancillary_data (hex) -> question_id/source_adapter 映射"""
+    cur = conn.execute("SELECT ancillary_data, question_id, source_adapter FROM uma_adapter_mapping")
+    question_map: Dict[str, str] = {}
+    source_map: Dict[str, str] = {}
+    for row in cur.fetchall():
+        key = row[0].lower() if row[0] else ""
+        if not key:
+            continue
+        question_map[key] = row[1] or ""
+        source_map[key] = (row[2] or "").lower()
+    return question_map, source_map
 
 
-def save_adapter_mapping_entries(conn, mapping: Dict[str, str]) -> int:
-    if not mapping:
+def save_adapter_mapping_entries(
+    conn,
+    mapping: Dict[str, str],
+    mapping_source: Optional[Dict[str, str]] = None,
+) -> int:
+    if not mapping and not mapping_source:
         return 0
     before = conn.total_changes
+    rows = []
+    for key, question_id in mapping.items():
+        if not key or not question_id:
+            continue
+        rows.append((key.lower(), question_id, (mapping_source or {}).get(key, "")))
     conn.executemany(
         """
-        INSERT INTO uma_adapter_mapping (ancillary_data, question_id)
-        VALUES (?, ?)
+        INSERT INTO uma_adapter_mapping (ancillary_data, question_id, source_adapter)
+        VALUES (?, ?, ?)
         ON CONFLICT(ancillary_data) DO UPDATE SET
-            question_id=excluded.question_id
+            question_id=excluded.question_id,
+            source_adapter=COALESCE(NULLIF(TRIM(COALESCE(excluded.source_adapter,'')), ''), uma_adapter_mapping.source_adapter)
         """,
-        [(k.lower(), v) for k, v in mapping.items() if k and v],
+        rows,
     )
     conn.commit()
     return conn.total_changes - before
+
+
+def _decode_neg_risk_question_prepared(
+    w3: Web3,
+    log: Dict,
+) -> Optional[Tuple[str, str, str, str]]:
+    """返回 (request_id, question_id, market_id, source_operator)"""
+    abi = {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "name": "marketId", "type": "bytes32"},
+            {"indexed": True, "name": "questionId", "type": "bytes32"},
+            {"indexed": True, "name": "requestId", "type": "bytes32"},
+            {"indexed": False, "name": "index", "type": "uint256"},
+            {"indexed": False, "name": "data", "type": "bytes"},
+        ],
+        "name": "QuestionPrepared",
+        "type": "event",
+    }
+    try:
+        contract = w3.eth.contract(abi=[abi])
+        decoded = contract.events.QuestionPrepared().process_log(log)
+        args = decoded["args"]
+        request_id = _ensure_0x(args.get("requestId") or "")[:66].lower()
+        question_id = _ensure_0x(args.get("questionId") or "")[:66].lower()
+        market_id = _ensure_0x(args.get("marketId") or "")[:66].lower()
+        source_operator = str(log.get("_source_address") or log.get("address") or "").lower()
+        if not request_id or request_id == "0x":
+            return None
+        return request_id, question_id, market_id, source_operator
+    except Exception as e:
+        print(f"Decode NegRisk QuestionPrepared error: {e}", file=sys.stderr)
+        return None
+
+
+def load_neg_risk_request_mapping(conn) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """加载 neg-risk request_id -> question_id/market_id/source_operator 映射"""
+    cur = conn.execute(
+        "SELECT request_id, question_id, market_id, source_operator FROM neg_risk_request_mapping"
+    )
+    question_map: Dict[str, str] = {}
+    market_map: Dict[str, str] = {}
+    operator_map: Dict[str, str] = {}
+    for row in cur.fetchall():
+        request_id = str(row[0] or "").strip().lower()
+        if not request_id:
+            continue
+        question_map[request_id] = str(row[1] or "").strip().lower()
+        market_map[request_id] = str(row[2] or "").strip().lower()
+        operator_map[request_id] = str(row[3] or "").strip().lower()
+    return question_map, market_map, operator_map
+
+
+def save_neg_risk_request_mapping_entries(
+    conn,
+    request_question_map: Dict[str, str],
+    request_market_map: Optional[Dict[str, str]] = None,
+    request_operator_map: Optional[Dict[str, str]] = None,
+) -> int:
+    if not request_question_map:
+        return 0
+    before = conn.total_changes
+    rows = []
+    for request_id, question_id in request_question_map.items():
+        request_id_norm = str(request_id or "").strip().lower()
+        question_id_norm = str(question_id or "").strip().lower()
+        if not request_id_norm or not question_id_norm:
+            continue
+        rows.append(
+            (
+                request_id_norm,
+                question_id_norm,
+                str((request_market_map or {}).get(request_id, "") or "").strip().lower(),
+                str((request_operator_map or {}).get(request_id, "") or "").strip().lower(),
+            )
+        )
+    conn.executemany(
+        """
+        INSERT INTO neg_risk_request_mapping (request_id, question_id, market_id, source_operator)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(request_id) DO UPDATE SET
+            question_id=excluded.question_id,
+            market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.market_id,'')), ''), neg_risk_request_mapping.market_id),
+            source_operator=COALESCE(NULLIF(TRIM(COALESCE(excluded.source_operator,'')), ''), neg_risk_request_mapping.source_operator)
+        """,
+        rows,
+    )
+    conn.commit()
+    return conn.total_changes - before
+
+
+def build_neg_risk_request_mapping(
+    w3: Web3,
+    start_block: int,
+    end_block: int,
+    operator_addresses: List[str],
+    batch_blocks: int = BATCH_BLOCKS_ADAPTER,
+    max_workers: int = 30,
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """在内存中构建 request_id -> question_id/market_id/source_operator 映射。"""
+    if not operator_addresses:
+        return {}, {}, {}
+    topic0 = _topic0(EVENT_SIGNATURES["neg_risk_question_prepared"])
+    logs = fetch_logs_many_addresses(
+        w3,
+        start_block,
+        end_block,
+        operator_addresses,
+        [topic0],
+        batch_blocks=batch_blocks,
+        max_logs=MAX_LOGS,
+        max_workers=max_workers,
+        label="NegRisk QuestionPrepared",
+    )
+    request_question_map: Dict[str, str] = {}
+    request_market_map: Dict[str, str] = {}
+    request_operator_map: Dict[str, str] = {}
+    conflict_count = 0
+    for log in logs:
+        decoded = _decode_neg_risk_question_prepared(w3, log)
+        if not decoded:
+            continue
+        request_id, question_id, market_id, source_operator = decoded
+        old_question_id = request_question_map.get(request_id)
+        if old_question_id and old_question_id != question_id:
+            conflict_count += 1
+        request_question_map[request_id] = question_id
+        request_market_map[request_id] = market_id
+        request_operator_map[request_id] = source_operator
+    print(
+        f"  Neg-risk request 映射条数: {len(request_question_map)}"
+        + (f" | request_id 冲突覆盖: {conflict_count}" if conflict_count else ""),
+        file=sys.stderr,
+    )
+    return request_question_map, request_market_map, request_operator_map
 
 
 def _connect_sqlite_write(db_path: str):
@@ -763,14 +1198,14 @@ def build_adapter_mapping(
         res = _decode_question_initialized(w3, log)
         if not res:
             continue
-        ancillary_hex, question_id = res
+        ancillary_hex, question_id, source_adapter = res
         key = (ancillary_hex or "").lower()
         if key and question_id:
             old_qid = mapping.get(key)
             if old_qid and old_qid != question_id:
                 conflict_count += 1
             mapping[key] = question_id
-            mapping_source[key] = str(log.get("_source_address") or log.get("address") or "").lower()
+            mapping_source[key] = source_adapter
     print(
         f"  内存映射条数: {len(mapping)}"
         + (f" | ancillary 冲突覆盖: {conflict_count}" if conflict_count else ""),
@@ -872,7 +1307,8 @@ def decode_request_price(log: Dict, w3: Web3, block_ts_cache: Dict[int, str]) ->
             "ancillaryData": ad,
             "ancillary_hex": _ancillary_to_hex(ad),
             "ancillary_raw": raw,
-            "requester": args.get("requester"),
+            # RequestPrice.requester is often the adapter contract; prefer tx sender later.
+            "requester": None,
             "proposer": None,
             "disputer": None,
             "settlement_recipient": None,
@@ -1086,24 +1522,26 @@ def run(
     db_path: Optional[str] = None,
     adapter_addresses_raw: Optional[str] = None,
     oracle_addresses_raw: Optional[str] = None,
+    neg_risk_operator_addresses_raw: Optional[str] = None,
     continue_sync: bool = False,
     batch_adapter: int = BATCH_BLOCKS_ADAPTER,
     batch_oracle: int = BATCH_BLOCKS_ORACLE,
     max_workers: int = 30,
     sync_state_key: str = ORACLE_SYNC_STATE_KEY,
+    continue_sync_rewind_blocks: int = CONTINUE_SYNC_REWIND_BLOCKS,
 ) -> str:
     rpc_url = rpc_url or get_rpc_url()
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    if ExtraDataToPOAMiddleware:
-        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-    if not w3.is_connected():
-        raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
+    w3 = _build_web3(rpc_url)
 
     db_path = db_path or os.environ.get("POLYMARKET_DB", POLYMARKET_DB)
     db_path = str(Path(db_path).expanduser().resolve())
-    db_exists = Path(db_path).exists()
+    db_exists = _db_target_available(db_path)
     adapter_addresses = _parse_address_list(adapter_addresses_raw, DEFAULT_ADAPTER_ADDRESSES)
     oracle_addresses = _parse_address_list(oracle_addresses_raw, DEFAULT_ORACLE_ADDRESSES)
+    neg_risk_operator_addresses = _parse_address_list(
+        neg_risk_operator_addresses_raw,
+        DEFAULT_NEG_RISK_OPERATOR_ADDRESSES,
+    )
 
     if continue_sync and (start_date or end_date):
         raise ValueError("--continue-sync 与 --start/--end 不能同时使用")
@@ -1124,37 +1562,50 @@ def run(
     if continue_sync and oracle_start_block is None:
         last = get_last_oracle_synced_block(db_path, sync_state_key=sync_state_key) if db_exists else None
         if last is not None:
-            oracle_start_block = last + 1
-            print(f"[continue-sync] Resuming oracle sync from block {oracle_start_block}", file=sys.stderr)
+            rewind = max(0, int(continue_sync_rewind_blocks))
+            oracle_start_block = max(0, last + 1 - rewind)
+            print(
+                f"[continue-sync] Resuming oracle sync from block {oracle_start_block} "
+                f"(last_block={last}, rewind={rewind})",
+                file=sys.stderr,
+            )
         else:
             print("[continue-sync] No previous oracle sync found — falling back to default start block logic.", file=sys.stderr)
     if oracle_start_block is None:
-        earliest_market_created_at = _get_earliest_market_created_at(db_path) if db_exists else None
-        if earliest_market_created_at:
-            earliest_dt = _parse_any_datetime(earliest_market_created_at)
-            if earliest_dt is not None:
-                oracle_start_block = _block_at_timestamp(w3, int(earliest_dt.timestamp()), high=end_block)
-                print(
-                    f"数据库最早市场 created_at={earliest_market_created_at} -> 起始区块 {oracle_start_block}",
-                    file=sys.stderr,
-                )
-            else:
-                oracle_start_block = max(0, end_block - 500_000)
-        else:
-            oracle_start_block = max(0, end_block - 500_000)
+        oracle_start_block = resolve_auto_start_block(
+            w3,
+            db_path,
+            end_block,
+            adapter_addresses,
+            oracle_addresses,
+            neg_risk_operator_addresses,
+        )
     if adapter_start_block is None:
-        adapter_start_block = oracle_start_block
+        adapter_start_block = ADAPTER_FULL_HISTORY_START_BLOCK
 
     # Step 1 & 2: 复用历史 SQLite 映射，并增量补充最近 QuestionInitialized
     adapter_map: Dict[str, str] = {}
     adapter_map_source: Dict[str, str] = {}
+    neg_risk_request_map: Dict[str, str] = {}
+    neg_risk_market_map: Dict[str, str] = {}
+    neg_risk_operator_map: Dict[str, str] = {}
     if db_exists:
         conn_map = _connect_sqlite_write(db_path)
         try:
             init_uma_adapter_mapping(conn_map)
-            adapter_map = load_adapter_mapping(conn_map)
+            adapter_map, adapter_map_source = load_adapter_mapping(conn_map)
             if adapter_map:
                 print(f"Loaded persisted adapter mapping rows: {len(adapter_map)}", file=sys.stderr)
+            (
+                neg_risk_request_map,
+                neg_risk_market_map,
+                neg_risk_operator_map,
+            ) = load_neg_risk_request_mapping(conn_map)
+            if neg_risk_request_map:
+                print(
+                    f"Loaded persisted neg-risk request mapping rows: {len(neg_risk_request_map)}",
+                    file=sys.stderr,
+                )
         finally:
             conn_map.close()
 
@@ -1172,8 +1623,33 @@ def run(
         conn_map = _connect_sqlite_write(db_path)
         try:
             init_uma_adapter_mapping(conn_map)
-            changed = save_adapter_mapping_entries(conn_map, recent_adapter_map)
+            changed = save_adapter_mapping_entries(conn_map, recent_adapter_map, recent_adapter_source)
             print(f"Persisted adapter mapping changes: {changed}", file=sys.stderr)
+        finally:
+            conn_map.close()
+
+    recent_neg_risk_request_map, recent_neg_risk_market_map, recent_neg_risk_operator_map = build_neg_risk_request_mapping(
+        w3,
+        adapter_start_block,
+        end_block,
+        operator_addresses=neg_risk_operator_addresses,
+        batch_blocks=batch_adapter,
+        max_workers=max_workers,
+    )
+    neg_risk_request_map.update(recent_neg_risk_request_map)
+    neg_risk_market_map.update(recent_neg_risk_market_map)
+    neg_risk_operator_map.update(recent_neg_risk_operator_map)
+    if db_exists and recent_neg_risk_request_map:
+        conn_map = _connect_sqlite_write(db_path)
+        try:
+            init_uma_adapter_mapping(conn_map)
+            changed = save_neg_risk_request_mapping_entries(
+                conn_map,
+                recent_neg_risk_request_map,
+                recent_neg_risk_market_map,
+                recent_neg_risk_operator_map,
+            )
+            print(f"Persisted neg-risk request mapping changes: {changed}", file=sys.stderr)
         finally:
             conn_map.close()
 
@@ -1294,7 +1770,7 @@ def run(
         for r in group:
             if r["label"] == "request":
                 request_tx = r.get("tx_hash") or r.get("request_tx")
-                requester = requester or _fast_fill_requester(request_tx or "")
+                requester = _fast_fill_requester(request_tx or "") or requester or r.get("requester")
             elif r["label"] == "propose":
                 proposal_tx = r.get("tx_hash") or r.get("proposal_tx")
                 proposer = proposer or r.get("proposer")
@@ -1315,7 +1791,10 @@ def run(
             r["request_tx"] = r.get("request_tx") or request_tx
             r["proposal_tx"] = r.get("proposal_tx") or proposal_tx
             r["settlement_tx"] = r.get("settlement_tx") or settlement_tx
-            r["requester"] = r.get("requester") or requester
+            if requester:
+                r["requester"] = requester
+            else:
+                r["requester"] = r.get("requester") or ""
             r["proposer"] = r.get("proposer") or proposer
             r["disputer"] = r.get("disputer") or disputer
             r["settlement_recipient"] = r.get("settlement_recipient") or settlement_recipient
@@ -1332,7 +1811,12 @@ def run(
         "by_title_nearest_date": 0,
         "by_condition_id": 0,
         "by_question_id": 0,
+        "neg_risk_request_to_question": 0,
+        "missing_neg_risk_request_mapping": 0,
         "unmatched": 0,
+        "missing_adapter_mapping": 0,
+        "fallback_identifier": 0,
+        "fallback_ancillary_hash": 0,
     }
     sorted_rows = sorted(rows, key=lambda x: (-x["block_number"], x["tx_hash"]))
     db_writer = _OracleDbWriter(db_path)
@@ -1341,19 +1825,36 @@ def run(
         ancillary_hex = r.get("ancillary_hex") or _ancillary_to_hex(r.get("ancillaryData") or b"")
         real_qid = adapter_map.get(ancillary_hex.lower()) or adapter_map.get(ancillary_hex) or ""
         source_adapter = adapter_map_source.get(ancillary_hex.lower()) or adapter_map_source.get(ancillary_hex) or ""
-        chain_question_id = ""
+        translated_question_id = ""
         if real_qid:
-            chain_question_id = real_qid
-        else:
+            translated_question_id = (
+                neg_risk_request_map.get(real_qid.lower())
+                or neg_risk_request_map.get(real_qid)
+                or ""
+            )
+            if translated_question_id:
+                match_stats["neg_risk_request_to_question"] += 1
+        lookup_question_id = translated_question_id or real_qid
+        fallback_question_id = ""
+        if not real_qid:
+            match_stats["missing_adapter_mapping"] += 1
             iden = r.get("identifier")
             if iden is not None:
                 h = iden.hex() if hasattr(iden, "hex") else str(iden)
                 if not h.startswith("0x"):
                     h = "0x" + h
-                chain_question_id = h[:66]
+                fallback_question_id = h[:66]
+                match_stats["fallback_identifier"] += 1
             else:
                 ad = r.get("ancillaryData") or b""
-                chain_question_id = "0x" + Web3.keccak(primitive=ad).hex()[:64] if ad else ""
+                fallback_question_id = "0x" + Web3.keccak(primitive=ad).hex()[:64] if ad else ""
+                if fallback_question_id:
+                    match_stats["fallback_ancillary_hash"] += 1
+        elif source_adapter and source_adapter.lower() in {
+            "0x69c47de9d4d3dad79590d61b9e05918e03775f24",
+            "0x2f5e3684cb1f318ec51b00edba38d79ac2c0aa9d",
+        } and not translated_question_id:
+            match_stats["missing_neg_risk_request_mapping"] += 1
 
         raw = r.get("ancillary_raw") or ""
         ext_market_id = _extract_market_id(raw)
@@ -1374,25 +1875,25 @@ def run(
                 )
                 if matched_by:
                     match_stats[matched_by] += 1
-            if matched_market is None and chain_question_id and chain_question_id.lower() in market_bridge["by_condition_id"]:
-                matched_market = market_bridge["by_condition_id"][chain_question_id.lower()]
+            if matched_market is None and lookup_question_id and lookup_question_id.lower() in market_bridge["by_condition_id"]:
+                matched_market = market_bridge["by_condition_id"][lookup_question_id.lower()]
                 matched_by = "by_condition_id"
                 match_stats["by_condition_id"] += 1
-            if matched_market is None and chain_question_id and chain_question_id.lower() in market_bridge["by_question_id"]:
-                matched_market = market_bridge["by_question_id"][chain_question_id.lower()]
+            if matched_market is None and lookup_question_id and lookup_question_id.lower() in market_bridge["by_question_id"]:
+                matched_market = market_bridge["by_question_id"][lookup_question_id.lower()]
                 matched_by = "question_id"
                 match_stats["by_question_id"] += 1
             if matched_market is None:
                 match_stats["unmatched"] += 1
 
         if matched_market:
-            question_id = matched_market.get("question_id") or chain_question_id
-            condition_id = matched_market.get("condition_id") or question_id
+            question_id = matched_market.get("question_id") or translated_question_id or real_qid or ""
+            condition_id = matched_market.get("condition_id") or ""
             market_id = matched_market.get("market_id") or ""
             market_title = matched_market.get("title") or ext_title
         else:
-            question_id = chain_question_id
-            condition_id = chain_question_id
+            question_id = translated_question_id or real_qid or ""
+            condition_id = ""
             market_id = ""
             market_title = ext_title
 
@@ -1417,7 +1918,7 @@ def run(
             "market_title": _to_text(market_title),
             "source_adapter": _to_text(source_adapter),
             "source_oracle": _to_text(r.get("source_oracle") or ""),
-            "adapter_question_id": _to_text(chain_question_id),
+            "adapter_question_id": _to_text(real_qid),
             "matched_by": matched_by,
             "question_id": _to_text(question_id),
             "condition_id": _to_text(condition_id),
@@ -1453,7 +1954,12 @@ def run(
         f"title_nearest_date={match_stats['by_title_nearest_date']}, "
         f"condition_id={match_stats['by_condition_id']}, "
         f"question_id={match_stats['by_question_id']}, "
-        f"unmatched={match_stats['unmatched']}",
+        f"neg_risk_request_to_question={match_stats['neg_risk_request_to_question']}, "
+        f"missing_neg_risk_request_mapping={match_stats['missing_neg_risk_request_mapping']}, "
+        f"unmatched={match_stats['unmatched']}, "
+        f"missing_adapter_mapping={match_stats['missing_adapter_mapping']}, "
+        f"fallback_identifier={match_stats['fallback_identifier']}, "
+        f"fallback_ancillary_hash={match_stats['fallback_ancillary_hash']}",
         file=sys.stderr,
     )
     save_oracle_synced_block(db_path, end_block, sync_state_key=sync_state_key)
@@ -1483,6 +1989,9 @@ def main():
     parser.add_argument("--output", "-o", default=None, help="可选调试导出路径；不传则只写数据库")
     parser.add_argument("--limit", type=int, default=None, help="最大输出条数，默认不限")
     add_db_cli_args(parser)
+    parser.add_argument("--watch", action="store_true", help="守护进程模式：循环执行 oracle 同步")
+    parser.add_argument("--interval", type=int, default=30, help="--watch 模式下每轮等待秒数")
+    parser.add_argument("--confirmations", type=int, default=20, help="自动追最新区块时保留的确认块数")
     parser.add_argument("--continue-sync", action="store_true", help="从 sync_state.oracle_sync 记录的上次区块继续同步")
     parser.add_argument(
         "--adapter-addresses",
@@ -1494,33 +2003,87 @@ def main():
         default=",".join(DEFAULT_ORACLE_ADDRESSES),
         help="逗号分隔的 UMA Oracle 地址列表；默认内置多版本地址并集",
     )
+    parser.add_argument(
+        "--neg-risk-operator-addresses",
+        default=",".join(DEFAULT_NEG_RISK_OPERATOR_ADDRESSES),
+        help="逗号分隔的 NegRiskOperator 地址列表；用于 requestId -> questionId 桥接",
+    )
     parser.add_argument("--batch-adapter", type=int, default=BATCH_BLOCKS_ADAPTER,
         help=f"Adapter 每批区块数 (default: {BATCH_BLOCKS_ADAPTER})")
     parser.add_argument("--batch-oracle", type=int, default=BATCH_BLOCKS_ORACLE,
         help=f"Oracle 每批区块数，RPC 限制时改小 (default: {BATCH_BLOCKS_ORACLE})")
     parser.add_argument("--max-workers", type=int, default=30,
         help="并发线程数，Growth 套餐 250 RPS 用 30；若遇 429 可降至 15 (default: 30)")
+    parser.add_argument(
+        "--continue-sync-rewind-blocks",
+        type=int,
+        default=CONTINUE_SYNC_REWIND_BLOCKS,
+        help=f"--continue-sync 时自动回扫最近多少个块 (default: {CONTINUE_SYNC_REWIND_BLOCKS})",
+    )
     args = parser.parse_args()
     configure_db_from_args(args)
     db_path = args.sqlite_path
-    print(f"Database target: {describe_db_target()}", file=sys.stderr)
-    run(
-        rpc_url=args.rpc,
-        adapter_start_block=args.adapter_start_block,
-        oracle_start_block=args.oracle_start_block,
-        end_block=args.end_block,
-        start_date=args.start,
-        end_date=args.end_date,
-        output_path=args.output,
-        limit=args.limit,
-        db_path=db_path,
-        adapter_addresses_raw=args.adapter_addresses,
-        oracle_addresses_raw=args.oracle_addresses,
-        continue_sync=args.continue_sync,
-        batch_adapter=args.batch_adapter,
-        batch_oracle=args.batch_oracle,
-        max_workers=args.max_workers,
-    )
+
+    def _run_once() -> None:
+        effective_end_block = args.end_block
+        if effective_end_block is None:
+            rpc_url = args.rpc or get_rpc_url()
+            w3 = _build_web3(rpc_url)
+            effective_end_block = max(0, w3.eth.block_number - max(0, args.confirmations))
+
+        print(f"Database target: {describe_db_target()}", file=sys.stderr)
+        run(
+            rpc_url=args.rpc,
+            adapter_start_block=args.adapter_start_block,
+            oracle_start_block=args.oracle_start_block,
+            end_block=effective_end_block,
+            start_date=args.start,
+            end_date=args.end_date,
+            output_path=args.output,
+            limit=args.limit,
+            db_path=db_path,
+            adapter_addresses_raw=args.adapter_addresses,
+            oracle_addresses_raw=args.oracle_addresses,
+            neg_risk_operator_addresses_raw=args.neg_risk_operator_addresses,
+            continue_sync=args.continue_sync,
+            batch_adapter=args.batch_adapter,
+            batch_oracle=args.batch_oracle,
+            max_workers=args.max_workers,
+            sync_state_key=ORACLE_SYNC_STATE_KEY,
+            continue_sync_rewind_blocks=args.continue_sync_rewind_blocks,
+        )
+
+    if args.watch:
+        run_index = 0
+        consecutive_failures = 0
+        try:
+            while True:
+                run_index += 1
+                print(
+                    f"\n[oracle] Run #{run_index} at {datetime.now(timezone.utc).isoformat()}",
+                    file=sys.stderr,
+                )
+                try:
+                    _run_once()
+                    consecutive_failures = 0
+                    print(f"[oracle] Sleeping {args.interval}s", file=sys.stderr)
+                    time.sleep(args.interval)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    consecutive_failures += 1
+                    backoff_seconds = _compute_watch_error_backoff(args.interval, consecutive_failures)
+                    print(f"[oracle] Run #{run_index} failed: {exc}", file=sys.stderr)
+                    print(
+                        f"[oracle] Entering recovery sleep for {backoff_seconds}s "
+                        f"(consecutive_failures={consecutive_failures}) before retrying.",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff_seconds)
+        except KeyboardInterrupt:
+            print("\n[oracle] Interrupted by user. Exiting.", file=sys.stderr)
+    else:
+        _run_once()
 
 
 if __name__ == "__main__":

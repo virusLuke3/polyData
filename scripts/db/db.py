@@ -22,6 +22,25 @@ try:
 except ImportError:
     pymysql = None
 
+
+def _load_dotenv_files() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    project_root = Path(__file__).resolve().parents[2]
+    scripts_root = Path(__file__).resolve().parents[1]
+    for candidate in (
+        project_root / ".env",
+        project_root / ".env.local",
+        scripts_root / ".env",
+    ):
+        if candidate.exists():
+            load_dotenv(candidate, override=False)
+
+
+_load_dotenv_files()
+
 DEFAULT_SQLITE_PATH = os.environ.get(
     "POLYMARKET_SQLITE_PATH",
     os.environ.get("POLYMARKET_DB", "/data/hy/myPolyDB/polymarket_indexer.db"),
@@ -30,10 +49,10 @@ DEFAULT_DB_PATH = DEFAULT_SQLITE_PATH
 DEFAULT_DB_BACKEND = os.environ.get("POLYMARKET_DB_BACKEND", "mysql").strip().lower()
 
 DEFAULT_MYSQL_HOST = os.environ.get("POLYMARKET_MYSQL_HOST", "127.0.0.1")
-DEFAULT_MYSQL_PORT = int(os.environ.get("POLYMARKET_MYSQL_PORT", "43306"))
-DEFAULT_MYSQL_USER = os.environ.get("POLYMARKET_MYSQL_USER", "poly_user")
-DEFAULT_MYSQL_PASSWORD = os.environ.get("POLYMARKET_MYSQL_PASSWORD", "PolyUserPass_007!")
-DEFAULT_MYSQL_DATABASE = os.environ.get("POLYMARKET_MYSQL_DATABASE", "poly_data")
+DEFAULT_MYSQL_PORT = int(os.environ.get("POLYMARKET_MYSQL_PORT", "3306"))
+DEFAULT_MYSQL_USER = os.environ.get("POLYMARKET_MYSQL_USER", "")
+DEFAULT_MYSQL_PASSWORD = os.environ.get("POLYMARKET_MYSQL_PASSWORD", "")
+DEFAULT_MYSQL_DATABASE = os.environ.get("POLYMARKET_MYSQL_DATABASE", "")
 DEFAULT_MYSQL_CHARSET = os.environ.get("POLYMARKET_MYSQL_CHARSET", "utf8mb4")
 
 _runtime_db_backend = DEFAULT_DB_BACKEND
@@ -253,6 +272,9 @@ class MySQLConnectionWrapper:
     def rollback(self) -> None:
         self._raw_conn.rollback()
 
+    def ping(self, reconnect: bool = True) -> None:
+        self._raw_conn.ping(reconnect=reconnect)
+
     def close(self) -> None:
         self._raw_conn.close()
 
@@ -430,7 +452,21 @@ def _create_mysql_uma_adapter_mapping_table(conn) -> None:
             ancillary_data LONGTEXT NOT NULL,
             ancillary_data_hash CHAR(64) GENERATED ALWAYS AS (SHA2(ancillary_data, 256)) STORED,
             question_id VARCHAR(255) NOT NULL,
+            source_adapter VARCHAR(255),
             UNIQUE KEY uq_uma_adapter_mapping_hash (ancillary_data_hash)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+
+
+def _create_mysql_neg_risk_request_mapping_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS neg_risk_request_mapping (
+            request_id VARCHAR(255) NOT NULL PRIMARY KEY,
+            question_id VARCHAR(255) NOT NULL,
+            market_id VARCHAR(255),
+            source_operator VARCHAR(255)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )
@@ -448,6 +484,7 @@ def _ensure_mysql_uma_adapter_mapping_schema(conn) -> None:
         or "id" not in column_types
     )
     if not needs_rebuild:
+        ensure_column_exists(conn, "uma_adapter_mapping", "source_adapter", "VARCHAR(255)")
         return
 
     conn.execute("DROP TABLE IF EXISTS uma_adapter_mapping_legacy_tmp")
@@ -455,12 +492,21 @@ def _ensure_mysql_uma_adapter_mapping_schema(conn) -> None:
     _create_mysql_uma_adapter_mapping_table(conn)
     conn.execute(
         """
-        INSERT INTO uma_adapter_mapping (ancillary_data, question_id)
-        SELECT ancillary_data, question_id
+        INSERT INTO uma_adapter_mapping (ancillary_data, question_id, source_adapter)
+        SELECT ancillary_data, question_id, NULL
         FROM uma_adapter_mapping_legacy_tmp
         """
     )
     conn.execute("DROP TABLE uma_adapter_mapping_legacy_tmp")
+
+
+def _ensure_mysql_neg_risk_request_mapping_schema(conn) -> None:
+    if not table_exists(conn, "neg_risk_request_mapping"):
+        _create_mysql_neg_risk_request_mapping_table(conn)
+        return
+
+    ensure_column_exists(conn, "neg_risk_request_mapping", "market_id", "VARCHAR(255)")
+    ensure_column_exists(conn, "neg_risk_request_mapping", "source_operator", "VARCHAR(255)")
 
 
 def init_schema(conn=None, db_path: str = DEFAULT_DB_PATH) -> None:
@@ -580,12 +626,137 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
     )
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS uma_adapter_mapping (
-            ancillary_data TEXT PRIMARY KEY,
-            question_id TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS market_trade_daily_stats (
+            trade_date TEXT NOT NULL,
+            market_id INTEGER NOT NULL,
+            trade_count INTEGER NOT NULL DEFAULT 0,
+            volume_notional REAL NOT NULL DEFAULT 0,
+            last_trade_at TEXT,
+            last_block_number INTEGER,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (trade_date, market_id)
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_latest_prices (
+            market_id INTEGER PRIMARY KEY,
+            latest_trade_at TEXT,
+            latest_trade_block INTEGER,
+            latest_trade_log_index INTEGER,
+            latest_price REAL,
+            latest_yes_trade_at TEXT,
+            latest_yes_trade_block INTEGER,
+            latest_yes_trade_log_index INTEGER,
+            latest_yes_price REAL,
+            latest_no_trade_at TEXT,
+            latest_no_trade_block INTEGER,
+            latest_no_trade_log_index INTEGER,
+            latest_no_price REAL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trade_addresses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id INTEGER,
+            tx_hash TEXT NOT NULL,
+            log_index INTEGER NOT NULL,
+            market_id INTEGER NOT NULL,
+            token_id TEXT NOT NULL,
+            outcome TEXT,
+            address TEXT NOT NULL,
+            role TEXT NOT NULL,
+            side_for_address TEXT NOT NULL,
+            price REAL NOT NULL,
+            size REAL NOT NULL,
+            notional REAL NOT NULL,
+            fee_amount REAL NOT NULL DEFAULT 0,
+            block_number INTEGER,
+            trade_time TEXT,
+            trade_date TEXT,
+            contract TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tx_hash, log_index, address)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_trade_daily_stats (
+            trade_date TEXT NOT NULL,
+            address TEXT NOT NULL,
+            trade_count INTEGER NOT NULL DEFAULT 0,
+            buy_count INTEGER NOT NULL DEFAULT 0,
+            sell_count INTEGER NOT NULL DEFAULT 0,
+            volume_notional REAL NOT NULL DEFAULT 0,
+            last_trade_at TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (trade_date, address)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_trade_totals (
+            address TEXT PRIMARY KEY,
+            total_trade_count INTEGER NOT NULL DEFAULT 0,
+            total_buy_count INTEGER NOT NULL DEFAULT 0,
+            total_sell_count INTEGER NOT NULL DEFAULT 0,
+            total_volume_notional REAL NOT NULL DEFAULT 0,
+            first_trade_at TEXT,
+            last_trade_at TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_market_stats (
+            address TEXT NOT NULL,
+            market_id INTEGER NOT NULL,
+            trade_count INTEGER NOT NULL DEFAULT 0,
+            buy_count INTEGER NOT NULL DEFAULT 0,
+            sell_count INTEGER NOT NULL DEFAULT 0,
+            volume_notional REAL NOT NULL DEFAULT 0,
+            first_trade_at TEXT,
+            last_trade_at TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (address, market_id)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS uma_adapter_mapping (
+            ancillary_data TEXT PRIMARY KEY,
+            question_id TEXT NOT NULL,
+            source_adapter TEXT
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS neg_risk_request_mapping (
+            request_id TEXT PRIMARY KEY,
+            question_id TEXT NOT NULL,
+            market_id TEXT,
+            source_operator TEXT
+        )
+        """
+    )
+    for col, col_type in (
+        ("market_id", "TEXT"),
+        ("source_operator", "TEXT"),
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE neg_risk_request_mapping ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS oracle_events (
@@ -626,12 +797,23 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
     for table, index_name, cols in (
         ("markets", "idx_markets_condition_id", ["condition_id"]),
         ("markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
-        ("markets", "idx_markets_end_date", ["end_date"]),
         ("markets", "idx_markets_yes_token", ["yes_token_id"]),
         ("markets", "idx_markets_no_token", ["no_token_id"]),
         ("trades", "idx_trades_market_id", ["market_id"]),
         ("trades", "idx_trades_timestamp", ["timestamp"]),
         ("trades", "idx_trades_block", ["block_number"]),
+        ("market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
+        ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
+        ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
+        ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
+        ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
+        ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
+        ("trade_addresses", "idx_trade_addresses_trade_date_address", ["trade_date", "address"]),
+        ("address_trade_daily_stats", "idx_address_trade_daily_stats_address_date", ["address", "trade_date"]),
+        ("address_trade_daily_stats", "idx_address_trade_daily_stats_last_trade_at", ["last_trade_at"]),
+        ("address_trade_totals", "idx_address_trade_totals_last_trade_at", ["last_trade_at"]),
+        ("address_market_stats", "idx_address_market_stats_market", ["market_id"]),
+        ("address_market_stats", "idx_address_market_stats_last_trade_at", ["last_trade_at"]),
         ("oracle_events", "idx_oracle_events_market_id", ["market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
@@ -640,6 +822,8 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("oracle_events", "idx_oracle_events_status_market_id", ["event_status", "market_id"]),
         ("oracle_events", "idx_oracle_events_status_event_time", ["event_status", "event_time"]),
         ("oracle_events", "idx_oracle_events_matched_by", ["matched_by"]),
+        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_question_id", ["question_id"]),
+        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_source_operator", ["source_operator"]),
         ("block_timestamps", "idx_block_timestamps_timestamp", ["timestamp"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)
@@ -718,7 +902,113 @@ def _init_mysql_schema(conn) -> None:
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_trade_daily_stats (
+            trade_date DATE NOT NULL,
+            market_id BIGINT NOT NULL,
+            trade_count BIGINT NOT NULL DEFAULT 0,
+            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            last_trade_at DATETIME(6),
+            last_block_number BIGINT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (trade_date, market_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_latest_prices (
+            market_id BIGINT NOT NULL PRIMARY KEY,
+            latest_trade_at DATETIME(6),
+            latest_trade_block BIGINT,
+            latest_trade_log_index BIGINT,
+            latest_price DECIMAL(20, 10),
+            latest_yes_trade_at DATETIME(6),
+            latest_yes_trade_block BIGINT,
+            latest_yes_trade_log_index BIGINT,
+            latest_yes_price DECIMAL(20, 10),
+            latest_no_trade_at DATETIME(6),
+            latest_no_trade_block BIGINT,
+            latest_no_trade_log_index BIGINT,
+            latest_no_price DECIMAL(20, 10),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trade_addresses (
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            trade_id BIGINT,
+            tx_hash CHAR(66) NOT NULL,
+            log_index BIGINT NOT NULL,
+            market_id BIGINT NOT NULL,
+            token_id VARCHAR(128) NOT NULL,
+            outcome VARCHAR(16),
+            address CHAR(42) NOT NULL,
+            role VARCHAR(16) NOT NULL,
+            side_for_address VARCHAR(16) NOT NULL,
+            price DECIMAL(20, 10) NOT NULL,
+            size DECIMAL(30, 10) NOT NULL,
+            notional DECIMAL(38, 18) NOT NULL,
+            fee_amount DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            block_number BIGINT,
+            trade_time DATETIME(6),
+            trade_date DATE,
+            contract VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_trade_addresses_trade_address (tx_hash, log_index, address)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_trade_daily_stats (
+            trade_date DATE NOT NULL,
+            address CHAR(42) NOT NULL,
+            trade_count BIGINT NOT NULL DEFAULT 0,
+            buy_count BIGINT NOT NULL DEFAULT 0,
+            sell_count BIGINT NOT NULL DEFAULT 0,
+            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            last_trade_at DATETIME(6),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (trade_date, address)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_trade_totals (
+            address CHAR(42) NOT NULL PRIMARY KEY,
+            total_trade_count BIGINT NOT NULL DEFAULT 0,
+            total_buy_count BIGINT NOT NULL DEFAULT 0,
+            total_sell_count BIGINT NOT NULL DEFAULT 0,
+            total_volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            first_trade_at DATETIME(6),
+            last_trade_at DATETIME(6),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS address_market_stats (
+            address CHAR(42) NOT NULL,
+            market_id BIGINT NOT NULL,
+            trade_count BIGINT NOT NULL DEFAULT 0,
+            buy_count BIGINT NOT NULL DEFAULT 0,
+            sell_count BIGINT NOT NULL DEFAULT 0,
+            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            first_trade_at DATETIME(6),
+            last_trade_at DATETIME(6),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (address, market_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
     _create_mysql_uma_adapter_mapping_table(conn)
+    _create_mysql_neg_risk_request_mapping_table(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS oracle_events (
@@ -774,6 +1064,7 @@ def _init_mysql_schema(conn) -> None:
     ):
         ensure_column_exists(conn, "trades", col, col_type)
     _ensure_mysql_uma_adapter_mapping_schema(conn)
+    _ensure_mysql_neg_risk_request_mapping_schema(conn)
     for table, index_name, cols in (
         ("markets", "idx_markets_condition_id", ["condition_id"]),
         ("markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
@@ -782,12 +1073,26 @@ def _init_mysql_schema(conn) -> None:
         ("trades", "idx_trades_market_id", ["market_id"]),
         ("trades", "idx_trades_timestamp", ["timestamp"]),
         ("trades", "idx_trades_block", ["block_number"]),
+        ("market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
+        ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
+        ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
+        ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
+        ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
+        ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
+        ("trade_addresses", "idx_trade_addresses_trade_date_address", ["trade_date", "address"]),
+        ("address_trade_daily_stats", "idx_address_trade_daily_stats_address_date", ["address", "trade_date"]),
+        ("address_trade_daily_stats", "idx_address_trade_daily_stats_last_trade_at", ["last_trade_at"]),
+        ("address_trade_totals", "idx_address_trade_totals_last_trade_at", ["last_trade_at"]),
+        ("address_market_stats", "idx_address_market_stats_market", ["market_id"]),
+        ("address_market_stats", "idx_address_market_stats_last_trade_at", ["last_trade_at"]),
         ("oracle_events", "idx_oracle_events_market_id", ["market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),
         ("oracle_events", "idx_oracle_events_status", ["event_status"]),
         ("oracle_events", "idx_oracle_events_matched_by", ["matched_by"]),
+        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_question_id", ["question_id"]),
+        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_source_operator", ["source_operator"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)
 

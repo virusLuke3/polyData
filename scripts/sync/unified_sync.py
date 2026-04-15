@@ -12,6 +12,7 @@
 import argparse
 import fcntl
 import hashlib
+import os
 import sys
 import time
 import traceback
@@ -26,6 +27,7 @@ if str(_scripts_root) not in sys.path:
 
 from config import get_rpc_url
 from db import add_db_cli_args, configure_db_from_args, describe_db_target
+from db.sync_trade_analytics import sync_trade_analytics
 from market.market_discovery import resolve_incremental_since_date, run_market_discovery
 from oracle.fetch_uma_oracle_chain import get_last_oracle_synced_block, run as run_oracle
 from trade.trades_indexer import get_last_synced_block as get_last_trade_synced_block, run_indexer
@@ -38,6 +40,10 @@ RPC_CONNECT_RETRIES = 3
 RPC_CONNECT_RETRY_DELAY_SECONDS = 10
 WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
 WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
+DEFAULT_TRADE_WRITE_MODE = "v2"
+DEFAULT_TRADES_READ_SOURCE = "trades_v2_read"
+DEFAULT_TRADES_STATS_SOURCE = "trades_v2"
+DEFAULT_ADDRESS_HISTORY_SOURCE = "trades_v2"
 
 try:
     from web3 import Web3
@@ -149,6 +155,15 @@ def _compute_market_since(
     return last_synced_at - overlap_lookback, True
 
 
+def _apply_trade_runtime_config(args) -> None:
+    os.environ["POLYDATA_TRADE_WRITE_MODE"] = (args.trade_write_mode or DEFAULT_TRADE_WRITE_MODE).strip()
+    os.environ["POLYDATA_TRADES_READ_SOURCE"] = (args.trades_read_source or DEFAULT_TRADES_READ_SOURCE).strip()
+    os.environ["POLYDATA_TRADES_STATS_SOURCE"] = (args.trades_stats_source or DEFAULT_TRADES_STATS_SOURCE).strip()
+    os.environ["POLYDATA_ADDRESS_HISTORY_SOURCE"] = (
+        args.address_history_source or DEFAULT_ADDRESS_HISTORY_SOURCE
+    ).strip()
+
+
 def run_once(args) -> None:
     rpc_url = args.rpc or get_rpc_url()
     db_path = args.sqlite_path
@@ -243,11 +258,36 @@ def run_once(args) -> None:
             rpc_url=rpc_url,
             db_path=db_path,
             batch_blocks=args.trade_batch_blocks,
+            max_workers=args.trade_workers,
+            enable_market_backfill=not args.disable_market_backfill,
         )
         print(
             f"[sync] Trade sync done. processed={processed}, inserted={inserted}",
             file=sys.stderr,
         )
+
+    if args.skip_trade_analytics_sync:
+        print("[sync] Step 4/4 trade analytics sync skipped by flag", file=sys.stderr)
+        return
+
+    print(
+        f"[sync] Step 4/4 trade analytics sync from trades -> materialized tables "
+        f"(batch_size={args.trade_analytics_batch_size})",
+        file=sys.stderr,
+    )
+    analytics_result = sync_trade_analytics(
+        db_path=db_path,
+        batch_size=args.trade_analytics_batch_size,
+        max_batches=args.trade_analytics_max_batches,
+        include_trade_addresses=args.with_trade_addresses,
+        verbose=True,
+    )
+    print(
+        f"[sync] Trade analytics sync done. batches={analytics_result['batches']} "
+        f"processed={analytics_result['processed_trades']} "
+        f"last_trade_id={analytics_result['last_trade_id']}",
+        file=sys.stderr,
+    )
 
 
 def run_tail_live_once(args) -> None:
@@ -354,10 +394,35 @@ def run_tail_live_once(args) -> None:
         rpc_url=rpc_url,
         db_path=db_path,
         batch_blocks=args.trade_batch_blocks,
+        max_workers=args.trade_workers,
         sync_state_key=LIVE_TRADE_SYNC_STATE_KEY,
+        enable_market_backfill=not args.disable_market_backfill,
     )
     print(
         f"[tail-live] Trade sync done. processed={processed}, inserted={inserted}",
+        file=sys.stderr,
+    )
+
+    if args.skip_trade_analytics_sync:
+        print("[tail-live] Trade analytics sync skipped by flag", file=sys.stderr)
+        return
+
+    print(
+        f"[tail-live] Trade analytics sync from trades -> materialized tables "
+        f"(batch_size={args.trade_analytics_batch_size})",
+        file=sys.stderr,
+    )
+    analytics_result = sync_trade_analytics(
+        db_path=db_path,
+        batch_size=args.trade_analytics_batch_size,
+        max_batches=args.trade_analytics_max_batches,
+        include_trade_addresses=args.with_trade_addresses,
+        verbose=True,
+    )
+    print(
+        f"[tail-live] Trade analytics sync done. batches={analytics_result['batches']} "
+        f"processed={analytics_result['processed_trades']} "
+        f"last_trade_id={analytics_result['last_trade_id']}",
         file=sys.stderr,
     )
 
@@ -385,7 +450,34 @@ def main():
     parser.add_argument("--trade-overlap-blocks", type=int, default=10000, help="trade 每轮回看区块数")
     parser.add_argument("--tail-trade-lookback-blocks", type=int, default=5000, help="--tail-live 模式下 trade 首次启动默认回看区块数")
     parser.add_argument("--trade-bootstrap-lookback-blocks", type=int, default=100000, help="trade 无断点时默认回看区块数")
-    parser.add_argument("--trade-batch-blocks", type=int, default=5000, help="trade 每批区块数")
+    parser.add_argument("--trade-batch-blocks", type=int, default=500, help="trade 每批区块数")
+    parser.add_argument("--trade-workers", type=int, default=4, help="trade 并发线程数")
+    parser.add_argument(
+        "--trade-write-mode",
+        choices=["legacy", "v2"],
+        default=None,
+        help="trade 写入模式。默认内置为 v2；命令行传参时优先于环境变量。",
+    )
+    parser.add_argument(
+        "--trades-read-source",
+        default=None,
+        help="trade 读取源。默认内置为 trades_v2_read；命令行传参时优先于环境变量。",
+    )
+    parser.add_argument(
+        "--trades-stats-source",
+        default=None,
+        help="trade 统计源。默认内置为 trades_v2；命令行传参时优先于环境变量。",
+    )
+    parser.add_argument(
+        "--address-history-source",
+        default=None,
+        help="地址历史读取源。默认内置为 trades_v2；命令行传参时优先于环境变量。",
+    )
+    parser.add_argument("--disable-market-backfill", action="store_true", help="禁用遇到未知tokenId时的自动查漏补缺API调用")
+    parser.add_argument("--skip-trade-analytics-sync", action="store_true", help="跳过 trades -> analytics 派生表同步")
+    parser.add_argument("--trade-analytics-batch-size", type=int, default=50_000, help="每批同步多少条 trades 到 analytics 表")
+    parser.add_argument("--trade-analytics-max-batches", type=int, default=None, help="单次最多同步多少批 analytics；默认直到追平")
+    parser.add_argument("--with-trade-addresses", action="store_true", help="额外落全量 trade_addresses 明细表；更占磁盘")
     parser.add_argument("--batch-adapter", type=int, default=2000, help="oracle adapter 每批区块数")
     parser.add_argument("--batch-oracle", type=int, default=2000, help="oracle 事件每批区块数")
     parser.add_argument("--max-workers", type=int, default=30, help="oracle 并发线程数")
@@ -393,6 +485,7 @@ def main():
     parser.add_argument("--oracle-addresses", default=None, help="可选覆盖默认 oracle 地址列表，逗号分隔")
     args = parser.parse_args()
     configure_db_from_args(args)
+    _apply_trade_runtime_config(args)
 
     lock_key = hashlib.sha1(describe_db_target().encode("utf-8")).hexdigest()[:12]
     lock_path = Path("/tmp") / f"polydata-unified-sync-{lock_key}.lock"

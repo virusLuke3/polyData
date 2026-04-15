@@ -14,7 +14,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple
+from typing import Any, Iterable, List, Dict, Optional, Set, Tuple
 from decimal import Decimal
 
 # 保证 scripts 根目录在 path 中，以便 from db / config / market 可导入
@@ -45,8 +45,22 @@ except ImportError:
             print("Warning: POA middleware not found; will use raw RPC for block timestamp.", file=sys.stderr)
 
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_connection, init_schema, dict_from_row, DEFAULT_DB_PATH
+from db.trade_v2 import (
+    LEGACY_TRADES_TABLE,
+    TRADE_V2_READ_VIEW,
+    convert_trade_row_to_v2,
+    ensure_trade_v2_schema,
+    get_trade_write_mode,
+    insert_trades_v2_batch,
+    sql_identifier,
+)
 from market.market_discovery import fetch_and_upsert_markets_for_token_ids
-from trade.trade_decoder import decode_order_filled_log, CTF_EXCHANGE_ADDRESS, NEG_RISK_EXCHANGE_ADDRESS
+from trade.trade_decoder import (
+    decode_order_filled_log,
+    get_order_filled_event_decoder,
+    CTF_EXCHANGE_ADDRESS,
+    NEG_RISK_EXCHANGE_ADDRESS,
+)
 from config import get_rpc_url
 
 USDC_DIVISOR = 10**6
@@ -55,12 +69,19 @@ BATCH_BLOCKS = 5000
 MAX_RETRIES = 5
 RETRY_DELAY_BASE = 2
 MAX_WORKERS = 20
-TOKEN_ID_BACKFILL_MAX_PAGES = 10
+TOKEN_ID_BACKFILL_MAX_PAGES = 0
 TRADE_INSERT_BATCH_SIZE = 2000
 SQLITE_IN_MAX_VARS = 900
 _THREAD_LOCAL = threading.local()
-
-
+RPC_CONNECT_RETRIES = 3
+RPC_CONNECT_RETRY_DELAY_SECONDS = 10
+RPC_RECOVERY_SLEEP_BASE_SECONDS = 30
+RPC_RECOVERY_SLEEP_MAX_SECONDS = 300
+DB_WRITE_MAX_RETRIES = 6
+DB_WRITE_RETRY_BASE_SECONDS = 1
+LOG_PROCESS_CHUNK_SIZE = 5000
+WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
+WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
 def iter_block_windows(from_block: int, to_block: int, window_blocks: int):
     current = from_block
     while current <= to_block:
@@ -69,13 +90,34 @@ def iter_block_windows(from_block: int, to_block: int, window_blocks: int):
         current = end + 1
 
 
+def iter_chunks(items: List[Any], chunk_size: int) -> Iterable[Tuple[int, List[Any]]]:
+    for start in range(0, len(items), chunk_size):
+        yield start, items[start:start + chunk_size]
+
+
 def _build_web3(rpc_url: str) -> Web3:
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    if geth_poa_middleware is not None:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-    if not w3.is_connected():
+    last_error: Optional[Exception] = None
+    for attempt in range(1, RPC_CONNECT_RETRIES + 1):
+        try:
+            w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
+            if geth_poa_middleware is not None:
+                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            if not w3.is_connected():
+                raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
+            return w3
+        except Exception as exc:
+            last_error = exc
+            if attempt >= RPC_CONNECT_RETRIES:
+                break
+            print(
+                f"[trade] RPC connect failed ({attempt}/{RPC_CONNECT_RETRIES}): {exc}. "
+                f"Retrying in {RPC_CONNECT_RETRY_DELAY_SECONDS}s...",
+                file=sys.stderr,
+            )
+            time.sleep(RPC_CONNECT_RETRY_DELAY_SECONDS)
+    if last_error is None:
         raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
-    return w3
+    raise ConnectionError(f"Cannot connect to RPC: {rpc_url}") from last_error
 
 
 def _get_thread_local_web3(rpc_url: str) -> Web3:
@@ -122,6 +164,78 @@ def _format_rpc_error(exc: Exception, max_len: int = 240) -> str:
     return text
 
 
+def _is_transient_rpc_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(
+        keyword in msg
+        for keyword in (
+            "cannot connect to rpc",
+            "connection aborted",
+            "connection reset",
+            "remote disconnected",
+            "temporarily unavailable",
+            "timed out",
+            "read timed out",
+            "max retries exceeded",
+            "503",
+            "502",
+            "504",
+            "429",
+            "network",
+        )
+    )
+
+
+def _sleep_for_rpc_recovery(stage: str, attempt: int, exc: Exception) -> None:
+    delay = min(RPC_RECOVERY_SLEEP_BASE_SECONDS * (2 ** max(0, attempt - 1)), RPC_RECOVERY_SLEEP_MAX_SECONDS)
+    print(
+        f"[trade] {stage} failed due to transient RPC/network issue: {_format_rpc_error(exc)}. "
+        f"Sleeping {delay}s before retry...",
+        file=sys.stderr,
+    )
+    time.sleep(delay)
+
+
+def _extract_db_error_code(exc: Exception) -> Optional[int]:
+    args = getattr(exc, "args", None)
+    if not args:
+        return None
+    first = args[0]
+    return first if isinstance(first, int) else None
+
+
+def _is_retryable_db_write_error(exc: Exception) -> bool:
+    code = _extract_db_error_code(exc)
+    if code in (1205, 1213, 2006, 2013):
+        return True
+    msg = str(exc).lower()
+    return any(
+        marker in msg
+        for marker in (
+            "lock wait timeout exceeded",
+            "deadlock found",
+            "lost connection to mysql server during query",
+            "mysql server has gone away",
+        )
+    )
+
+
+def _sleep_for_db_write_retry(stage: str, attempt: int, exc: Exception) -> None:
+    delay = min(DB_WRITE_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)), 30)
+    print(
+        f"[trade] {stage} hit retryable DB write error: {_format_rpc_error(exc)}. "
+        f"Sleeping {delay}s before retry...",
+        file=sys.stderr,
+    )
+    time.sleep(delay)
+
+
+def _compute_watch_error_backoff(interval_seconds: int, consecutive_failures: int) -> int:
+    base = max(WATCH_ERROR_BACKOFF_BASE_SECONDS, int(interval_seconds))
+    backoff = base * (2 ** max(0, consecutive_failures - 1))
+    return min(backoff, WATCH_ERROR_BACKOFF_MAX_SECONDS)
+
+
 def _should_split_range(exc: Exception, from_block: int, to_block: int) -> bool:
     if from_block >= to_block:
         return False
@@ -157,42 +271,51 @@ def fetch_logs_with_retry(
         Web3.to_checksum_address(CTF_EXCHANGE_ADDRESS),
         Web3.to_checksum_address(NEG_RISK_EXCHANGE_ADDRESS),
     ]
-    last_err: Optional[Exception] = None
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            w3 = _get_thread_local_web3(rpc_url)
-            topic = get_order_filled_topic(w3)
-            logs = w3.eth.get_logs(
-                {
-                    "address": addresses,
-                    "topics": [topic],
-                    "fromBlock": from_block,
-                    "toBlock": to_block,
-                }
-            )
-            return [dict(log) for log in logs]
-        except Exception as e:
-            last_err = e
-            _invalidate_thread_local_web3(rpc_url)
-            delay = RETRY_DELAY_BASE ** (attempt + 1)
+    recovery_attempt = 0
+
+    while True:
+        last_err: Optional[Exception] = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                w3 = _get_thread_local_web3(rpc_url)
+                topic = get_order_filled_topic(w3)
+                logs = w3.eth.get_logs(
+                    {
+                        "address": addresses,
+                        "topics": [topic],
+                        "fromBlock": from_block,
+                        "toBlock": to_block,
+                    }
+                )
+                return [dict(log) for log in logs]
+            except Exception as e:
+                last_err = e
+                _invalidate_thread_local_web3(rpc_url)
+                delay = RETRY_DELAY_BASE ** (attempt + 1)
+                print(
+                    f"getLogs failed blocks {from_block}-{to_block} "
+                    f"(attempt {attempt+1}/{MAX_RETRIES}): {_format_rpc_error(e)}, retry in {delay}s",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+
+        if last_err is not None and _should_split_range(last_err, from_block, to_block):
+            mid = (from_block + to_block) // 2
             print(
-                f"getLogs failed blocks {from_block}-{to_block} "
-                f"(attempt {attempt+1}/{MAX_RETRIES}): {_format_rpc_error(e)}, retry in {delay}s",
+                f"getLogs failed repeatedly for blocks {from_block}-{to_block}; split into {from_block}-{mid} and {mid + 1}-{to_block}",
                 file=sys.stderr,
             )
-            time.sleep(delay)
+            left = fetch_logs_with_retry(rpc_url, from_block, mid)
+            right = fetch_logs_with_retry(rpc_url, mid + 1, to_block)
+            return left + right
 
-    if last_err is not None and _should_split_range(last_err, from_block, to_block):
-        mid = (from_block + to_block) // 2
-        print(
-            f"getLogs failed repeatedly for blocks {from_block}-{to_block}; split into {from_block}-{mid} and {mid + 1}-{to_block}",
-            file=sys.stderr,
-        )
-        left = fetch_logs_with_retry(rpc_url, from_block, mid)
-        right = fetch_logs_with_retry(rpc_url, mid + 1, to_block)
-        return left + right
-    return []
+        if last_err is not None and _is_transient_rpc_error(last_err):
+            recovery_attempt += 1
+            _sleep_for_rpc_recovery(f"getLogs blocks {from_block}-{to_block}", recovery_attempt, last_err)
+            continue
+
+        return []
 
 
 def fetch_logs_parallel_with_retry(
@@ -309,15 +432,39 @@ def prefetch_block_timestamps(
     )
 
     def _fetch_ts(block_number: int):
-        w3 = _get_thread_local_web3(rpc_url)
-        return block_number, get_block_timestamp(w3, block_number)
+        recovery_attempt = 0
+        while True:
+            try:
+                w3 = _get_thread_local_web3(rpc_url)
+                ts = get_block_timestamp(w3, block_number)
+                if ts:
+                    return block_number, ts
+                return block_number, None
+            except Exception as exc:
+                _invalidate_thread_local_web3(rpc_url)
+                if not _is_transient_rpc_error(exc):
+                    print(
+                        f"  [trade] block timestamp fetch failed for {block_number}: {_format_rpc_error(exc)}",
+                        file=sys.stderr,
+                    )
+                    return block_number, None
+                recovery_attempt += 1
+                _sleep_for_rpc_recovery(f"timestamp block {block_number}", recovery_attempt, exc)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_block = {executor.submit(_fetch_ts, b): b for b in missing_blocks}
         completed = 0
         rows_to_persist = []
         for future in as_completed(future_to_block):
-            block_number, ts = future.result()
+            try:
+                block_number, ts = future.result()
+            except Exception as exc:
+                block_number = future_to_block[future]
+                print(
+                    f"  [trade] unexpected timestamp future failure for block {block_number}: {_format_rpc_error(exc)}",
+                    file=sys.stderr,
+                )
+                ts = None
             block_ts_cache[block_number] = ts or ""
             if ts:
                 rows_to_persist.append((block_number, ts))
@@ -330,21 +477,108 @@ def prefetch_block_timestamps(
                 )
 
     if rows_to_persist:
-        cursor.executemany(
-            "INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)",
-            rows_to_persist,
-        )
+        for attempt in range(1, DB_WRITE_MAX_RETRIES + 1):
+            try:
+                cursor.executemany(
+                    "INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)",
+                    rows_to_persist,
+                )
+                conn.commit()
+                break
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if attempt < DB_WRITE_MAX_RETRIES and _is_retryable_db_write_error(exc):
+                    _sleep_for_db_write_retry(f"persist_block_timestamps[{len(rows_to_persist)} rows]", attempt, exc)
+                    continue
+                raise
+
+
+def build_trade_key(tx_hash: Any, log_index: Any) -> Tuple[str, int]:
+    if hasattr(tx_hash, "hex"):
+        tx_hash_text = tx_hash.hex()
+    else:
+        tx_hash_text = str(tx_hash)
+    return tx_hash_text, int(log_index)
+
+
+def build_trade_key_from_log(log: Dict) -> Tuple[str, int]:
+    return build_trade_key(log.get("transactionHash"), log.get("logIndex", 0))
+
+
+def prefetch_existing_trade_keys(
+    conn,
+    from_block: int,
+    to_block: int,
+) -> Set[Tuple[str, int]]:
+    trade_write_mode = get_trade_write_mode()
+    source = TRADE_V2_READ_VIEW if trade_write_mode == "v2" else LEGACY_TRADES_TABLE
+    source_sql = sql_identifier(source)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT tx_hash, log_index
+        FROM {source_sql}
+        WHERE block_number >= ? AND block_number <= ?
+        """,
+        (from_block, to_block),
+    )
+    return {
+        build_trade_key(row["tx_hash"], row["log_index"])
+        for row in cursor.fetchall()
+    }
 
 
 def find_market_by_token_id(conn, token_id: str) -> Optional[Dict]:
     """根据 tokenId 查找市场"""
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT * FROM markets WHERE yes_token_id = ? OR no_token_id = ? LIMIT 1",
-        (str(token_id), str(token_id)),
+        "SELECT * FROM markets WHERE yes_token_id = %s OR no_token_id = %s OR JSON_CONTAINS(clob_token_ids, JSON_QUOTE(%s)) LIMIT 1",
+        (str(token_id), str(token_id), str(token_id)),
     )
     row = cursor.fetchone()
     return dict_from_row(row) if row else None
+
+
+def prefetch_market_cache_for_token_ids(
+    conn,
+    token_ids: Iterable[str],
+    market_cache: Dict[str, Dict],
+) -> None:
+    unresolved = [str(token_id) for token_id in token_ids if token_id and token_id not in market_cache]
+    if not unresolved:
+        return
+
+    cursor = conn.cursor()
+
+    for chunk_start in range(0, len(unresolved), SQLITE_IN_MAX_VARS):
+        chunk = unresolved[chunk_start:chunk_start + SQLITE_IN_MAX_VARS]
+        placeholders = ",".join("?" for _ in chunk)
+
+        cursor.execute(
+            f"SELECT * FROM markets WHERE yes_token_id IN ({placeholders})",
+            chunk,
+        )
+        for row in cursor.fetchall():
+            market = dict_from_row(row)
+            market_cache[str(market["yes_token_id"])] = market
+
+        cursor.execute(
+            f"SELECT * FROM markets WHERE no_token_id IN ({placeholders})",
+            chunk,
+        )
+        for row in cursor.fetchall():
+            market = dict_from_row(row)
+            market_cache[str(market["no_token_id"])] = market
+
+    # 只有少量未命中的 token 才走 JSON_CONTAINS 慢路径。
+    still_missing = [token_id for token_id in unresolved if token_id not in market_cache]
+    for token_id in still_missing:
+        market = find_market_by_token_id(conn, token_id)
+        if market:
+            market_cache[token_id] = market
 
 
 def resolve_market_by_token_id(
@@ -353,10 +587,19 @@ def resolve_market_by_token_id(
     db_path: str,
     backfill_attempted: set,
     enable_market_backfill: bool = True,
+    market_cache: Optional[Dict] = None,
 ) -> Optional[Dict]:
+    if market_cache is not None and token_id in market_cache:
+        return market_cache[token_id]
+
     market = find_market_by_token_id(conn, token_id)
-    if market or token_id in backfill_attempted or not enable_market_backfill:
+    if market:
+        if market_cache is not None:
+            market_cache[token_id] = market
         return market
+
+    if token_id in backfill_attempted or not enable_market_backfill:
+        return None
 
     backfill_attempted.add(token_id)
     try:
@@ -372,15 +615,19 @@ def resolve_market_by_token_id(
                 f"Backfilled {inserted} market(s) for tokenId {token_id[:30]}...",
                 file=sys.stderr,
             )
+            market = find_market_by_token_id(conn, token_id)
+            if market and market_cache is not None:
+                market_cache[token_id] = market
+            return market
     except Exception as e:
         print(f"Failed to backfill market for tokenId {token_id[:30]}...: {e}", file=sys.stderr)
 
-    return find_market_by_token_id(conn, token_id)
+    return None
 
 
-def decode_and_enrich(log: Dict, w3: Web3, block_ts_cache: Dict[int, str]) -> Optional[Dict]:
+def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: Dict[int, str]) -> Optional[Dict]:
     """解码日志并补充 block_number、timestamp、size"""
-    decoded = decode_order_filled_log(log, w3)
+    decoded = decode_order_filled_log(log, event_decoder=event_decoder)
     if not decoded:
         return None
     
@@ -404,58 +651,91 @@ def decode_and_enrich(log: Dict, w3: Web3, block_ts_cache: Dict[int, str]) -> Op
     return decoded
 
 
-def build_trade_insert_row(trade: Dict, market_id: int, outcome: str) -> Tuple:
-    return (
-        trade["txHash"],
-        trade["logIndex"],
-        market_id,
-        str(trade["maker"]),
-        str(trade["taker"]),
-        trade["price"],
-        trade["size"],
-        trade["side"],
-        outcome,
-        trade["tokenId"],
-        trade.get("block_number"),
-        trade.get("timestamp"),
-        trade.get("orderHash"),
-        trade.get("makerAssetId"),
-        trade.get("takerAssetId"),
-        int(trade["makerAmountFilled"]) if trade.get("makerAmountFilled") is not None else None,
-        int(trade["takerAmountFilled"]) if trade.get("takerAmountFilled") is not None else None,
-        int(trade["fee"]) if trade.get("fee") is not None else None,
-        trade.get("contract") or trade.get("exchange"),
-    )
+def build_trade_insert_row(trade: Dict, market_id: int, outcome: str) -> Dict[str, Any]:
+    return {
+        "tx_hash": trade["txHash"],
+        "log_index": trade["logIndex"],
+        "market_id": market_id,
+        "maker": str(trade["maker"]),
+        "taker": str(trade["taker"]),
+        "price": trade["price"],
+        "size": trade["size"],
+        "side": trade["side"],
+        "outcome": outcome,
+        "token_id": trade["tokenId"],
+        "block_number": trade.get("block_number"),
+        "timestamp": trade.get("timestamp"),
+        "order_hash": trade.get("orderHash"),
+        "maker_asset_id": trade.get("makerAssetId"),
+        "taker_asset_id": trade.get("takerAssetId"),
+        "maker_amount": int(trade["makerAmountFilled"]) if trade.get("makerAmountFilled") is not None else None,
+        "taker_amount": int(trade["takerAmountFilled"]) if trade.get("takerAmountFilled") is not None else None,
+        "fee": int(trade["fee"]) if trade.get("fee") is not None else None,
+        "contract": trade.get("contract") or trade.get("exchange"),
+        "created_at": None,
+    }
 
 
-def insert_trades_batch(conn, trade_rows: List[Tuple]) -> int:
+def insert_trades_batch(conn, trade_rows: List[Dict[str, Any]]) -> int:
     """批量插入交易记录，唯一键冲突时忽略（幂等）"""
     if not trade_rows:
         return 0
 
-    cursor = conn.cursor()
-    before_changes = conn.total_changes
-    try:
-        cursor.executemany(
-            """
-            INSERT OR IGNORE INTO trades (
-                tx_hash, log_index, market_id, maker, taker, price, size,
-                side, outcome, token_id, block_number, timestamp,
-                order_hash, maker_asset_id, taker_asset_id,
-                maker_amount, taker_amount, fee, contract
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            trade_rows,
-        )
-        return conn.total_changes - before_changes
-    except Exception as e:
+    if get_trade_write_mode() == "v2":
+        core_rows = [convert_trade_row_to_v2(row) for row in trade_rows]
+        return insert_trades_v2_batch(conn, core_rows)
+
+    for attempt in range(1, DB_WRITE_MAX_RETRIES + 1):
+        cursor = conn.cursor()
+        before_changes = conn.total_changes
         try:
-            conn.rollback()
-        except Exception:
-            pass
-        raise RuntimeError(
-            f"Insert trades batch failed for {len(trade_rows)} rows: {e}"
-        ) from e
+            cursor.executemany(
+                """
+                INSERT OR IGNORE INTO trades (
+                    tx_hash, log_index, market_id, maker, taker, price, size,
+                    side, outcome, token_id, block_number, timestamp,
+                    order_hash, maker_asset_id, taker_asset_id,
+                    maker_amount, taker_amount, fee, contract
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        row["tx_hash"],
+                        row["log_index"],
+                        row["market_id"],
+                        row["maker"],
+                        row["taker"],
+                        row["price"],
+                        row["size"],
+                        row["side"],
+                        row["outcome"],
+                        row["token_id"],
+                        row["block_number"],
+                        row["timestamp"],
+                        row["order_hash"],
+                        row["maker_asset_id"],
+                        row["taker_asset_id"],
+                        row["maker_amount"],
+                        row["taker_amount"],
+                        row["fee"],
+                        row["contract"],
+                    )
+                    for row in trade_rows
+                ],
+            )
+            conn.commit()
+            return conn.total_changes - before_changes
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            if attempt < DB_WRITE_MAX_RETRIES and _is_retryable_db_write_error(e):
+                _sleep_for_db_write_retry(f"insert_trades_batch[{len(trade_rows)} rows]", attempt, e)
+                continue
+            raise RuntimeError(
+                f"Insert trades batch failed for {len(trade_rows)} rows: {e}"
+            ) from e
 
 
 def update_sync_state(conn, block_number: int, sync_state_key: str = SYNC_STATE_KEY) -> None:
@@ -498,12 +778,16 @@ def run_indexer(
     init_schema(db_path=db_path)
 
     w3 = _build_web3(rpc_url)
+    event_decoder = get_order_filled_event_decoder(w3)
 
     conn = get_connection(db_path)
+    if not test_mode and get_trade_write_mode() == "v2":
+        ensure_trade_v2_schema(conn)
     inserted = 0
     processed = 0
     unknown_tokens = set()
     backfill_attempted = set()
+    market_cache: Dict[str, Dict] = {}
     trades_out: List[Dict] = []  # 测试模式收集
     window_blocks = max(batch_blocks, batch_blocks * max_workers)
     total_blocks = max(0, to_block - from_block + 1)
@@ -521,7 +805,8 @@ def run_indexer(
             start=1,
         ):
             block_ts_cache: Dict[int, str] = {}
-            pending_trade_rows: List[Tuple] = []
+            pending_trade_rows: List[Dict[str, Any]] = []
+            skipped_existing = 0
             print(
                 f"Window {window_index}: fetch logs blocks {window_start}-{window_end}...",
                 file=sys.stderr,
@@ -535,74 +820,113 @@ def run_indexer(
                 max_workers=max_workers,
             )
 
+            if logs and not test_mode:
+                existing_trade_keys = prefetch_existing_trade_keys(conn, window_start, window_end)
+                if existing_trade_keys:
+                    original_count = len(logs)
+                    logs = [log for log in logs if build_trade_key_from_log(log) not in existing_trade_keys]
+                    skipped_existing = original_count - len(logs)
+                    if skipped_existing:
+                        print(
+                            f"  ... 预过滤已存在交易 {skipped_existing} 条，剩余待处理 {len(logs)} 条...",
+                            file=sys.stderr,
+                        )
+
             if logs:
                 prefetch_block_timestamps(conn, rpc_url, logs, block_ts_cache, max_workers=max_workers)
 
             print(f"  ... 开始解析并写入当前窗口 {len(logs)} 条日志...", file=sys.stderr)
-            for idx, log in enumerate(logs, start=1):
-                processed += 1
-                decoded = decode_and_enrich(log, w3, block_ts_cache)
-                if not decoded:
-                    continue
+            progress_step = max(1, len(logs) // 100)
+            next_progress_mark = progress_step
+            for chunk_start, log_chunk in iter_chunks(logs, LOG_PROCESS_CHUNK_SIZE):
+                decoded_chunk: List[Dict] = []
+                token_ids_in_chunk: Set[str] = set()
 
-                token_id = str(decoded["tokenId"])
-                market = resolve_market_by_token_id(
-                    conn,
-                    token_id,
-                    db_path,
-                    backfill_attempted,
-                    enable_market_backfill=enable_market_backfill,
-                )
+                for log in log_chunk:
+                    processed += 1
+                    decoded = decode_and_enrich(log, w3, event_decoder, block_ts_cache)
+                    if not decoded:
+                        continue
+                    decoded_chunk.append(decoded)
+                    if not test_mode:
+                        token_ids_in_chunk.add(str(decoded["tokenId"]))
 
-                if not market and token_id not in unknown_tokens:
-                    unknown_tokens.add(token_id)
-                    print(
-                        f"Unknown tokenId, skip for now: {token_id[:30]}... "
-                        f"(will rely on next market -> oracle -> trade sync cycle)",
-                        file=sys.stderr,
-                    )
+                if not test_mode and token_ids_in_chunk:
+                    prefetch_market_cache_for_token_ids(conn, token_ids_in_chunk, market_cache)
 
-                if test_mode:
-                    row = {
-                        "tx_hash": decoded.get("txHash"),
-                        "block_number": decoded.get("block_number"),
-                        "timestamp": decoded.get("timestamp"),
-                        "maker": decoded.get("maker"),
-                        "taker": decoded.get("taker"),
-                        "price": decoded.get("price"),
-                        "size": decoded.get("size"),
-                        "side": decoded.get("side"),
-                        "token_id": token_id,
-                        "market_id": market["id"] if market else None,
-                        "market_slug": market.get("slug") if market else None,
-                        "outcome": ("YES" if str(market["yes_token_id"]) == token_id else "NO") if market else None,
-                        "order_hash": decoded.get("orderHash"),
-                        "maker_asset_id": decoded.get("makerAssetId"),
-                        "taker_asset_id": decoded.get("takerAssetId"),
-                        "maker_amount": decoded.get("makerAmountFilled"),
-                        "taker_amount": decoded.get("takerAmountFilled"),
-                        "fee": decoded.get("fee"),
-                        "contract": decoded.get("contract") or decoded.get("exchange"),
-                    }
-                    trades_out.append(row)
-                    if market:
+                for decoded in decoded_chunk:
+                    token_id = str(decoded["tokenId"])
+                    market = None
+                    if not test_mode:
+                        market = market_cache.get(token_id)
+                        if market is None:
+                            market = resolve_market_by_token_id(
+                                conn,
+                                token_id,
+                                db_path,
+                                backfill_attempted,
+                                enable_market_backfill=enable_market_backfill,
+                                market_cache=market_cache,
+                            )
+
+                        if not market and token_id not in unknown_tokens:
+                            unknown_tokens.add(token_id)
+                            print(
+                                f"Unknown tokenId, skip for now: {token_id} "
+                                f"(will rely on next market -> oracle -> trade sync cycle)",
+                                file=sys.stderr,
+                            )
+
+                    if test_mode:
+                        row = {
+                            "tx_hash": decoded.get("txHash"),
+                            "log_index": decoded.get("logIndex"),
+                            "block_number": decoded.get("block_number"),
+                            "timestamp": decoded.get("timestamp"),
+                            "maker": decoded.get("maker"),
+                            "taker": decoded.get("taker"),
+                            "price": decoded.get("price"),
+                            "size": decoded.get("size"),
+                            "side": decoded.get("side"),
+                            "token_id": token_id,
+                            "market_id": 0,
+                            "market_slug": None,
+                            "outcome": None,
+                            "order_hash": decoded.get("orderHash"),
+                            "maker_asset_id": decoded.get("makerAssetId"),
+                            "taker_asset_id": decoded.get("takerAssetId"),
+                            "maker_amount": decoded.get("makerAmountFilled"),
+                            "taker_amount": decoded.get("takerAmountFilled"),
+                            "fee": decoded.get("fee"),
+                            "contract": decoded.get("contract") or decoded.get("exchange"),
+                        }
+                        trades_out.append(row)
                         inserted += 1
-                elif market:
-                    outcome = "YES" if str(market["yes_token_id"]) == token_id else "NO"
-                    pending_trade_rows.append(build_trade_insert_row(decoded, market["id"], outcome))
-                    if len(pending_trade_rows) >= TRADE_INSERT_BATCH_SIZE:
-                        inserted += insert_trades_batch(conn, pending_trade_rows)
-                        pending_trade_rows.clear()
+                    else:
+                        if market:
+                            outcome = "YES" if str(market["yes_token_id"]) == token_id else "NO"
+                            m_id = market["id"]
+                        else:
+                            continue
 
-                if idx % max(1, len(logs) // 20) == 0 or idx == len(logs):
+                        pending_trade_rows.append(build_trade_insert_row(decoded, m_id, outcome))
+                        if len(pending_trade_rows) >= TRADE_INSERT_BATCH_SIZE:
+                            inserted += insert_trades_batch(conn, pending_trade_rows)
+                            pending_trade_rows.clear()
+
+                chunk_end = chunk_start + len(log_chunk)
+                should_report = chunk_end >= next_progress_mark or chunk_end == len(logs)
+                if should_report:
                     if pending_trade_rows and not test_mode:
                         inserted += insert_trades_batch(conn, pending_trade_rows)
                         pending_trade_rows.clear()
-                    progress = (idx / len(logs)) * 100 if logs else 100.0
+                    progress = (chunk_end / len(logs)) * 100 if logs else 100.0
                     print(
-                        f"  ---> 窗口处理进度: {idx}/{len(logs)} ({progress:.1f}%) | inserted={inserted} | unknown_tokens={len(unknown_tokens)}",
+                        f"  ---> 窗口处理进度: {chunk_end}/{len(logs)} ({progress:.1f}%) | inserted={inserted} | unknown_tokens={len(unknown_tokens)}",
                         file=sys.stderr,
                     )
+                    while next_progress_mark <= chunk_end:
+                        next_progress_mark += progress_step
 
             if pending_trade_rows and not test_mode:
                 inserted += insert_trades_batch(conn, pending_trade_rows)
@@ -617,7 +941,7 @@ def run_indexer(
                 conn.commit()
 
             print(
-                f"Window {window_index} done: blocks {window_start}-{window_end} | logs={len(logs)} | processed={processed} | inserted={inserted} | overall_blocks={overall_progress:.1f}%",
+                f"Window {window_index} done: blocks {window_start}-{window_end} | logs={len(logs)} | skipped_existing={skipped_existing} | processed={processed} | inserted={inserted} | overall_blocks={overall_progress:.1f}%",
                 file=sys.stderr,
                 flush=True,
             )
@@ -653,6 +977,54 @@ def get_last_synced_block(
     return int(row[0]) if row and row[0] is not None else None
 
 
+def _resolve_sync_range(args, rpc_url: str) -> Tuple[int, int]:
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
+    if geth_poa_middleware is not None:
+        w3.middleware_onion.inject(geth_poa_middleware, layer=0)  # Polygon 为 POA 链
+    if not w3.is_connected():
+        raise ConnectionError("Cannot connect to RPC")
+
+    to_block = args.to_block
+    if to_block is None:
+        latest = w3.eth.block_number
+        to_block = max(0, latest - max(0, args.confirmations))
+
+    from_block = args.from_block
+    if args.continue_sync:
+        last = get_last_synced_block(args.sqlite_path, sync_state_key=args.sync_state_key)
+        from_block = (last + 1) if last is not None else 0
+    if from_block is None:
+        from_block = max(0, to_block - args.batch)
+
+    return from_block, to_block
+
+
+def _run_once(args) -> Tuple[int, int]:
+    rpc_url = args.rpc or get_rpc_url()
+    from_block, to_block = _resolve_sync_range(args, rpc_url)
+    out_json = args.test
+    if out_json:
+        print(f"Test mode: blocks {from_block} to {to_block} -> {out_json}", file=sys.stderr)
+    else:
+        print(f"Indexing blocks {from_block} to {to_block} (RPC: {rpc_url[:50]}...)", file=sys.stderr)
+        print(f"Database target: {describe_db_target()}", file=sys.stderr)
+
+    processed, inserted = run_indexer(
+        from_block, to_block, rpc_url, args.sqlite_path,
+        output_json=out_json,
+        batch_blocks=args.batch,
+        max_workers=args.max_workers,
+        sync_state_key=args.sync_state_key,
+        update_sync_state_on_commit=not args.no_sync_state_update,
+        enable_market_backfill=not args.disable_market_backfill,
+    )
+    if out_json:
+        print(f"Processed {processed} logs, wrote {inserted} trades to {out_json}.", file=sys.stderr)
+    else:
+        print(f"Processed {processed} logs, inserted {inserted} trades.", file=sys.stderr)
+    return processed, inserted
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Polymarket Trades Indexer")
@@ -661,6 +1033,9 @@ def main():
     parser.add_argument("--rpc", default=None, help="RPC URL（默认从 NODE_URL/POLYMARKET_RPC_URL 或 config 读取）")
     add_db_cli_args(parser)
     parser.add_argument("--continue-sync", action="store_true", help="从上次进度继续")
+    parser.add_argument("--watch", action="store_true", help="守护进程模式：循环执行 trade 同步")
+    parser.add_argument("--interval", type=int, default=30, help="--watch 模式下每轮等待秒数")
+    parser.add_argument("--confirmations", type=int, default=20, help="自动追最新区块时保留的确认块数")
     parser.add_argument("--batch", type=int, default=BATCH_BLOCKS, help="每批区块数")
     parser.add_argument("--max-workers", type=int, default=MAX_WORKERS, help="并发线程数")
     parser.add_argument("--sync-state-key", default=SYNC_STATE_KEY, help="sync_state 中用于读写进度的 key")
@@ -677,46 +1052,37 @@ def main():
 
     args = parser.parse_args()
     configure_db_from_args(args)
-    db_path = args.sqlite_path
-    rpc_url = args.rpc or get_rpc_url()
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    if geth_poa_middleware is not None:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)  # Polygon 为 POA 链
-    if not w3.is_connected():
-        print("Error: Cannot connect to RPC", file=sys.stderr)
-        sys.exit(1)
-    
-    to_block = args.to_block
-    if to_block is None:
-        to_block = w3.eth.block_number
-    
-    from_block = args.from_block
-    if args.continue_sync:
-        last = get_last_synced_block(db_path, sync_state_key=args.sync_state_key)
-        from_block = (last + 1) if last is not None else 0
-    if from_block is None:
-        from_block = max(0, to_block - args.batch)
-    
-    rpc = rpc_url
-    out_json = args.test
-    if out_json:
-        print(f"Test mode: blocks {from_block} to {to_block} -> {out_json}", file=sys.stderr)
+    if args.watch:
+        run_index = 0
+        consecutive_failures = 0
+        try:
+            while True:
+                run_index += 1
+                print(
+                    f"\n[trade] Run #{run_index} at {datetime.now(timezone.utc).isoformat()}",
+                    file=sys.stderr,
+                )
+                try:
+                    _run_once(args)
+                    consecutive_failures = 0
+                    print(f"[trade] Sleeping {args.interval}s", file=sys.stderr)
+                    time.sleep(args.interval)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:
+                    consecutive_failures += 1
+                    backoff_seconds = _compute_watch_error_backoff(args.interval, consecutive_failures)
+                    print(f"[trade] Run #{run_index} failed: {exc}", file=sys.stderr)
+                    print(
+                        f"[trade] Entering recovery sleep for {backoff_seconds}s "
+                        f"(consecutive_failures={consecutive_failures}) before retrying.",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff_seconds)
+        except KeyboardInterrupt:
+            print("\n[trade] Interrupted by user. Exiting.", file=sys.stderr)
     else:
-        print(f"Indexing blocks {from_block} to {to_block} (RPC: {rpc[:50]}...)...", file=sys.stderr)
-        print(f"Database target: {describe_db_target()}", file=sys.stderr)
-    processed, inserted = run_indexer(
-        from_block, to_block, rpc, db_path,
-        output_json=out_json,
-        batch_blocks=args.batch,
-        max_workers=args.max_workers,
-        sync_state_key=args.sync_state_key,
-        update_sync_state_on_commit=not args.no_sync_state_update,
-        enable_market_backfill=not args.disable_market_backfill,
-    )
-    if out_json:
-        print(f"Processed {processed} logs, wrote {inserted} trades to {out_json}.", file=sys.stderr)
-    else:
-        print(f"Processed {processed} logs, inserted {inserted} trades.", file=sys.stderr)
+        _run_once(args)
 
 
 if __name__ == "__main__":

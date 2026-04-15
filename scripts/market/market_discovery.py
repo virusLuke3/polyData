@@ -81,6 +81,17 @@ def _attach_event_meta_to_market(m: Dict, ev: Dict) -> None:
     m["_event_tags"] = ev.get("tags")
 
 
+def _attach_embedded_event_meta_to_market(m: Dict) -> None:
+    """从 GET /markets 返回的 embedded event 中提取 event 元数据。"""
+    events = m.get("events")
+    if not isinstance(events, list) or not events:
+        return
+    ev = events[0]
+    if not isinstance(ev, dict):
+        return
+    _attach_event_meta_to_market(m, ev)
+
+
 def _ensure_0x(value: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -193,8 +204,27 @@ def fetch_market_by_condition_id_from_clob(condition_id: str) -> Optional[Dict]:
         return None
     if not isinstance(data, dict):
         return None
+    slug = data.get("market_slug") or data.get("slug")
+    # CLOB market payload often lacks Gamma's canonical market id even when the slug exists.
+    # Hydrate from Gamma by slug first so downstream upserts can keep gamma_market_id/questionID.
+    if slug:
+        gamma_market = fetch_market_by_slug(str(slug).strip())
+        if isinstance(gamma_market, dict):
+            merged = dict(data)
+            for key, value in gamma_market.items():
+                if value is None:
+                    continue
+                if isinstance(value, str) and not value.strip():
+                    continue
+                if isinstance(value, (list, dict)) and not value:
+                    continue
+                merged[key] = value
+            data = merged
+    data["id"] = data.get("id") or data.get("market_id")
     data["conditionId"] = data.get("condition_id") or cid
     data["questionId"] = data.get("question_id")
+    if data.get("question_id") and not data.get("questionID"):
+        data["questionID"] = data.get("question_id")
     data["slug"] = data.get("market_slug") or data.get("slug") or f"market-{cid[2:18]}"
     data["createdAt"] = data.get("createdAt") or data.get("created_at")
     data["endDate"] = data.get("endDate") or data.get("end_date") or data.get("end_date_iso")
@@ -623,7 +653,7 @@ def fetch_all_markets(
     """
     if not active_only and not closed_only:
         ancient = datetime(1970, 1, 1, tzinfo=timezone.utc)
-        markets, _written = fetch_markets_since_date(
+        markets, _written, _max_created_at = fetch_markets_since_date(
             since_date=ancient,
             include_active=True,
             include_closed=True,
@@ -748,6 +778,20 @@ def _parse_iso_date(s: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _get_market_created_at(market: Dict) -> Optional[datetime]:
+    """统一读取 market 级 createdAt，用于增量断点推进。"""
+    return _parse_iso_date(market.get("createdAt") or market.get("created_at"))
+
+
+def _max_created_at_from_markets(markets: List[Dict]) -> Optional[datetime]:
+    latest: Optional[datetime] = None
+    for market in markets:
+        created = _get_market_created_at(market)
+        if created is not None and (latest is None or created > latest):
+            latest = created
+    return latest
+
+
 def _flush_buffer_to_db(
     buffer: List[Dict],
     conn,
@@ -777,9 +821,9 @@ def fetch_markets_since_date(
     batch_size: int = 500,
     requests_delay: float = DEFAULT_REQUESTS_DELAY,
     max_empty_closed_pages: int = 5,
-) -> Tuple[List[Dict], int]:
+) -> Tuple[List[Dict], int, Optional[datetime]]:
     """
-    从指定起始日期向后爬取市场，按时间排序，不设 limit。
+    从指定起始日期向后爬取市场，按 market.createdAt 排序，不设 limit。
     同时拉取活跃和已关闭市场。若指定 db_path，则每 batch_size 个写入 DB 一次（去重由 ON CONFLICT 保证）。
 
     Args:
@@ -788,19 +832,20 @@ def fetch_markets_since_date(
         include_closed: 是否包含已关闭市场
         db_path: 若指定，每 batch_size 个市场写入数据库
         batch_size: 每批写入数量，默认 500
-        max_empty_closed_pages: 增量优化——closed events 按 volume 排序，无法按日期截断；
-            连续 N 页全被 since_date 过滤后提前退出，避免无效遍历（默认 5）
+        max_empty_closed_pages: 保留参数兼容旧调用；当前 market 级 createdAt 排序下不再使用
 
     Returns:
-        (市场列表用于 JSON 输出，总写入数)。当 db_path 指定时列表为空，仅返回计数
+        (市场列表用于 JSON 输出，总写入数，实际观察到的最大 market.createdAt)。
+        当 db_path 指定时列表为空，仅返回计数与断点时间。
     """
     if not include_active and not include_closed:
-        return [], 0
+        return [], 0, None
 
     buffer: List[Dict] = []
     all_markets: List[Dict] = []
     seen_ids: set = set()
     total_written = 0
+    latest_seen_created_at: Optional[datetime] = None
     conn = None
     if db_path:
         init_schema(db_path=db_path)
@@ -812,11 +857,13 @@ def fetch_markets_since_date(
             print(f"  Loaded {len(existing)} existing markets from DB (will skip duplicates)", file=sys.stderr)
 
     def _add_market(m: Dict) -> None:
-        nonlocal buffer, total_written
+        nonlocal buffer, total_written, latest_seen_created_at
         cid = m.get("conditionId")
         if not cid or cid in seen_ids:
             return
-        created = _parse_iso_date(m.get("createdAt") or m.get("created_at"))
+        created = _get_market_created_at(m)
+        if created is not None and (latest_seen_created_at is None or created > latest_seen_created_at):
+            latest_seen_created_at = created
         if created is None or created < since_date:
             return
         seen_ids.add(cid)
@@ -827,159 +874,74 @@ def fetch_markets_since_date(
         else:
             all_markets.append(m)
 
-    try:
-        # 1. 从 /events?active=true&closed=false 拉取活跃市场
-        # 注意：GET /markets 的响应里 tags 永远为 null；只有 GET /events 顶层对象有 tags。
-        # 因此改用 events 接口，并通过 _attach_event_meta_to_market 把 event 字段挂到 market 上。
-        params = {
-            "limit": 100,
-            "order": "createdAt",
-            "ascending": "false",
-            "active": "true",
-            "closed": "false",
-        }
+    def _scan_market_pages(label: str, params: Dict[str, str]) -> None:
         offset = 0
-        stopped_markets = False
-
         while True:
             params["offset"] = offset
             time.sleep(requests_delay)
             try:
-                batch = _fetch_with_retry(GAMMA_EVENTS_URL, dict(params))
+                batch = _fetch_with_retry(GAMMA_MARKETS_URL, dict(params))
             except Exception as e:
-                print(f"Error fetching events (offset={offset}): {e}", file=sys.stderr)
+                print(f"Error fetching {label} markets (offset={offset}): {e}", file=sys.stderr)
                 break
 
             if not isinstance(batch, list):
-                batch = batch.get("events", []) if isinstance(batch, dict) else []
+                batch = batch.get("markets", []) if isinstance(batch, dict) else []
 
             if not batch:
                 break
 
-            for ev in batch:
-                created = _parse_iso_date(ev.get("createdAt") or ev.get("created_at"))
-                if created is not None and created < since_date:
-                    stopped_markets = True
-                    break
-                for m in ev.get("markets", []):
-                    _attach_event_meta_to_market(m, ev)
-                    _add_market(m)
-            if stopped_markets:
-                break
+            page_has_recent_market = False
+            page_has_unknown_created_at = False
+
+            for market in batch:
+                _attach_embedded_event_meta_to_market(market)
+                created = _get_market_created_at(market)
+                if created is None:
+                    page_has_unknown_created_at = True
+                elif created >= since_date:
+                    page_has_recent_market = True
+                _add_market(market)
 
             offset += len(batch)
             batch_len = len(batch)
-            if batch_len < 100:
-                break
             collected = total_written + len(buffer) if conn else len(all_markets)
             if offset % 500 == 0 and offset > 0:
-                print(f"  ... fetched {offset} from /events(active), collected {collected}", file=sys.stderr)
-            del batch  # 及时释放，减轻长运行时的内存占用
+                print(
+                    f"  ... fetched {offset} from /markets({label}), collected {collected}",
+                    file=sys.stderr,
+                )
 
-        # 2. 从 /events?closed=true 补充已关闭市场（支持断点续传）
-        # closed events 按 volume 排序，无法像 /events?active 那样按时间截断；
-        # 使用"连续空页"计数：连续 max_empty_closed_pages 页全被 since_date 过滤则提前退出，
-        # 避免增量模式下无效遍历全量数据。
-        if include_closed and conn is not None:
-            ev_params = {
-                "limit": 100,
-                "closed": "true",
-                "order": "volume",
-                "ascending": "false",
-            }
-            ev_offset = _get_closed_events_offset(conn)
-            ev_offset = ev_offset if ev_offset is not None and ev_offset > 0 else 0
-            if ev_offset > 0:
-                print(f"  Resuming closed events from offset {ev_offset}", file=sys.stderr)
+            # /markets 已经按 market.createdAt 倒序排列；当整页都早于 since_date 时可安全停止。
+            if not page_has_recent_market and not page_has_unknown_created_at:
+                break
+            if batch_len < 100:
+                break
+            del batch
 
-            consecutive_empty_pages = 0
-            while True:
-                ev_params["offset"] = ev_offset
-                time.sleep(requests_delay)
-                try:
-                    events = _fetch_with_retry(GAMMA_EVENTS_URL, dict(ev_params))
-                except Exception as e:
-                    print(f"Error fetching closed events (offset={ev_offset}): {e}", file=sys.stderr)
-                    _save_closed_events_offset(conn, ev_offset)
-                    print(f"  Saved progress at offset {ev_offset}. Re-run to resume.", file=sys.stderr)
-                    break
+    try:
+        if include_active:
+            _scan_market_pages(
+                "active",
+                {
+                    "limit": 100,
+                    "order": "createdAt",
+                    "ascending": "false",
+                    "active": "true",
+                    "closed": "false",
+                },
+            )
 
-                if not events or not isinstance(events, list):
-                    _save_closed_events_offset(conn, 0)  # 标记完成
-                    break
-
-                before = total_written + len(buffer)
-                for ev in events:
-                    for m in ev.get("markets", []):
-                        _attach_event_meta_to_market(m, ev)
-                        _add_market(m)
-                after = total_written + len(buffer)
-
-                # 本页一条新市场都没加入 → 累计空页计数
-                if after == before:
-                    consecutive_empty_pages += 1
-                    if consecutive_empty_pages >= max_empty_closed_pages:
-                        print(
-                            f"  Incremental early-exit: {consecutive_empty_pages} consecutive closed-event "
-                            f"pages yielded no new markets (all filtered by since_date). "
-                            f"Stopped at offset {ev_offset}.",
-                            file=sys.stderr,
-                        )
-                        _save_closed_events_offset(conn, 0)
-                        break
-                else:
-                    consecutive_empty_pages = 0
-
-                ev_offset += len(events)
-                _save_closed_events_offset(conn, ev_offset)
-                events_count = len(events)
-                if events_count < 100:
-                    _save_closed_events_offset(conn, 0)  # 标记完成
-                    break
-                collected = total_written + len(buffer) if conn else len(all_markets)
-                if ev_offset % 500 == 0 and ev_offset > 0:
-                    print(f"  ... fetched {ev_offset} closed events, total {collected}", file=sys.stderr)
-                del events  # 及时释放
-        elif include_closed and conn is None:
-            # 无 db 时仍拉取 closed events 到 all_markets（用于 JSON 输出）
-            ev_params = {
-                "limit": 100,
-                "closed": "true",
-                "order": "volume",
-                "ascending": "false",
-            }
-            ev_offset = 0
-            consecutive_empty_pages = 0
-            while True:
-                ev_params["offset"] = ev_offset
-                time.sleep(requests_delay)
-                try:
-                    events = _fetch_with_retry(GAMMA_EVENTS_URL, dict(ev_params))
-                except Exception as e:
-                    print(f"Error fetching closed events (offset={ev_offset}): {e}", file=sys.stderr)
-                    break
-                if not events or not isinstance(events, list):
-                    break
-                before = len(all_markets)
-                for ev in events:
-                    for m in ev.get("markets", []):
-                        _attach_event_meta_to_market(m, ev)
-                        _add_market(m)
-                if len(all_markets) == before:
-                    consecutive_empty_pages += 1
-                    if consecutive_empty_pages >= max_empty_closed_pages:
-                        print(
-                            f"  Incremental early-exit: {consecutive_empty_pages} consecutive empty pages. "
-                            f"Stopped at offset {ev_offset}.",
-                            file=sys.stderr,
-                        )
-                        break
-                else:
-                    consecutive_empty_pages = 0
-                ev_offset += len(events)
-                if len(events) < 100:
-                    break
-                del events
+        if include_closed:
+            _scan_market_pages(
+                "closed",
+                {
+                    "limit": 100,
+                    "order": "createdAt",
+                    "ascending": "false",
+                    "closed": "true",
+                },
+            )
 
         # 写入剩余 buffer
         if conn and buffer:
@@ -991,12 +953,12 @@ def fetch_markets_since_date(
 
         if all_markets:
             def _sort_key(m: Dict) -> datetime:
-                d = _parse_iso_date(m.get("createdAt") or m.get("created_at"))
+                d = _get_market_created_at(m)
                 return d or datetime.min.replace(tzinfo=timezone.utc)
 
             all_markets.sort(key=_sort_key)
-            return all_markets, total_written
-        return [], total_written
+            return all_markets, total_written, latest_seen_created_at
+        return [], total_written, latest_seen_created_at
     finally:
         if conn is not None:
             try:
@@ -1985,16 +1947,16 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(condition_id) DO UPDATE SET
             gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
-            slug=excluded.slug,
-            question_id=excluded.question_id,
-            oracle=excluded.oracle,
+            slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+            question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+            oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
             yes_token_id=excluded.yes_token_id,
             no_token_id=excluded.no_token_id,
             title=excluded.title,
             description=excluded.description,
             enable_neg_risk=excluded.enable_neg_risk,
-            end_date=excluded.end_date,
-            created_at=excluded.created_at,
+            end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
+            created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
             category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
             tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
             clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
@@ -2024,16 +1986,16 @@ def upsert_market(conn, market: Dict) -> int:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(condition_id) DO UPDATE SET
             gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
-            slug=excluded.slug,
-            question_id=excluded.question_id,
-            oracle=excluded.oracle,
+            slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+            question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+            oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
             yes_token_id=excluded.yes_token_id,
             no_token_id=excluded.no_token_id,
             title=excluded.title,
             description=excluded.description,
             enable_neg_risk=excluded.enable_neg_risk,
-            end_date=excluded.end_date,
-            created_at=excluded.created_at,
+            end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
+            created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
             category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
             tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
             clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
@@ -2183,6 +2145,7 @@ def run_market_discovery(
     max_fetches: Optional[int] = None,
     session_recycle_every: int = SESSION_RECYCLE_EVERY,
     sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT,
+    update_sync_state: bool = True,
 ) -> int:
     """
     执行市场发现流程
@@ -2196,6 +2159,7 @@ def run_market_discovery(
     """
     markets_to_process: List[Dict] = []
     pre_written = 0
+    discovery_watermark: Optional[datetime] = None
 
     if closed_events_only:
         if not db_path:
@@ -2214,7 +2178,7 @@ def run_market_discovery(
         )
 
     if since_date is not None:
-        markets_to_process, pre_written = fetch_markets_since_date(
+        markets_to_process, pre_written, discovery_watermark = fetch_markets_since_date(
             since_date=since_date,
             include_active=True,
             include_closed=True,
@@ -2231,7 +2195,7 @@ def run_market_discovery(
     else:
         if db_path and not active_only and not closed_only and not event_slugs:
             ancient = datetime(1970, 1, 1, tzinfo=timezone.utc)
-            markets_to_process, pre_written = fetch_markets_since_date(
+            markets_to_process, pre_written, discovery_watermark = fetch_markets_since_date(
                 since_date=ancient,
                 include_active=True,
                 include_closed=True,
@@ -2269,6 +2233,8 @@ def run_market_discovery(
             norm = normalize_market_from_gamma(m)
             if norm:
                 norms.append(norm)
+        if discovery_watermark is None:
+            discovery_watermark = _max_created_at_from_markets(markets_to_process)
 
     if db_path and pre_written == 0 and norms:
         init_schema(db_path=db_path)
@@ -2280,13 +2246,18 @@ def run_market_discovery(
             json.dump(norms, f, ensure_ascii=False, indent=2)
         print(f"Results saved to: {out_path}", file=sys.stderr)
 
-    # 记录本次成功完成时间，供下次 --incremental 读取
-    if db_path:
+    # 记录本次实际扫描到的最大 market.createdAt，供下次增量同步读取。
+    # 手工 --since-date 回补默认不推进主断点，避免污染正常增量游标。
+    if db_path and update_sync_state:
         try:
-            with get_db(db_path) as conn:
-                _save_last_discovery_at(conn, datetime.now(timezone.utc), sync_state_key=sync_state_key)
+            if discovery_watermark is None:
+                discovery_watermark = _max_created_at_from_markets(norms)
+            if discovery_watermark is not None:
+                with get_db(db_path) as conn:
+                    _save_last_discovery_at(conn, discovery_watermark, sync_state_key=sync_state_key)
         except Exception:
             pass
+    if db_path:
         pre_written += supplement_missing_markets_from_onchain_registry(
             db_path=db_path,
             batch_blocks=DEFAULT_CHAIN_BATCH_BLOCKS,
@@ -2483,6 +2454,7 @@ def main():
     def _run_once() -> int:
         """执行一次市场发现，返回写入数量。支持 --incremental 自动推断起点。"""
         since_date = manual_since_date
+        update_sync_state = bool(args.incremental or args.watch)
 
         if args.incremental:
             since_date = resolve_incremental_since_date(db_path)
@@ -2494,6 +2466,26 @@ def main():
             else:
                 print(
                     "[incremental] No previous sync found in DB — running full discovery.",
+                    file=sys.stderr,
+                )
+        elif (
+            args.watch
+            and db_path
+            and manual_since_date is None
+            and not args.event_slugs
+            and not args.active_only
+            and not args.closed_only
+            and not args.closed_events_only
+        ):
+            since_date = resolve_incremental_since_date(db_path)
+            if since_date is not None:
+                print(
+                    f"[watch-auto-incremental] Resuming from last sync: {since_date.isoformat()}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    "[watch-auto-incremental] No previous sync found in DB — running full discovery.",
                     file=sys.stderr,
                 )
 
@@ -2547,6 +2539,7 @@ def main():
             cooldown_seconds=args.cooldown_seconds,
             max_fetches=args.max_fetches,
             session_recycle_every=args.session_recycle_every,
+            update_sync_state=update_sync_state,
         )
 
     if args.watch:

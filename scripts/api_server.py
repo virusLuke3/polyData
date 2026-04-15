@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+import re
 import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -31,17 +33,87 @@ try:
 except ImportError:
     HTTPException = Exception
 
-from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_connection, init_schema, DEFAULT_DB_PATH
+try:
+    import redis
+except ImportError:
+    redis = None
+
+try:
+    from eth_utils import to_checksum_address
+except ImportError:
+    to_checksum_address = None
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
+from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_backend, get_connection, init_schema, DEFAULT_DB_PATH
+from db.trade_v2 import (
+    LEGACY_TRADES_TABLE,
+    TRADE_V2_CORE_TABLE,
+    compat_maker_asset_id_sql,
+    compat_taker_asset_id_sql,
+    get_address_history_source,
+    get_trade_read_source,
+    get_trade_stats_source,
+    sql_identifier,
+    uint256_storage_to_text,
+)
+from runtime.content_runtime import RuntimeContentProvider
+from runtime.lob_runtime import LOBRuntimeManager
+from runtime.snapshot_store import SnapshotStore
+from api import cache as api_cache, db as api_db
+from api.config import load_api_settings
+from api.clients import market_data_client
+from api.routes import register_blueprints
+from api.services import address_service, bootstrap_service, content_service, lob_service, market_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
-DB_PATH = os.environ.get("POLYMARKET_DB", DEFAULT_DB_PATH)
-DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("POLYDATA_DASHBOARD_CACHE_TTL_SECONDS", "300"))
-MARKETS_CACHE_TTL_SECONDS = int(os.environ.get("POLYDATA_MARKETS_CACHE_TTL_SECONDS", "60"))
-RECENT_TRADE_WINDOW = int(os.environ.get("POLYDATA_DASHBOARD_TRADE_WINDOW", "250000"))
+SETTINGS = load_api_settings()
+DB_PATH = SETTINGS.db_path
+ALLOWED_ORIGINS = set(SETTINGS.allowed_origins)
+DASHBOARD_CACHE_TTL_SECONDS = SETTINGS.dashboard_cache_ttl_seconds
+MARKETS_CACHE_TTL_SECONDS = SETTINGS.markets_cache_ttl_seconds
+BOOTSTRAP_CACHE_TTL_SECONDS = SETTINGS.bootstrap_cache_ttl_seconds
+BOOTSTRAP_COMPONENT_TTL_SECONDS = SETTINGS.bootstrap_component_ttl_seconds
+RECENT_TRADE_WINDOW = SETTINGS.recent_trade_window
+ADDRESS_CACHE_TTL_SECONDS = SETTINGS.address_cache_ttl_seconds
+REDIS_URL = SETTINGS.redis_url
+REDIS_PREFIX = SETTINGS.redis_prefix
+SNAPSHOT_SQLITE_PATH = SETTINGS.snapshot_sqlite_path
+SNAPSHOT_PREWARM_ENABLED = SETTINGS.snapshot_prewarm_enabled
+CLOB_API_BASE = SETTINGS.clob_api_base
+CLOB_TIMEOUT_SECONDS = SETTINGS.clob_timeout_seconds
+CLOB_PRICE_CACHE_TTL_SECONDS = SETTINGS.clob_price_cache_ttl_seconds
+FINANCE_RUNTIME_TTL_SECONDS = SETTINGS.finance_runtime_ttl_seconds
+SPORTS_RUNTIME_TTL_SECONDS = SETTINGS.sports_runtime_ttl_seconds
+SIGNAL_RUNTIME_TTL_SECONDS = SETTINGS.signal_runtime_ttl_seconds
 _dashboard_cache_lock = threading.Lock()
 _dashboard_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
+_bootstrap_cache_lock = threading.Lock()
+_bootstrap_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
 _markets_cache_lock = threading.Lock()
 _markets_cache: Dict[str, Dict[str, Any]] = {}
+_trade_index_cache_lock = threading.Lock()
+_trade_index_cache: Dict[str, Any] = {"names": set(), "loaded_at": 0.0}
+_redis_client = None
+_redis_init_lock = threading.Lock()
+_clob_session = None
+_clob_session_lock = threading.Lock()
+_clob_price_cache_lock = threading.Lock()
+_clob_price_cache: Dict[str, Dict[str, Any]] = {}
+TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
+TRADE_STATS_SOURCE = sql_identifier(get_trade_stats_source())
+ADDRESS_HISTORY_SOURCE = sql_identifier(get_address_history_source())
+CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
+LOB_RUNTIME_MANAGER = LOBRuntimeManager()
+SNAPSHOT_STORE = SnapshotStore(SNAPSHOT_SQLITE_PATH)
 
 
 def configure_logging() -> None:
@@ -56,6 +128,211 @@ def configure_logging() -> None:
 configure_logging()
 
 
+def create_app() -> Flask:
+    app.config["POLYDATA_SETTINGS"] = SETTINGS
+    app.config["POLYDATA_API_HOST"] = SETTINGS.host
+    app.config["POLYDATA_API_PORT"] = SETTINGS.port
+    register_blueprints(app, build_route_helpers())
+    return app
+
+
+def build_route_helpers() -> Dict[str, Any]:
+    return {
+        "build_system_health_payload": build_system_health_payload,
+        "COMMODITY_SYMBOLS": COMMODITY_SYMBOLS,
+        "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
+        "LOB_RUNTIME_MANAGER": LOB_RUNTIME_MANAGER,
+        "describe_db_target": describe_db_target,
+        "enrich_market_rows_with_runtime_prices": enrich_market_rows_with_runtime_prices,
+        "get_active_markets_snapshot": get_active_markets_snapshot,
+        "get_active_addresses_cached": lambda days=30: address_service.get_active_addresses_cached(build_service_context(), days),
+        "get_address_summary_cached": lambda address, days=30: address_service.get_address_summary_cached(build_service_context(), address, days),
+        "get_address_trades_payload": lambda address, **kwargs: address_service.get_address_trades_payload(build_service_context(), address, **kwargs),
+        "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
+        "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
+        "get_dashboard_payload_cached": get_dashboard_payload_cached,
+        "get_inflation_nowcast_snapshot": get_inflation_nowcast_snapshot,
+        "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
+        "get_market_by_id": get_market_by_id,
+        "get_market_by_slug": get_market_by_slug,
+        "get_market_chart_payload": get_market_chart_payload,
+        "get_market_detail_payload": lambda market_id: market_service.get_market_detail_payload(build_service_context(), market_id),
+        "get_market_group_snapshot": get_market_group_snapshot,
+        "get_market_oracle_payload": lambda market_id: market_service.get_market_oracle_payload(build_service_context(), market_id),
+        "get_markets_payload": lambda status="active", query="", page=1, page_size=20: market_service.get_markets_payload(
+            build_service_context(),
+            status=status,
+            query=query,
+            page=page,
+            page_size=page_size,
+        ),
+        "get_market_price_summary": get_market_price_summary,
+        "get_markets_payload_cached": get_markets_payload_cached,
+        "get_nba_intel_snapshot": get_nba_intel_snapshot,
+        "get_nba_scoreboard_snapshot": get_nba_scoreboard_snapshot,
+        "get_oracle_events_by_market_id": get_oracle_events_by_market_id,
+        "get_recent_oracle_snapshot": get_recent_oracle_snapshot,
+        "get_recent_trades_snapshot": get_recent_trades_snapshot,
+        "get_related_content_payload": lambda market_id, limit=8: content_service.get_related_content_payload(build_service_context(), market_id, limit=limit),
+        "get_redis_client": get_redis_client,
+        "get_runtime_lob_payload": lambda market_id: lob_service.get_runtime_lob_payload(build_service_context(), market_id),
+        "get_suspicious_trades_snapshot": get_suspicious_trades_snapshot,
+        "get_top_addresses_cached": lambda days=None, limit=50: address_service.get_top_addresses_cached(build_service_context(), days, limit),
+        "get_whale_trades_snapshot": get_whale_trades_snapshot,
+        "search_markets": lambda query, limit=10: market_service.search_markets(build_service_context(), query, limit=limit),
+        "get_trades_by_market_id": get_trades_by_market_id,
+        "normalize_address": normalize_address,
+        "normalize_market": normalize_market,
+        "parse_json_list": parse_json_list,
+        "query_all": query_all,
+        "utc_now_iso": utc_now_iso,
+    }
+
+
+def build_service_context() -> Dict[str, Any]:
+    return {
+        "ADDRESS_CACHE_TTL_SECONDS": ADDRESS_CACHE_TTL_SECONDS,
+        "ADDRESS_HISTORY_SOURCE": ADDRESS_HISTORY_SOURCE,
+        "BOOTSTRAP_CACHE_TTL_SECONDS": BOOTSTRAP_CACHE_TTL_SECONDS,
+        "BOOTSTRAP_COMPONENT_TTL_SECONDS": BOOTSTRAP_COMPONENT_TTL_SECONDS,
+        "COMMODITY_SYMBOLS": COMMODITY_SYMBOLS,
+        "CONTENT_RUNTIME_PROVIDER": CONTENT_RUNTIME_PROVIDER,
+        "CLOB_API_BASE": CLOB_API_BASE,
+        "CLOB_TIMEOUT_SECONDS": CLOB_TIMEOUT_SECONDS,
+        "CRYPTO_COINGECKO_IDS": CRYPTO_COINGECKO_IDS,
+        "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
+        "DB_PATH": DB_PATH,
+        "DASHBOARD_CACHE_TTL_SECONDS": DASHBOARD_CACHE_TTL_SECONDS,
+        "FINANCE_RUNTIME_TTL_SECONDS": FINANCE_RUNTIME_TTL_SECONDS,
+        "LEGACY_TRADES_TABLE": LEGACY_TRADES_TABLE,
+        "LOB_RUNTIME_MANAGER": LOB_RUNTIME_MANAGER,
+        "MARKETS_CACHE_TTL_SECONDS": MARKETS_CACHE_TTL_SECONDS,
+        "REDIS_PREFIX": REDIS_PREFIX,
+        "REDIS_URL": REDIS_URL,
+        "RECENT_TRADE_WINDOW": RECENT_TRADE_WINDOW,
+        "SETTINGS": SETTINGS,
+        "SIGNAL_RUNTIME_TTL_SECONDS": SIGNAL_RUNTIME_TTL_SECONDS,
+        "SNAPSHOT_PREWARM_ENABLED": SNAPSHOT_PREWARM_ENABLED,
+        "SNAPSHOT_STORE": SNAPSHOT_STORE,
+        "SPORTS_RUNTIME_TTL_SECONDS": SPORTS_RUNTIME_TTL_SECONDS,
+        "TRADE_READ_SOURCE": TRADE_READ_SOURCE,
+        "TRADE_V2_CORE_TABLE": TRADE_V2_CORE_TABLE,
+        "_bootstrap_cache": _bootstrap_cache,
+        "_bootstrap_cache_lock": _bootstrap_cache_lock,
+        "_clob_price_cache": _clob_price_cache,
+        "_clob_price_cache_lock": _clob_price_cache_lock,
+        "_dashboard_cache": _dashboard_cache,
+        "_dashboard_cache_lock": _dashboard_cache_lock,
+        "_identifier_name": _identifier_name,
+        "_markets_cache": _markets_cache,
+        "_markets_cache_lock": _markets_cache_lock,
+        "_redis_init_lock": _redis_init_lock,
+        "_safe_decimal": _safe_decimal,
+        "_safe_float": _safe_float,
+        "_trade_index_cache": _trade_index_cache,
+        "_trade_index_cache_lock": _trade_index_cache_lock,
+        "app": app,
+        "BeautifulSoup": BeautifulSoup,
+        "build_system_health_payload": lambda: system_service.build_system_health_payload(build_service_context()),
+        "build_market_status_case": build_market_status_case,
+        "compat_maker_asset_id_sql": compat_maker_asset_id_sql,
+        "compat_taker_asset_id_sql": compat_taker_asset_id_sql,
+        "describe_db_target": describe_db_target,
+        "dict_from_row": dict_from_row,
+        "enrich_market_rows_with_runtime_prices": lambda rows, max_updates=18: market_service.enrich_market_rows_with_runtime_prices(build_service_context(), rows, max_updates=max_updates),
+        "fetch_dashboard_market_status": fetch_dashboard_market_status,
+        "fetch_dashboard_recent_markets": fetch_dashboard_recent_markets,
+        "fetch_dashboard_trade_volume": fetch_dashboard_trade_volume,
+        "fetch_recent_trade_window_bounds": fetch_recent_trade_window_bounds,
+        "fetch_trade_count_estimate": fetch_trade_count_estimate,
+        "format_trade_decimal": format_trade_decimal,
+        "format_trade_address": format_trade_address,
+        "get_active_markets_snapshot": lambda page_size=40: market_service.get_active_markets_snapshot(build_service_context(), page_size=page_size),
+        "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
+        "get_bootstrap_component_cached": get_bootstrap_component_cached,
+        "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
+        "get_cached_json": get_cached_json,
+        "get_cached_runtime_payload": get_cached_runtime_payload,
+        "get_existing_trade_read_source": get_existing_trade_read_source,
+        "get_latest_content_snapshot": get_latest_content_snapshot,
+        "get_market_by_id": lambda market_id: market_service.get_market_by_id(build_service_context(), market_id),
+        "get_market_chart_payload": lambda market_id, range_name="1d", interval="5m": market_service.get_market_chart_payload(build_service_context(), market_id, range_name=range_name, interval=interval),
+        "get_market_clob_price_series": lambda market, range_name="1d", interval="5m": market_data_client.get_market_clob_price_series(
+            build_service_context(),
+            market,
+            range_name=range_name,
+            interval=interval,
+        ),
+        "get_market_clob_price_snapshot": lambda market: market_data_client.get_market_clob_price_snapshot(build_service_context(), market),
+        "get_market_group_snapshot": lambda items, kind: runtime_service.get_market_group_snapshot(build_service_context(), items, kind=kind),
+        "get_market_by_slug": lambda slug: market_service.get_market_by_slug(build_service_context(), slug),
+        "get_market_oracle_payload": lambda market_id: market_service.get_market_oracle_payload(build_service_context(), market_id),
+        "get_market_price_summary": lambda market_id: market_service.get_market_price_summary(build_service_context(), market_id),
+        "get_markets_payload_cached": get_markets_payload_cached,
+        "get_markets_payload": lambda status="active", query="", page=1, page_size=20: market_service.get_markets_payload(
+            build_service_context(),
+            status=status,
+            query=query,
+            page=page,
+            page_size=page_size,
+        ),
+        "get_inflation_nowcast_snapshot": lambda: runtime_service.get_inflation_nowcast_snapshot(build_service_context()),
+        "get_nba_intel_snapshot": lambda limit=12: runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit),
+        "get_nba_scoreboard_snapshot": lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit),
+        "get_oracle_events_by_market_id": lambda market_id: market_service.get_oracle_events_by_market_id(build_service_context(), market_id),
+        "get_recent_oracle_events": get_recent_oracle_events,
+        "get_recent_oracle_snapshot": lambda limit=24: market_service.get_recent_oracle_snapshot(build_service_context(), limit=limit),
+        "get_recent_trades": lambda limit=24: query_service.get_recent_trades(build_service_context(), limit=limit),
+        "get_recent_trades_snapshot": lambda limit=24: market_service.get_recent_trades_snapshot(build_service_context(), limit=limit),
+        "get_redis_client": get_redis_client,
+        "get_related_content_by_market_id": lambda market_id, limit=8: query_service.get_related_content_by_market_id(build_service_context(), market_id, limit=limit),
+        "get_runtime_lob_payload": lambda market_id: lob_service.get_runtime_lob_payload(build_service_context(), market_id),
+        "get_snapshot_payload": get_snapshot_payload,
+        "get_suspicious_trades_snapshot": get_suspicious_trades_snapshot,
+        "get_trade_derived_market_price_series": get_trade_derived_market_price_series,
+        "get_trade_market_projection_sql": get_trade_market_projection_sql,
+        "get_trades_by_market_id": lambda market_id, limit=100, offset=0: market_service.get_trades_by_market_id(build_service_context(), market_id, limit=limit, offset=offset),
+        "get_whale_trades_snapshot": get_whale_trades_snapshot,
+        "get_yahoo_market_snapshot": lambda symbol, interval="30m", range_name="5d": market_data_client.get_yahoo_market_snapshot(
+            build_service_context(),
+            symbol,
+            interval=interval,
+            range_name=range_name,
+        ),
+        "http_json_get": lambda url, params=None, timeout=12, headers=None: market_data_client.http_json_get(
+            build_service_context(),
+            url,
+            params=params,
+            timeout=timeout,
+            headers=headers,
+        ),
+        "iso_days_before": iso_days_before,
+        "get_connection": get_connection,
+        "get_redis_client_state": lambda: _redis_client,
+        "normalize_market": normalize_market,
+        "normalize_address": normalize_address,
+        "normalize_oracle_event": normalize_oracle_event,
+        "normalize_trade": normalize_trade,
+        "parse_iso_datetime": parse_iso_datetime,
+        "parse_json_list": parse_json_list,
+        "query_all": query_all,
+        "query_one": query_one,
+        "redis_module": redis,
+        "requests": requests,
+        "search_markets": lambda query, limit=10: market_service.search_markets(build_service_context(), query, limit=limit),
+        "set_redis_client_state": lambda value: globals().__setitem__("_redis_client", value),
+        "set_cached_json": set_cached_json,
+        "set_cached_runtime_payload": set_cached_runtime_payload,
+        "sql_identifier": sql_identifier,
+        "table_exists": table_exists,
+        "threading": threading,
+        "utc_date_days_ago": utc_date_days_ago,
+        "utc_now_iso": utc_now_iso,
+        "get_backend": get_backend,
+        "get_clob_session": get_clob_session,
+    }
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -63,6 +340,13 @@ def utc_now_iso() -> str:
 def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
+    if isinstance(value, datetime):
+        parsed = value
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
     text = value.strip()
     if not text:
         return None
@@ -102,42 +386,240 @@ def parse_json_list(value: Any) -> List[Any]:
     return [value]
 
 
-def query_all(sql: str, params: Optional[Iterable[Any]] = None) -> List[Dict[str, Any]]:
-    conn = get_connection(DB_PATH)
-    cursor = conn.cursor()
-    bound_params = tuple(params or ())
+def normalize_address(value: Optional[str]) -> str:
+    return str(value or "").strip().lower()
+
+
+def format_trade_decimal(value: Any) -> Any:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return ""
     try:
-        cursor.execute(sql, bound_params)
-        rows = [dict_from_row(row) for row in cursor.fetchall()]
-        return rows
+        normalized = format(Decimal(text), "f")
+    except (InvalidOperation, ValueError, TypeError):
+        return value
+    if "." not in normalized:
+        return normalized
+    return normalized.rstrip("0").rstrip(".")
+
+
+def format_trade_address(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        if len(raw) == 20:
+            text = "0x" + raw.hex()
+        else:
+            return value
+    else:
+        text = str(value or "").strip()
+    if not text.startswith("0x") or len(text) != 42:
+        return value
+    lowered = "0x" + text[2:].lower()
+    if to_checksum_address is None:
+        return lowered
+    try:
+        return to_checksum_address(lowered)
     except Exception:
-        app.logger.exception(
-            "SQL query_all failed sql=%s params=%s",
-            " ".join(sql.split()),
-            bound_params,
+        return lowered
+
+
+def utc_date_days_ago(days: int) -> str:
+    return (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+
+
+def get_redis_client():
+    return api_cache.get_redis_client(build_service_context())
+
+
+def get_clob_session():
+    global _clob_session
+    if requests is None:
+        return None
+    if _clob_session is not None:
+        return _clob_session
+    with _clob_session_lock:
+        if _clob_session is not None:
+            return _clob_session
+        session = requests.Session()
+        session.headers.update(
+            {
+                "Accept": "application/json",
+                "User-Agent": "polyData-api/1.0",
+            }
         )
-        raise
-    finally:
-        conn.close()
+        _clob_session = session
+        return _clob_session
+
+
+def parse_interval_minutes(interval: str) -> int:
+    text = str(interval or "5m").strip().lower()
+    match = re.fullmatch(r"(\d+)(m|h|d)", text)
+    if not match:
+        return 5
+    value = max(1, int(match.group(1)))
+    unit = match.group(2)
+    if unit == "m":
+        return value
+    if unit == "h":
+        return value * 60
+    return value * 1440
+
+
+def range_to_seconds(range_name: str) -> int:
+    normalized = str(range_name or "1d").strip().lower()
+    mapping = {
+        "1h": 3600,
+        "6h": 21600,
+        "12h": 43200,
+        "1d": 86400,
+        "3d": 259200,
+        "7d": 604800,
+        "30d": 2592000,
+    }
+    return mapping.get(normalized, 86400)
+
+
+def get_cached_runtime_payload(namespace: str, cache_key: str) -> Optional[Any]:
+    return api_cache.get_cached_runtime_payload(build_service_context(), namespace, cache_key)
+
+
+def set_cached_runtime_payload(namespace: str, cache_key: str, payload: Any, ttl_seconds: int = CLOB_PRICE_CACHE_TTL_SECONDS) -> Any:
+    return api_cache.set_cached_runtime_payload(build_service_context(), namespace, cache_key, payload, ttl_seconds)
+
+
+def _redis_key(namespace: str, cache_key: str) -> str:
+    return api_cache._redis_key(build_service_context(), namespace, cache_key)
+
+
+def get_cached_payload(namespace: str, cache_key: str) -> Optional[Any]:
+    return api_cache.get_cached_payload(build_service_context(), namespace, cache_key)
+
+
+def set_cached_payload(namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+    api_cache.set_cached_payload(build_service_context(), namespace, cache_key, payload, ttl_seconds)
+
+
+def get_cached_json(namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
+    return api_cache.get_cached_json(build_service_context(), namespace, cache_key)
+
+
+def set_cached_json(namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
+    api_cache.set_cached_json(build_service_context(), namespace, cache_key, payload, ttl_seconds)
+
+
+def get_snapshot_payload(namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
+    return api_cache.get_snapshot_payload(build_service_context(), namespace, cache_key, builder, ttl_seconds=ttl_seconds)
+
+
+def http_json_get(url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
+    return market_data_client.http_json_get(build_service_context(), url, params=params, timeout=timeout, headers=headers)
+
+
+def _safe_decimal(value: Any) -> Optional[Decimal]:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_percent_text(value: Optional[Decimal]) -> Optional[str]:
+    if value is None:
+        return None
+    return format_trade_decimal(value)
+
+
+COMMODITY_SYMBOLS = [
+    ("gold", "GOLD", "GC=F"),
+    ("silver", "SILVER", "SI=F"),
+    ("oil", "WTI CRUDE", "CL=F"),
+    ("natgas", "NAT GAS", "NG=F"),
+    ("copper", "COPPER", "HG=F"),
+]
+
+CRYPTO_SYMBOLS = [
+    ("btc", "BTC", "BTC-USD"),
+    ("eth", "ETH", "ETH-USD"),
+    ("sol", "SOL", "SOL-USD"),
+    ("doge", "DOGE", "DOGE-USD"),
+    ("bnb", "BNB", "BNB-USD"),
+]
+
+CRYPTO_COINGECKO_IDS = {
+    "BTC-USD": "bitcoin",
+    "ETH-USD": "ethereum",
+    "SOL-USD": "solana",
+    "DOGE-USD": "dogecoin",
+    "BNB-USD": "binancecoin",
+}
+
+
+def get_yahoo_market_snapshot(symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
+    return market_data_client.get_yahoo_market_snapshot(build_service_context(), symbol, interval=interval, range_name=range_name)
+
+
+def get_market_group_snapshot(items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
+    return runtime_service.get_market_group_snapshot(build_service_context(), items, kind=kind)
+
+
+def get_nba_scoreboard_snapshot(limit: int = 10) -> Dict[str, Any]:
+    return runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit)
+
+
+def get_nba_intel_snapshot(limit: int = 12) -> Dict[str, Any]:
+    return runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit)
+
+
+def get_inflation_nowcast_snapshot() -> Dict[str, Any]:
+    return runtime_service.get_inflation_nowcast_snapshot(build_service_context())
+
+
+def get_whale_trades_snapshot(limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+    return signal_service.get_whale_trades_snapshot(build_service_context(), limit=limit, lookback_days=lookback_days)
+
+
+def get_suspicious_trades_snapshot(limit: int = 12) -> Dict[str, Any]:
+    return signal_service.get_suspicious_trades_snapshot(build_service_context(), limit=limit)
+
+
+def get_alpha_signal_snapshot(limit: int = 8) -> Dict[str, Any]:
+    return signal_service.get_alpha_signal_snapshot(build_service_context(), limit=limit)
+
+
+def query_all(sql: str, params: Optional[Iterable[Any]] = None) -> List[Dict[str, Any]]:
+    return api_db.query_all(build_service_context(), sql, params)
 
 
 def query_one(sql: str, params: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
-    conn = get_connection(DB_PATH)
-    cursor = conn.cursor()
-    bound_params = tuple(params or ())
-    try:
-        cursor.execute(sql, bound_params)
-        row = dict_from_row(cursor.fetchone())
-        return row
-    except Exception:
-        app.logger.exception(
-            "SQL query_one failed sql=%s params=%s",
-            " ".join(sql.split()),
-            bound_params,
-        )
-        raise
-    finally:
-        conn.close()
+    return api_db.query_one(build_service_context(), sql, params)
+
+
+def table_exists(table_name: str) -> bool:
+    return api_db.table_exists(build_service_context(), table_name)
+
+
+def _identifier_name(identifier: str) -> str:
+    return api_db.identifier_name(identifier)
+
+
+def get_existing_trade_read_source() -> Optional[str]:
+    return api_db.get_existing_trade_read_source(build_service_context())
+
+
+def get_trades_index_names(force_refresh: bool = False) -> set[str]:
+    return api_db.get_trades_index_names(build_service_context(), force_refresh=force_refresh)
 
 
 @app.before_request
@@ -160,6 +642,12 @@ def log_request_end(response):
     started_at = getattr(g, "request_started_at", None)
     duration_ms = (time.perf_counter() - started_at) * 1000 if started_at else -1
     response.headers["X-Request-ID"] = request_id
+    origin = request.headers.get("Origin", "").strip()
+    if origin and origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Accept, X-Requested-With"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     app.logger.info(
         "request-end request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
         request_id,
@@ -209,131 +697,23 @@ def build_market_status_case(now_iso: str) -> str:
 
 
 def fetch_dashboard_market_status(now_iso: str) -> List[Dict[str, Any]]:
-    return query_all(
-        """
-        SELECT status AS name, COUNT(*) AS value
-        FROM (
-            SELECT
-                CASE
-                    WHEN settled.market_id IS NOT NULL THEN 'Settled'
-                    WHEN proposed.market_id IS NOT NULL THEN 'Proposed'
-                    WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
-                    ELSE 'Active'
-                END AS status
-            FROM markets m
-            LEFT JOIN (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'settle' AND market_id IS NOT NULL
-            ) settled ON settled.market_id = m.id
-            LEFT JOIN (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'propose' AND market_id IS NOT NULL
-            ) proposed ON proposed.market_id = m.id
-        ) status_rows
-        GROUP BY status
-        ORDER BY value DESC
-        """,
-        (now_iso,),
-    )
+    return query_service.fetch_dashboard_market_status(build_service_context(), now_iso)
 
 
 def fetch_recent_trade_window_bounds(window_size: int) -> Dict[str, Any]:
-    return query_one(
-        """
-        SELECT
-            COUNT(*) AS trade_count,
-            MIN(timestamp) AS earliest_timestamp,
-            MAX(timestamp) AS latest_timestamp
-        FROM (
-            SELECT timestamp
-            FROM trades
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ) recent_trades
-        """,
-        (window_size,),
-    )
+    return query_service.fetch_recent_trade_window_bounds(build_service_context(), window_size)
 
 
 def fetch_dashboard_trade_volume(window_size: int) -> List[Dict[str, Any]]:
-    return query_all(
-        """
-        SELECT day, COUNT(*) AS trade_count
-        FROM (
-            SELECT substr(timestamp, 1, 10) AS day
-            FROM trades
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ) recent_trades
-        GROUP BY day
-        ORDER BY day ASC
-        """,
-        (window_size,),
-    )
+    return query_service.fetch_dashboard_trade_volume(build_service_context(), window_size)
 
 
 def fetch_dashboard_recent_markets(now_iso: str, window_size: int) -> List[Dict[str, Any]]:
-    status_case = build_market_status_case(now_iso)
-    return query_all(
-        f"""
-        WITH recent_trades AS (
-            SELECT market_id, timestamp, price, block_number, log_index
-            FROM trades
-            WHERE market_id IS NOT NULL
-            ORDER BY timestamp DESC
-            LIMIT ?
-        ),
-        activity AS (
-            SELECT market_id, COUNT(*) AS trade_count, MAX(timestamp) AS last_trade_at
-            FROM recent_trades
-            GROUP BY market_id
-            ORDER BY trade_count DESC, last_trade_at DESC
-            LIMIT 5
-        ),
-        latest_price AS (
-            SELECT market_id, price
-            FROM (
-                SELECT
-                    market_id,
-                    price,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY market_id
-                        ORDER BY timestamp DESC, block_number DESC, log_index DESC
-                    ) AS row_num
-                FROM recent_trades
-            ) ranked_prices
-            WHERE row_num = 1
-        )
-        SELECT
-            m.id,
-            m.slug,
-            m.title,
-            m.end_date,
-            {status_case} AS status,
-            activity.trade_count,
-            activity.last_trade_at,
-            latest_price.price AS latest_price
-        FROM activity
-        JOIN markets m ON m.id = activity.market_id
-        LEFT JOIN latest_price ON latest_price.market_id = activity.market_id
-        ORDER BY activity.trade_count DESC, activity.last_trade_at DESC
-        """,
-        (window_size, now_iso),
-    )
+    return query_service.fetch_dashboard_recent_markets(build_service_context(), now_iso, window_size)
 
 
 def fetch_trade_count_estimate() -> Dict[str, Any]:
-    return query_one(
-        """
-        SELECT
-            COALESCE(table_rows, 0) AS table_rows,
-            COALESCE(auto_increment, 0) AS auto_increment
-        FROM information_schema.tables
-        WHERE table_schema = DATABASE() AND table_name = 'trades'
-        """
-    )
+    return query_service.fetch_trade_count_estimate(build_service_context())
 
 
 def build_dashboard_payload() -> Dict[str, Any]:
@@ -371,8 +751,20 @@ def build_dashboard_payload() -> Dict[str, Any]:
             "totalTrades": int(trade_count_estimate.get("table_rows") or 0),
             "settlements24h": int(settlements_row.get("settlements_24h") or 0),
         },
-        "volume7d": trade_volume_rows[-7:],
-        "volume30d": trade_volume_rows[-30:],
+        "volume7d": [
+            {
+                "day": str(row.get("day")) if row.get("day") is not None else None,
+                "trade_count": int(row.get("trade_count") or 0),
+            }
+            for row in trade_volume_rows[-7:]
+        ],
+        "volume30d": [
+            {
+                "day": str(row.get("day")) if row.get("day") is not None else None,
+                "trade_count": int(row.get("trade_count") or 0),
+            }
+            for row in trade_volume_rows[-30:]
+        ],
         "statusShare": status_rows,
         "recentActiveMarkets": [
             {
@@ -393,6 +785,7 @@ def build_dashboard_payload() -> Dict[str, Any]:
             "tradeWindowSize": RECENT_TRADE_WINDOW,
             "tradeWindowEarliestTimestamp": earliest_trade_ts,
             "tradeWindowLatestTimestamp": latest_trade_ts,
+            "tradeWindowSource": trade_window.get("source"),
             "tradeWindowCovers7d": bool(coverage_7d_start and earliest_trade_ts and earliest_trade_ts <= coverage_7d_start),
             "tradeWindowCovers30d": bool(coverage_30d_start and earliest_trade_ts and earliest_trade_ts <= coverage_30d_start),
             "totalTradesSource": "information_schema.table_rows",
@@ -402,6 +795,12 @@ def build_dashboard_payload() -> Dict[str, Any]:
 
 
 def get_dashboard_payload_cached() -> Dict[str, Any]:
+    redis_cache_key = "dashboard"
+    redis_payload = get_cached_json("dashboard", redis_cache_key)
+    if redis_payload is not None:
+        app.logger.info("dashboard-cache redis-hit")
+        return redis_payload
+
     now_monotonic = time.monotonic()
     cached = _dashboard_cache.get("value")
     if cached is not None and _dashboard_cache.get("expires_at", 0.0) > now_monotonic:
@@ -418,31 +817,22 @@ def get_dashboard_payload_cached() -> Dict[str, Any]:
         payload = build_dashboard_payload()
         _dashboard_cache["value"] = payload
         _dashboard_cache["expires_at"] = time.monotonic() + DASHBOARD_CACHE_TTL_SECONDS
+        set_cached_json("dashboard", redis_cache_key, payload, DASHBOARD_CACHE_TTL_SECONDS)
         return payload
 
 
-def get_markets_payload_cached(cache_key: str, builder) -> Dict[str, Any]:
-    now_monotonic = time.monotonic()
-    cached_entry = _markets_cache.get(cache_key)
-    if cached_entry is not None and cached_entry.get("expires_at", 0.0) > now_monotonic:
-        app.logger.info("markets-cache hit key=%s ttl_remaining_ms=%.2f", cache_key, (cached_entry["expires_at"] - now_monotonic) * 1000)
-        return cached_entry["value"]
+def get_markets_payload_cached(cache_key: str, builder, *, namespace: str = "markets", ttl_seconds: int = MARKETS_CACHE_TTL_SECONDS) -> Dict[str, Any]:
+    return api_cache.get_markets_payload_cached(
+        build_service_context(),
+        cache_key,
+        builder,
+        namespace=namespace,
+        ttl_seconds=ttl_seconds,
+    )
 
-    with _markets_cache_lock:
-        cached_entry = _markets_cache.get(cache_key)
-        if cached_entry is not None and cached_entry.get("expires_at", 0.0) > time.monotonic():
-            app.logger.info("markets-cache hit-after-lock key=%s", cache_key)
-            return cached_entry["value"]
 
-        payload = builder()
-        _markets_cache[cache_key] = {
-            "value": payload,
-            "expires_at": time.monotonic() + MARKETS_CACHE_TTL_SECONDS,
-        }
-        expired_keys = [key for key, value in _markets_cache.items() if value.get("expires_at", 0.0) <= time.monotonic()]
-        for key in expired_keys:
-            _markets_cache.pop(key, None)
-        return payload
+def get_bootstrap_component_cached(component_key: str, builder, *, ttl_seconds: int = BOOTSTRAP_COMPONENT_TTL_SECONDS) -> Any:
+    return api_cache.get_bootstrap_component_cached(build_service_context(), component_key, builder, ttl_seconds=ttl_seconds)
 
 
 def normalize_market(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -470,26 +860,38 @@ def normalize_market(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
+    token_id_text = uint256_storage_to_text(row.get("token_id"))
+    maker_asset_id = uint256_storage_to_text(row.get("maker_asset_id"))
+    taker_asset_id = uint256_storage_to_text(row.get("taker_asset_id"))
+    side_text = row.get("side")
+    if maker_asset_id is None and token_id_text is not None:
+        if side_text == "BUY":
+            maker_asset_id = "0"
+            taker_asset_id = token_id_text
+        elif side_text == "SELL":
+            maker_asset_id = token_id_text
+            taker_asset_id = "0"
     return {
-        "txHash": row.get("tx_hash"),
+        "txHash": row.get("tx_hash").hex() if isinstance(row.get("tx_hash"), (bytes, bytearray, memoryview)) else row.get("tx_hash"),
         "logIndex": row.get("log_index"),
         "blockNumber": row.get("block_number"),
         "timestamp": row.get("timestamp"),
-        "maker": row.get("maker"),
-        "taker": row.get("taker"),
-        "price": row.get("price"),
-        "size": row.get("size"),
+        "maker": format_trade_address(row.get("maker")),
+        "taker": format_trade_address(row.get("taker")),
+        "price": format_trade_decimal(row.get("price")),
+        "size": format_trade_decimal(row.get("size")),
         "side": row.get("side"),
         "outcome": row.get("outcome"),
-        "tokenId": row.get("token_id"),
+        "tokenId": token_id_text,
         "marketId": row.get("market_id"),
-        "orderHash": row.get("order_hash"),
-        "makerAssetId": row.get("maker_asset_id"),
-        "takerAssetId": row.get("taker_asset_id"),
+        "marketTitle": row.get("market_title"),
+        "orderHash": row.get("order_hash").hex() if isinstance(row.get("order_hash"), (bytes, bytearray, memoryview)) else row.get("order_hash"),
+        "makerAssetId": maker_asset_id,
+        "takerAssetId": taker_asset_id,
         "makerAmount": row.get("maker_amount"),
         "takerAmount": row.get("taker_amount"),
         "fee": row.get("fee"),
-        "contract": row.get("contract"),
+        "contract": format_trade_address(row.get("contract")),
     }
 
 
@@ -518,86 +920,113 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def get_trade_market_projection_sql(alias: str) -> str:
+    return f"""
+        {alias}.tx_hash AS tx_hash,
+        {alias}.log_index AS log_index,
+        {alias}.market_id AS market_id,
+        {alias}.maker AS maker,
+        {alias}.taker AS taker,
+        {alias}.price AS price,
+        {alias}.size AS size,
+        CASE {alias}.side_code
+            WHEN 1 THEN 'BUY'
+            WHEN 2 THEN 'SELL'
+            ELSE 'UNKNOWN'
+        END AS side,
+        CASE {alias}.outcome_code
+            WHEN 1 THEN 'YES'
+            WHEN 2 THEN 'NO'
+            ELSE 'UNKNOWN'
+        END AS outcome,
+        {alias}.token_id AS token_id,
+        DATE_FORMAT({alias}.block_time, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS timestamp,
+        {alias}.block_number AS block_number,
+        {alias}.order_hash AS order_hash,
+        {compat_maker_asset_id_sql(alias)} AS maker_asset_id,
+        {compat_taker_asset_id_sql(alias)} AS taker_asset_id,
+        {alias}.maker_amount AS maker_amount,
+        {alias}.taker_amount AS taker_amount,
+        {alias}.fee AS fee,
+        {alias}.contract AS contract
+    """
+
+
 def get_market_by_slug(slug: str) -> Optional[dict]:
-    now_iso = utc_now_iso()
-    status_case = build_market_status_case(now_iso)
-    market = query_one(
-        f"""
-        SELECT
-            m.*,
-            {status_case} AS status,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id AND t.outcome = 'YES'
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_yes_price,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id AND t.outcome = 'NO'
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_no_price,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_price
-        FROM markets m
-        WHERE m.slug = ? COLLATE NOCASE
-        LIMIT 1
-        """,
-        (now_iso, slug),
-    )
-    return market or None
+    return market_service.get_market_by_slug(build_service_context(), slug)
+
+
+def get_market_by_id(market_id: int) -> Optional[dict]:
+    return market_service.get_market_by_id(build_service_context(), market_id)
 
 
 def get_trades_by_market_id(market_id: int, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-    rows = query_all(
-        """
-        SELECT
-            tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
-            token_id, timestamp, block_number, order_hash, maker_asset_id, taker_asset_id,
-            maker_amount, taker_amount, fee, contract
-        FROM trades
-        WHERE market_id = ?
-        ORDER BY timestamp DESC, block_number DESC, log_index DESC
-        LIMIT ? OFFSET ?
-        """,
-        (market_id, limit, offset),
-    )
-    return [normalize_trade(row) for row in rows]
+    return market_service.get_trades_by_market_id(build_service_context(), market_id, limit=limit, offset=offset)
+
+
+def get_recent_trades(limit: int = 24) -> List[Dict[str, Any]]:
+    return query_service.get_recent_trades(build_service_context(), limit=limit)
+
+
+def get_recent_trades_snapshot(limit: int = 24) -> List[Dict[str, Any]]:
+    return market_service.get_recent_trades_snapshot(build_service_context(), limit=limit)
 
 
 def get_oracle_events_by_market_id(market_id: int) -> List[Dict[str, Any]]:
-    rows = query_all(
-        """
-        SELECT
-            id, tx_hash, block_number, event_time, event_status, external_market_id,
-            market_id, market_title, matched_by, question_id, condition_id,
-            proposed_price, settled_price, requester, proposer, disputer,
-            proposal_transaction, settlement_transaction, source_adapter, source_oracle
-        FROM oracle_events
-        WHERE market_id = ?
-        ORDER BY block_number ASC, id ASC
-        """,
-        (market_id,),
-    )
-    return [normalize_oracle_event(row) for row in rows]
+    return market_service.get_oracle_events_by_market_id(build_service_context(), market_id)
 
 
-def get_market_price_series(market_id: int, limit: int = 400) -> List[Dict[str, Any]]:
-    rows = query_all(
-        """
-        SELECT timestamp, outcome, price, block_number, log_index
-        FROM trades
-        WHERE market_id = ?
-        ORDER BY timestamp DESC, block_number DESC, log_index DESC
-        LIMIT ?
-        """,
-        (market_id, limit),
-    )
+def get_recent_oracle_events(limit: int = 24) -> List[Dict[str, Any]]:
+    return query_service.get_recent_oracle_events(build_service_context(), limit=limit)
+
+
+def get_recent_oracle_snapshot(limit: int = 24) -> List[Dict[str, Any]]:
+    return market_service.get_recent_oracle_snapshot(build_service_context(), limit=limit)
+
+
+def get_market_clob_price_snapshot(market: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return market_data_client.get_market_clob_price_snapshot(build_service_context(), market)
+
+
+def get_market_clob_price_series(market: Optional[Dict[str, Any]], range_name: str = "1d", interval: str = "5m") -> List[Dict[str, Any]]:
+    return market_data_client.get_market_clob_price_series(build_service_context(), market, range_name=range_name, interval=interval)
+
+
+def get_trade_derived_market_price_series(market_id: int, limit: int = 400) -> List[Dict[str, Any]]:
+    trade_source = get_existing_trade_read_source()
+    if trade_source is None:
+        return []
+    if _identifier_name(trade_source) == TRADE_V2_CORE_TABLE:
+        rows = query_all(
+            f"""
+            SELECT
+                DATE_FORMAT(block_time, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS timestamp,
+                CASE outcome_code
+                    WHEN 1 THEN 'YES'
+                    WHEN 2 THEN 'NO'
+                    ELSE 'UNKNOWN'
+                END AS outcome,
+                price,
+                block_number,
+                log_index
+            FROM {trade_source}
+            WHERE market_id = ?
+            ORDER BY block_time DESC, block_number DESC, log_index DESC
+            LIMIT ?
+            """,
+            (market_id, limit),
+        )
+    else:
+        rows = query_all(
+            f"""
+            SELECT timestamp, outcome, price, block_number, log_index
+            FROM {trade_source}
+            WHERE market_id = ?
+            ORDER BY timestamp DESC, block_number DESC, log_index DESC
+            LIMIT ?
+            """,
+            (market_id, limit),
+        )
     rows.reverse()
     yes_price = None
     no_price = None
@@ -611,266 +1040,277 @@ def get_market_price_series(market_id: int, limit: int = 400) -> List[Dict[str, 
     return points
 
 
-@app.route("/dashboard", methods=["GET"])
-def api_dashboard():
-    return jsonify(get_dashboard_payload_cached())
+def get_market_price_summary(market_id: int) -> Dict[str, Any]:
+    return market_service.get_market_price_summary(build_service_context(), market_id)
 
 
-@app.route("/search", methods=["GET"])
-def api_search():
-    query = (request.args.get("q") or "").strip()
-    if not query:
-        return jsonify({"items": []})
-    pattern = f"%{query}%"
-    rows = query_all(
+def get_market_chart_payload(market_id: int, range_name: str = "1d", interval: str = "5m") -> Dict[str, Any]:
+    return market_service.get_market_chart_payload(build_service_context(), market_id, range_name=range_name, interval=interval)
+
+
+def get_related_content_by_market_id(market_id: int, limit: int = 8) -> Dict[str, Any]:
+    return query_service.get_related_content_by_market_id(build_service_context(), market_id, limit=limit)
+
+
+def get_latest_content_snapshot(limit: int = 8) -> Dict[str, Any]:
+    return query_service.get_latest_content_snapshot(build_service_context(), limit=limit)
+
+
+def build_system_health_payload() -> Dict[str, Any]:
+    return system_service.build_system_health_payload(build_service_context())
+
+
+def enrich_market_rows_with_runtime_prices(rows: List[Dict[str, Any]], *, max_updates: int = 18) -> List[Dict[str, Any]]:
+    return market_service.enrich_market_rows_with_runtime_prices(build_service_context(), rows, max_updates=max_updates)
+
+
+def build_active_markets_payload(page_size: int = 40) -> Dict[str, Any]:
+    return market_service.build_active_markets_payload(build_service_context(), page_size=page_size)
+
+
+def get_active_markets_snapshot(page_size: int = 40) -> Dict[str, Any]:
+    return market_service.get_active_markets_snapshot(build_service_context(), page_size=page_size)
+
+
+def build_bootstrap_payload() -> Dict[str, Any]:
+    return bootstrap_service.build_bootstrap_payload(build_service_context())
+
+
+def get_bootstrap_payload_cached() -> Dict[str, Any]:
+    return bootstrap_service.get_bootstrap_payload_cached(build_service_context())
+
+
+def prewarm_snapshot_payloads() -> None:
+    bootstrap_service.prewarm_snapshot_payloads(build_service_context())
+
+
+def start_snapshot_prewarm_thread() -> None:
+    bootstrap_service.start_snapshot_prewarm_thread(build_service_context())
+
+
+def get_top_addresses_payload(days: Optional[int], limit: int) -> Dict[str, Any]:
+    return address_service.get_top_addresses_payload(build_service_context(), days, limit)
+
+
+def get_active_addresses_payload(days: int) -> Dict[str, Any]:
+    return address_service.get_active_addresses_payload(build_service_context(), days)
+
+
+def get_address_summary_payload(address: str, days: int) -> Dict[str, Any]:
+    return address_service.get_address_summary_payload(build_service_context(), address, days)
+
+
+def get_address_trades_payload(
+    address: str,
+    *,
+    limit: int = 100,
+    market_id: Optional[int] = None,
+    start_ts: Optional[str] = None,
+    end_ts: Optional[str] = None,
+    before_ts: Optional[str] = None,
+    before_block_number: Optional[int] = None,
+    before_log_index: Optional[int] = None,
+) -> Dict[str, Any]:
+    return address_service.get_address_trades_payload(
+        build_service_context(),
+        address,
+        limit=limit,
+        market_id=market_id,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        before_ts=before_ts,
+        before_block_number=before_block_number,
+        before_log_index=before_log_index,
+    )
+
+    normalized = normalize_address(address)
+    if not normalized:
+        return {"address": normalized, "items": [], "nextCursor": None}
+
+    trade_index_names = get_trades_index_names()
+    query_source = ADDRESS_HISTORY_SOURCE
+    if query_source == TRADE_V2_CORE_TABLE:
+        maker_time_index = "idx_trades_v2_maker_time_log"
+        taker_time_index = "idx_trades_v2_taker_time_log"
+        maker_market_index = ""
+        taker_market_index = ""
+        maker_projection = """
+            t.id AS id,
+            LOWER(HEX(t.tx_hash)) AS tx_hash,
+            t.log_index AS log_index,
+            t.market_id AS market_id,
+            CONCAT('0x', LOWER(HEX(t.maker))) AS maker,
+            CONCAT('0x', LOWER(HEX(t.taker))) AS taker,
+            CAST(t.price AS CHAR) AS price,
+            CAST(t.size AS CHAR) AS size,
+            CASE t.side_code
+                WHEN 1 THEN 'BUY'
+                WHEN 2 THEN 'SELL'
+                ELSE 'UNKNOWN'
+            END AS side,
+            CASE t.outcome_code
+                WHEN 1 THEN 'YES'
+                WHEN 2 THEN 'NO'
+                ELSE 'UNKNOWN'
+            END AS outcome,
+            LOWER(HEX(t.token_id)) AS token_id,
+            t.block_number AS block_number,
+            DATE_FORMAT(t.block_time, '%%Y-%%m-%%dT%%H:%%i:%%sZ') AS timestamp,
+            LOWER(HEX(t.order_hash)) AS order_hash,
+            {compat_maker_asset_id_sql('t')} AS maker_asset_id,
+            {compat_taker_asset_id_sql('t')} AS taker_asset_id,
+            t.maker_amount AS maker_amount,
+            t.taker_amount AS taker_amount,
+            t.fee AS fee,
+            t.contract AS contract
         """
-        SELECT id, slug, title, condition_id, question_id
-        FROM markets
-        WHERE title LIKE ? OR slug LIKE ? OR condition_id LIKE ? OR question_id LIKE ?
-        ORDER BY created_at DESC
-        LIMIT 10
-        """,
-        (pattern, pattern, pattern, pattern),
-    )
-    return jsonify(
-        {
-            "items": [
-                {
-                    "id": row.get("id"),
-                    "slug": row.get("slug"),
-                    "title": row.get("title"),
-                    "conditionId": row.get("condition_id"),
-                    "questionId": row.get("question_id"),
-                }
-                for row in rows
-            ]
-        }
-    )
+        taker_projection = maker_projection
+        maker_filters = ["maker = UNHEX(REPLACE(LOWER(?), '0x', ''))"]
+        taker_filters = ["taker = UNHEX(REPLACE(LOWER(?), '0x', ''))"]
+    else:
+        maker_market_index = "idx_trades_maker_market_time_block_log"
+        taker_market_index = "idx_trades_taker_market_time_block_log"
+        maker_time_index = "idx_trades_maker_time_block_log"
+        taker_time_index = "idx_trades_taker_time_block_log"
+        maker_projection = """
+            tx_hash, log_index, market_id, maker, taker, price, size, side, outcome,
+            token_id, timestamp, block_number, order_hash, maker_asset_id, taker_asset_id,
+            maker_amount, taker_amount, fee, contract
+        """
+        taker_projection = maker_projection
+        maker_filters = ["maker = ?"]
+        taker_filters = ["taker = ?"]
 
-
-@app.route("/markets", methods=["GET"])
-def api_markets():
-    now_iso = utc_now_iso()
-    status = (request.args.get("status") or "active").strip().lower()
-    query = (request.args.get("q") or "").strip()
-    page = max(1, int(request.args.get("page", 1)))
-    page_size = min(50, max(1, int(request.args.get("pageSize", 20))))
-    offset = (page - 1) * page_size
-
-    filters: List[str] = []
-    params: List[Any] = []
-    if status == "active":
-        filters.append("(settled.market_id IS NULL AND (proposed.market_id IS NOT NULL OR m.end_date IS NULL OR m.end_date >= ?))")
-        params.append(now_iso)
-    elif status == "closed":
-        filters.append("(settled.market_id IS NOT NULL OR (settled.market_id IS NULL AND proposed.market_id IS NULL AND m.end_date IS NOT NULL AND m.end_date < ?))")
-        params.append(now_iso)
-    if query:
-        pattern = f"%{query}%"
-        filters.append("(m.title LIKE ? OR m.slug LIKE ? OR m.condition_id LIKE ? OR m.question_id LIKE ?)")
-        params.extend([pattern, pattern, pattern, pattern])
-
-    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    row_params = [now_iso, *params, page_size + 1, offset]
-
-    cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
-
-    def build_payload() -> Dict[str, Any]:
-        rows = query_all(
-            f"""
-        WITH settled_markets AS (
-            SELECT DISTINCT market_id
-            FROM oracle_events
-            WHERE event_status = 'settle' AND market_id IS NOT NULL
-        ),
-        proposed_markets AS (
-            SELECT DISTINCT market_id
-            FROM oracle_events
-            WHERE event_status = 'propose' AND market_id IS NOT NULL
-        ),
-        filtered_markets AS (
-            SELECT
-                m.id,
-                m.slug,
-                m.title,
-                m.condition_id,
-                m.question_id,
-                m.category,
-                m.tags,
-                m.end_date,
-                m.created_at,
-                CASE
-                    WHEN settled.market_id IS NOT NULL THEN 'Settled'
-                    WHEN proposed.market_id IS NOT NULL THEN 'Proposed'
-                    WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
-                    ELSE 'Active'
-                END AS status
-            FROM markets m
-            LEFT JOIN settled_markets settled ON settled.market_id = m.id
-            LEFT JOIN proposed_markets proposed ON proposed.market_id = m.id
-            {where_clause}
-        ),
-        paged_markets AS (
-            SELECT *
-            FROM filtered_markets
-            ORDER BY end_date DESC, created_at DESC
-            LIMIT ? OFFSET ?
-        ),
-        latest_yes_trades AS (
-            SELECT market_id, price
-            FROM (
-                SELECT
-                    t.market_id,
-                    t.price,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY t.market_id
-                        ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                    ) AS rn
-                FROM trades t
-                INNER JOIN paged_markets pm ON pm.id = t.market_id
-                WHERE t.outcome = 'YES'
-            ) ranked_trades
-            WHERE rn = 1
-        )
-        SELECT
-            pm.id,
-            pm.slug,
-            pm.title,
-            pm.condition_id,
-            pm.question_id,
-            pm.category,
-            pm.tags,
-            pm.end_date,
-            pm.status,
-            latest_yes_trades.price AS latest_price
-        FROM paged_markets pm
-        LEFT JOIN latest_yes_trades ON latest_yes_trades.market_id = pm.id
-        ORDER BY pm.end_date DESC, pm.created_at DESC
-            """,
-            row_params,
-        )
-        has_more = len(rows) > page_size
-        visible_rows = rows[:page_size]
-
+    maker_hint = ""
+    taker_hint = ""
+    if (
+        market_id is not None
+        and maker_market_index
+        and taker_market_index
+        and maker_market_index in trade_index_names
+        and taker_market_index in trade_index_names
+    ):
+        maker_hint = f" FORCE INDEX ({maker_market_index})"
+        taker_hint = f" FORCE INDEX ({taker_market_index})"
+    elif maker_time_index in trade_index_names and taker_time_index in trade_index_names:
+        maker_hint = f" FORCE INDEX ({maker_time_index})"
+        taker_hint = f" FORCE INDEX ({taker_time_index})"
+    else:
         return {
-            "items": [
-                {
-                    "id": row.get("id"),
-                    "slug": row.get("slug"),
-                    "title": row.get("title"),
-                    "conditionId": row.get("condition_id"),
-                    "questionId": row.get("question_id"),
-                    "endDate": row.get("end_date"),
-                    "latestPrice": row.get("latest_price"),
-                    "status": row.get("status"),
-                    "category": row.get("category") or "Uncategorized",
-                    "tags": parse_json_list(row.get("tags")),
-                }
-                for row in visible_rows
-            ],
-            "pagination": {
-                "page": page,
-                "pageSize": page_size,
-                "total": offset + len(visible_rows) + (1 if has_more else 0),
-                "totalPages": page + (1 if has_more else 0),
-                "hasMore": has_more,
-            },
+            "address": normalized,
+            "items": [],
+            "nextCursor": None,
+            "error": "Required maker/taker address indexes are missing on trades",
         }
 
-    return jsonify(get_markets_payload_cached(cache_key, build_payload))
+    arm_limit = max(100, limit * 2)
+    maker_params: List[Any] = [normalized]
+    taker_params: List[Any] = [normalized]
 
+    if market_id is not None:
+        maker_filters.append("market_id = ?")
+        taker_filters.append("market_id = ?")
+        maker_params.append(market_id)
+        taker_params.append(market_id)
+    if start_ts:
+        maker_filters.append("timestamp >= ?")
+        taker_filters.append("timestamp >= ?")
+        maker_params.append(start_ts)
+        taker_params.append(start_ts)
+    if end_ts:
+        maker_filters.append("timestamp < ?")
+        taker_filters.append("timestamp < ?")
+        maker_params.append(end_ts)
+        taker_params.append(end_ts)
+    if before_ts and before_block_number is not None and before_log_index is not None:
+        cursor_clause = (
+            "(timestamp < ? OR (timestamp = ? AND (block_number < ? "
+            "OR (block_number = ? AND log_index < ?))))"
+        )
+        maker_filters.append(cursor_clause)
+        taker_filters.append(cursor_clause)
+        cursor_params = [before_ts, before_ts, before_block_number, before_block_number, before_log_index]
+        maker_params.extend(cursor_params)
+        taker_params.extend(cursor_params)
 
-@app.route("/markets/<int:market_id>/detail", methods=["GET"])
-def api_market_detail_by_id(market_id: int):
-    now_iso = utc_now_iso()
-    status_case = build_market_status_case(now_iso)
-    market = query_one(
-        f"""
+    maker_sql = f"""
         SELECT
-            m.*,
-            {status_case} AS status,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id AND t.outcome = 'YES'
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_yes_price,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id AND t.outcome = 'NO'
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_no_price,
-            (
-                SELECT t.price FROM trades t
-                WHERE t.market_id = m.id
-                ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC
-                LIMIT 1
-            ) AS latest_price
-        FROM markets m
-        WHERE m.id = ?
-        LIMIT 1
-        """,
-        (now_iso, market_id),
-    )
-    if not market:
-        return jsonify({"error": "Market not found", "marketId": market_id}), 404
-
-    return jsonify(
-        {
-            "market": normalize_market(market),
-            "priceSeries": get_market_price_series(market_id),
-            "trades": get_trades_by_market_id(market_id, limit=100, offset=0),
-            "oracleEvents": get_oracle_events_by_market_id(market_id),
+            'maker' AS address_role,
+            {maker_projection}
+        FROM {query_source} t
+        {maker_hint}
+        WHERE {' AND '.join(maker_filters)}
+        ORDER BY timestamp DESC, block_number DESC, log_index DESC
+        LIMIT {arm_limit}
+    """
+    taker_sql = f"""
+        SELECT
+            'taker' AS address_role,
+            {taker_projection}
+        FROM {query_source} t
+        {taker_hint}
+        WHERE {' AND '.join(taker_filters)}
+        ORDER BY timestamp DESC, block_number DESC, log_index DESC
+        LIMIT {arm_limit}
+    """
+    sql = f"""
+        SELECT *
+        FROM (
+            ({maker_sql})
+            UNION ALL
+            ({taker_sql})
+        ) address_trades
+        ORDER BY timestamp DESC, block_number DESC, log_index DESC
+        LIMIT {limit + 1}
+    """
+    rows = query_all(sql, [*maker_params, *taker_params])
+    has_more = len(rows) > limit
+    visible_rows = rows[:limit]
+    next_cursor = None
+    if has_more and visible_rows:
+        last_row = visible_rows[-1]
+        next_cursor = {
+            "beforeTs": last_row.get("timestamp"),
+            "beforeBlockNumber": last_row.get("block_number"),
+            "beforeLogIndex": last_row.get("log_index"),
         }
-    )
 
-
-@app.route("/markets/<slug>", methods=["GET"])
-def api_market_detail(slug: str):
-    slug = slug.strip()
-    if not slug:
-        return jsonify({"error": "slug required"}), 400
-    market = get_market_by_slug(slug)
-    if not market:
-        return jsonify({"error": "Market not found", "slug": slug}), 404
-    return jsonify(normalize_market(market))
-
-
-@app.route("/markets/<slug>/trades", methods=["GET"])
-def api_market_trades(slug: str):
-    slug = slug.strip()
-    if not slug:
-        return jsonify({"error": "slug required"}), 400
-    market = get_market_by_slug(slug)
-    if not market:
-        return jsonify({"error": "Market not found", "slug": slug}), 404
-    limit = min(int(request.args.get("limit", 100)), 500)
-    offset = max(0, int(request.args.get("offset", 0)))
-    return jsonify(get_trades_by_market_id(market["id"], limit=limit, offset=offset))
-
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "database": describe_db_target()})
+    return {
+        "address": normalized,
+        "items": [
+            {
+                **normalize_trade(row),
+                "addressRole": row.get("address_role"),
+            }
+            for row in visible_rows
+        ],
+        "nextCursor": next_cursor,
+    }
 
 
 def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Polymarket Indexer API Server")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host")
-    parser.add_argument("--port", type=int, default=5000, help="Bind port")
+    parser.add_argument("--host", default=SETTINGS.host, help="Bind host")
+    parser.add_argument("--port", type=int, default=SETTINGS.port, help="Bind port")
+    parser.add_argument("--skip-init-schema", action="store_true", help="Do not initialize schema on startup")
     add_db_cli_args(parser)
 
     args = parser.parse_args()
+    explicit_backend = "--backend" in sys.argv
+    if not explicit_backend and args.backend == "mysql" and args.sqlite_path != DEFAULT_DB_PATH:
+        args.backend = "sqlite"
     configure_db_from_args(args)
     global DB_PATH
     DB_PATH = args.sqlite_path
-    init_schema(db_path=DB_PATH)
+    if not args.skip_init_schema:
+        init_schema(db_path=DB_PATH)
 
+    create_app()
     app.logger.info("Starting API server at http://%s:%s", args.host, args.port)
     app.logger.info("Database: %s", describe_db_target())
+    start_snapshot_prewarm_thread()
     app.run(host=args.host, port=args.port, debug=False)
 
 

@@ -40,3 +40,5 @@ database/*.db-wal
 database/*.db-shm
 
 runtime_logs/
+
+document/

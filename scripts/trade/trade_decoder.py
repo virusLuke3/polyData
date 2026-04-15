@@ -15,7 +15,7 @@ Polymarket 交易日志解码器 (Trade Decoder)
 import json
 import sys
 import argparse
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from decimal import Decimal, ROUND_DOWN
 
 try:
@@ -36,6 +36,22 @@ NEG_RISK_EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"  # 负�
 # 注意：这里使用完整的事件签名字符串，Web3会自动计算哈希
 ORDER_FILLED_EVENT_SIGNATURE = "OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)"
 
+ORDER_FILLED_EVENT_ABI = {
+    "anonymous": False,
+    "inputs": [
+        {"indexed": True, "name": "orderHash", "type": "bytes32"},
+        {"indexed": True, "name": "maker", "type": "address"},
+        {"indexed": True, "name": "taker", "type": "address"},
+        {"indexed": False, "name": "makerAssetId", "type": "uint256"},
+        {"indexed": False, "name": "takerAssetId", "type": "uint256"},
+        {"indexed": False, "name": "makerAmountFilled", "type": "uint256"},
+        {"indexed": False, "name": "takerAmountFilled", "type": "uint256"},
+        {"indexed": False, "name": "fee", "type": "uint256"},
+    ],
+    "name": "OrderFilled",
+    "type": "event",
+}
+
 # USDC 精度（6位小数）
 USDC_DECIMALS = 6
 USDC_DIVISOR = 10 ** USDC_DECIMALS
@@ -49,7 +65,16 @@ def is_collateral_asset(asset_id: str) -> bool:
     return asset_id == COLLATERAL_ASSET_ID or asset_id == "0x0" or asset_id == "0x0000000000000000000000000000000000000000000000000000000000000000"
 
 
-def decode_order_filled_log(log: Dict, w3: Web3) -> Optional[Dict]:
+def get_order_filled_event_decoder(w3: Web3) -> Any:
+    """复用 event decoder，避免每条日志都重复构造 ABI 对象。"""
+    return w3.eth.contract(abi=[ORDER_FILLED_EVENT_ABI]).events.OrderFilled()
+
+
+def decode_order_filled_log(
+    log: Dict,
+    w3: Optional[Web3] = None,
+    event_decoder: Optional[Any] = None,
+) -> Optional[Dict]:
     """
     解码 OrderFilled 事件日志
     
@@ -61,26 +86,13 @@ def decode_order_filled_log(log: Dict, w3: Web3) -> Optional[Dict]:
         解码后的交易信息字典，如果解码失败返回 None
     """
     try:
-        # OrderFilled 事件 ABI
-        event_abi = {
-            "anonymous": False,
-            "inputs": [
-                {"indexed": True, "name": "orderHash", "type": "bytes32"},
-                {"indexed": True, "name": "maker", "type": "address"},
-                {"indexed": True, "name": "taker", "type": "address"},
-                {"indexed": False, "name": "makerAssetId", "type": "uint256"},
-                {"indexed": False, "name": "takerAssetId", "type": "uint256"},
-                {"indexed": False, "name": "makerAmountFilled", "type": "uint256"},
-                {"indexed": False, "name": "takerAmountFilled", "type": "uint256"},
-                {"indexed": False, "name": "fee", "type": "uint256"}
-            ],
-            "name": "OrderFilled",
-            "type": "event"
-        }
-        
+        if event_decoder is None:
+            if w3 is None:
+                raise ValueError("decode_order_filled_log requires either w3 or event_decoder")
+            event_decoder = get_order_filled_event_decoder(w3)
+
         # 解码日志
-        event = w3.eth.contract(abi=[event_abi]).events.OrderFilled()
-        decoded = event.process_log(log)
+        decoded = event_decoder.process_log(log)
         
         # 提取事件参数
         args = decoded['args']
@@ -188,9 +200,10 @@ def decode_transaction(tx_hash: str, rpc_url: str = "https://polygon-rpc.com") -
                 order_filled_logs.append(log)
     
     # 解码所有 OrderFilled 日志
+    event_decoder = get_order_filled_event_decoder(w3)
     decoded_trades = []
     for log in order_filled_logs:
-        decoded = decode_order_filled_log(log, w3)
+        decoded = decode_order_filled_log(log, event_decoder=event_decoder)
         if decoded:
             decoded_trades.append(decoded)
     
