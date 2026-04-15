@@ -61,14 +61,14 @@ const INITIAL_LAYERS: LayerToggle[] = [
 ];
 
 const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
-  { value: 'global', label: '全球' },
-  { value: 'america', label: '美洲' },
-  { value: 'mena', label: '中东北非' },
-  { value: 'eu', label: '欧洲' },
-  { value: 'asia', label: '亚洲' },
-  { value: 'latam', label: '拉美' },
-  { value: 'africa', label: '非洲' },
-  { value: 'oceania', label: '大洋洲' },
+  { value: 'global', label: 'Global' },
+  { value: 'america', label: 'Americas' },
+  { value: 'mena', label: 'MENA' },
+  { value: 'eu', label: 'Europe' },
+  { value: 'asia', label: 'Asia' },
+  { value: 'latam', label: 'LATAM' },
+  { value: 'africa', label: 'Africa' },
+  { value: 'oceania', label: 'Oceania' },
 ];
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
@@ -531,23 +531,23 @@ export function App() {
       <header className="wm-toolbar">
         <div className="wm-toolbar-left">
           <div className="wm-nav-cluster">
-            <button className="wm-nav-pill active" type="button" onClick={resetWorkspace}>世界</button>
+            <button className="wm-nav-pill active" type="button" onClick={resetWorkspace}>World</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowCommandPalette(true)} title="Command palette">⌨</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowPanelLibrary((current) => !current)} title="Toggle panel library">◫</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>
             <button className="wm-nav-icon" type="button" onClick={cycleRegion} title="Cycle region">◌</button>
           </div>
           <div className="wm-brand">MONITOR <span>v0.2.0</span></div>
-          <div className="wm-live-dot">实时</div>
+          <div className="wm-live-dot">Live</div>
           <button className="wm-select-pill" type="button" onClick={cycleRegion}>
-            {REGION_OPTIONS.find((item) => item.value === region)?.label || '全球'} ▾
+            {REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'} ▾
           </button>
           <div className="wm-defcon-pill">POLYMARKET <span>LIVE</span></div>
         </div>
         <div className="wm-toolbar-right">
           <button className="wm-counter-pill" type="button">{liveMetrics[1]?.value || 0}</button>
-          <button className="wm-tool-button" type="button" onClick={() => setShowCommandPalette(true)}>⌘K 搜索</button>
-          <button className="wm-tool-button" type="button" onClick={() => void copyLink()}>复制链接</button>
+          <button className="wm-tool-button" type="button" onClick={() => setShowCommandPalette(true)}>⌘K Search</button>
+          <button className="wm-tool-button" type="button" onClick={() => void copyLink()}>Copy Link</button>
           <button className="wm-tool-icon" type="button" onClick={resetWorkspace}>⌂</button>
           <button className="wm-tool-icon" type="button" onClick={() => setShowSettings(true)}>⚙</button>
         </div>
@@ -557,7 +557,7 @@ export function App() {
         <div className="wm-main-content">
         <section className="wm-map-section">
           <div className="wm-map-header">
-            <div className="wm-map-title">全球态势</div>
+            <div className="wm-map-title">Global Situation</div>
             <div className="wm-map-clock">{currentUtcClock(now)}</div>
             <div className="wm-map-view-toggle">
               <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={() => changeViewMode('2d')}>2D</button>
@@ -569,14 +569,14 @@ export function App() {
             <div className={`wm-globe-area ${viewMode === '2d' ? 'wm-globe-area-flat' : ''}`}>
               <aside className={`wm-layer-sidebar ${showPanelLibrary ? '' : 'collapsed'}`}>
                 <div className="wm-toggle-header">
-                  <span>图层</span>
+                  <span>Layers</span>
                   <button type="button" className="wm-toggle-collapse" onClick={() => setShowPanelLibrary(false)}>▼</button>
                 </div>
                 <input
                   className="wm-layer-search"
                   value={marketQuery}
                   onInput={(event) => setMarketQuery((event.currentTarget as HTMLInputElement).value)}
-                  placeholder="搜索图层..."
+                  placeholder="Search layers..."
                 />
 
                 <div className="wm-layer-list">
