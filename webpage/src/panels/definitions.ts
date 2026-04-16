@@ -1,0 +1,31 @@
+import type { PanelDefinition } from '@/types';
+
+export const PANEL_LIBRARY: PanelDefinition[] = [
+  { id: 'world-brief', title: 'World Brief', eyebrow: 'context', description: 'Selected market narrative and context.' },
+  { id: 'active-markets', title: 'Active Markets', eyebrow: 'market', description: 'Live active market list.' },
+  { id: 'global-orderfilled', title: 'Orderfilled Flow', eyebrow: 'chain', description: 'Cross-market latest on-chain trades.' },
+  { id: 'oracle-feed', title: 'Oracle Feed', eyebrow: 'oracle', description: 'Recent oracle events across markets.' },
+  { id: 'featured-market', title: 'Featured Market', eyebrow: 'focus', description: 'Primary market card with key stats.' },
+  { id: 'market-summary', title: 'Market Summary', eyebrow: 'market', description: 'Identifiers, category, timing, and pricing.' },
+  { id: 'price-implications', title: 'Price Implications', eyebrow: 'price', description: 'Latest price and derived trade stats.' },
+  { id: 'price-chart', title: 'Price Surface', eyebrow: 'price', description: 'Focused market probability curve.', size: 'wide' },
+  { id: 'sample-chain-trades', title: 'Market Tape', eyebrow: 'chain', description: 'Focused market trade tape.' },
+  { id: 'oracle-timeline', title: 'Oracle Timeline', eyebrow: 'oracle', description: 'Focused market oracle timeline.' },
+  { id: 'bbo-monitor', title: 'BBO Monitor', eyebrow: 'lob', description: 'Runtime best bid/ask snapshot.' },
+  { id: 'lob-depth', title: 'LOB Depth', eyebrow: 'lob', description: 'Focused market book depth.', size: 'wide' },
+  { id: 'related-news', title: 'Related News', eyebrow: 'intel', description: 'News linked to focused market.' },
+  { id: 'related-video', title: 'Video Feed', eyebrow: 'content', description: 'Video content linked to market.' },
+  { id: 'report-feed', title: 'Report Feed', eyebrow: 'content', description: 'Long-form reports and writeups.' },
+  { id: 'research-feed', title: 'Research Feed', eyebrow: 'content', description: 'Research and analysis artifacts.' },
+  { id: 'live-api-status', title: 'Live API Status', eyebrow: 'system', description: 'Runtime health and sync status.' },
+  { id: 'system-health', title: 'System Health', eyebrow: 'system', description: 'Infra and sync readiness.' },
+  { id: 'commodities-watch', title: 'Commodities Watch', eyebrow: 'macro', description: 'Commodity price boards and sparklines.' },
+  { id: 'crypto-watch', title: 'Crypto Watch', eyebrow: 'macro', description: 'Crypto spot trends and sparklines.' },
+  { id: 'nba-scoreboard', title: 'NBA Scoreboard', eyebrow: 'sports', description: 'Upcoming and live NBA games.' },
+  { id: 'nba-intel', title: 'NBA Intel', eyebrow: 'sports', description: 'ESPN news, starting lineups, and pregame rumors.' },
+  { id: 'inflation-nowcast', title: 'Inflation Nowcast', eyebrow: 'macro', description: 'Cleveland Fed CPI/PCE nowcasting panel.' },
+  { id: 'alpha-signal', title: 'Alpha Signal', eyebrow: 'signal', description: 'Cross-source heuristic signal stack.' },
+  { id: 'whale-tracker', title: 'Whale Tracker', eyebrow: 'chain', description: 'Largest recent on-chain trades.' },
+  { id: 'suspicious-flow', title: 'Suspicious Flow', eyebrow: 'chain', description: 'Pre-oracle or unusual trade flow.' },
+];
+
