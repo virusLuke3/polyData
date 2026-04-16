@@ -27,7 +27,7 @@ try:
 except ImportError as e:
     print("Error: web3 not installed or wrong Python env.", file=sys.stderr)
     print("  Run: pip install web3>=6.0.0", file=sys.stderr)
-    print("  If using conda, ensure env is activated: conda activate polyBots", file=sys.stderr)
+    print("  If using conda, ensure the intended environment is activated.", file=sys.stderr)
     print(f"  Detail: {e}", file=sys.stderr)
     sys.exit(1)
 try:

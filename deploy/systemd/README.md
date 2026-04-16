@@ -20,6 +20,7 @@ The templates assume:
 - user-level systemd
 - one shared environment file at `~/.config/polydata/polydata.env`
 - repo checkout path replaced before install
+- Python interpreter selected through `POLYDATA_PYTHON_BIN`
 
 Before copying these units into `~/.config/systemd/user/`, replace:
 
@@ -34,6 +35,9 @@ mkdir -p ~/.config/polydata
 cp deploy/systemd/polydata.env.example ~/.config/polydata/polydata.env
 chmod 600 ~/.config/polydata/polydata.env
 ```
+
+Set `POLYDATA_PYTHON_BIN` in `~/.config/polydata/polydata.env` if your services
+should run from a conda environment or venv.
 
 2. Copy the unit files:
 
