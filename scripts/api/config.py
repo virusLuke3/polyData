@@ -98,7 +98,7 @@ def load_api_settings() -> ApiSettings:
     snapshot_default = str((PROJECT_ROOT / "data" / "panel_snapshots.sqlite3").resolve())
     return ApiSettings(
         host=_get_str("POLYDATA_API_HOST", "127.0.0.1"),
-        port=_get_int("POLYDATA_API_PORT", 5000),
+        port=_get_int("POLYDATA_API_PORT", 18500),
         allowed_origins=_get_csv("POLYDATA_ALLOWED_ORIGINS", ()),
         db_path=_get_str("POLYMARKET_DB", DEFAULT_DB_PATH),
         dashboard_cache_ttl_seconds=_get_int("POLYDATA_DASHBOARD_CACHE_TTL_SECONDS", 300),

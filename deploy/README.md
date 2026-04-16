@@ -1,12 +1,23 @@
 # Deployment Templates
 
-This directory is reserved for public deployment templates and operational examples.
+This directory contains public deployment templates and operational examples.
 
-Private deployment notes should stay in `document/`.
+Private deployment notes, machine-specific commands, and secrets should stay in
+`document/`.
 
-## Planned Contents
+## Included templates
 
-- `nginx/` - reverse proxy examples for serving the dashboard and proxying API traffic.
-- `systemd/` - service templates for long-running API and web processes.
+- `systemd/` - local long-running service templates for the API and sync jobs
+- `nginx/` - reverse proxy examples for serving the dashboard and proxying API traffic
 
-These files are templates only. They do not replace the current local startup flow.
+## Current recommendation
+
+For local production-style runtime on one machine, use the `deploy/systemd/`
+templates and keep MySQL, Redis, and Tailscale managed outside this repo.
+
+For remote frontend hosting, prefer CI-built `webpage/dist` deployment to a
+static directory such as `/var/www/polydata` instead of cloning the repo and
+building on the server.
+
+The private step-by-step setup for the current machine lives in
+`document/deploy.md`.

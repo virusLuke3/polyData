@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData oracle sync service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/usr/bin/python3 scripts/oracle/fetch_uma_oracle_chain.py --continue-sync --watch --interval 30 --confirmations 20 --continue-sync-rewind-blocks 500 --batch-adapter 2000 --batch-oracle 2000 --max-workers 30
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polydata.target

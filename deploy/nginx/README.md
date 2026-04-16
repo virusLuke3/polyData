@@ -1,11 +1,46 @@
 # Nginx Templates
 
-Future Nginx reverse proxy templates will live here.
+This directory contains public Nginx templates for serving the built frontend
+as static files and proxying `/wm-api` to the local Tailscale-backed API.
 
-Planned examples:
+## Included template
 
-- Static frontend hosting for `webpage/dist`.
-- `/wm-api` reverse proxy to the Flask API.
-- Optional Tailscale-only upstream examples for private API connectivity.
+- `polydata-static.conf.example`
 
-Templates must not include private hostnames, credentials, or local-only IP addresses.
+## Server contract
+
+The production frontend server is expected to:
+
+- serve static files from `/var/www/polydata`
+- use SPA fallback via `try_files ... /index.html`
+- proxy `/wm-api/` to the local-machine API over Tailscale
+- not build frontend code on the server
+
+The checked-in template uses placeholders instead of private values:
+
+- `__POLYDATA_SERVER_NAME__`
+- `__POLYDATA_API_UPSTREAM__`
+
+Example upstream value:
+
+```text
+http://100.88.66.12:18500
+```
+
+## Typical install flow
+
+```bash
+sudo mkdir -p /var/www/polydata
+sudo cp deploy/nginx/polydata-static.conf.example /etc/nginx/sites-available/polydata
+sudo nano /etc/nginx/sites-available/polydata
+sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydata
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## Notes
+
+- GCP only needs Nginx, Tailscale, OpenSSH, rsync, and the static site
+  directory.
+- The API continues to live on the local machine; this template does not
+  change the `/wm-api` topology.

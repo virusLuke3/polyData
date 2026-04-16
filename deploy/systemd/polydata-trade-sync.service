@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData trade sync service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/usr/bin/python3 scripts/trade/trades_indexer.py --continue-sync --watch --interval 10 --confirmations 20 --batch 125 --max-workers 6 --sync-state-key trade_sync_live
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polydata.target

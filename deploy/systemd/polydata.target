@@ -1,0 +1,7 @@
+[Unit]
+Description=polyData local production services
+Wants=polydata-api.service polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service
+After=network-online.target
+
+[Install]
+WantedBy=default.target

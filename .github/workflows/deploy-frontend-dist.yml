@@ -1,0 +1,80 @@
+name: Deploy Frontend Dist
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-frontend-dist:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.GCP_DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.GCP_DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.GCP_DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.GCP_DEPLOY_PATH }}
+      RELEASE_DIR: /tmp/polydata-dist-${{ github.sha }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webpage/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: webpage
+        run: npm ci
+
+      - name: Build frontend dist
+        working-directory: webpage
+        run: npm run build
+
+      - name: Verify dist output
+        run: test -f webpage/dist/index.html
+
+      - name: Install rsync and SSH client
+        run: sudo apt-get update && sudo apt-get install -y rsync openssh-client
+
+      - name: Configure SSH
+        env:
+          GCP_DEPLOY_SSH_KEY: ${{ secrets.GCP_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$GCP_DEPLOY_SSH_KEY"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$GCP_DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload dist to release directory
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$RELEASE_DIR'"
+          rsync -az --delete \
+            -e "ssh -p ${DEPLOY_PORT:-22}" \
+            webpage/dist/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
+
+      - name: Promote release and reload nginx
+        run: |
+          set -euo pipefail
+          REMOTE_DEPLOY_PATH="${DEPLOY_PATH:-/var/www/polydata}"
+          ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -euo pipefail
+            mkdir -p '$REMOTE_DEPLOY_PATH'
+            rsync -az --delete '$RELEASE_DIR/' '$REMOTE_DEPLOY_PATH/'
+            rm -rf '$RELEASE_DIR'
+            sudo nginx -t
+            sudo systemctl reload nginx
+          "

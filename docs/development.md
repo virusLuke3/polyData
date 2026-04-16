@@ -11,21 +11,46 @@ npm run dev
 npm run build
 ```
 
-The Vite dev server defaults to port `3000`. API proxy requests use `/wm-api` and target `VITE_POLYDATA_API_BASE_URL` when set, otherwise `http://127.0.0.1:5000`.
+The Vite dev server defaults to port `3000`. API proxy requests use `/wm-api`
+and target `VITE_POLYDATA_API_BASE_URL` when set, otherwise
+`http://127.0.0.1:18500`.
+
+Production frontend deployment is expected to publish `webpage/dist` from CI,
+not build on the remote server.
 
 ## API
 
 ```bash
 python scripts/api_server.py --help
-python scripts/api_server.py --host 127.0.0.1 --port 5000
+python scripts/api_server.py --host 127.0.0.1 --port 18500
 ```
 
 Health checks:
 
 ```bash
-curl http://127.0.0.1:5000/health
-curl http://127.0.0.1:5000/system/health
-curl http://127.0.0.1:5000/bootstrap
+curl http://127.0.0.1:18500/health
+curl http://127.0.0.1:18500/system/health
+curl http://127.0.0.1:18500/bootstrap
+```
+
+## Local systemd runtime
+
+Public systemd templates live in `deploy/systemd/`.
+
+Typical commands:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now polydata.target
+systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync
+journalctl --user-unit polydata-api -f
+```
+
+Shared runtime configuration is read from `~/.config/polydata/polydata.env`.
+On shared servers, enable lingering so the services keep running after logout:
+
+```bash
+loginctl enable-linger "$USER"
 ```
 
 ## Convenience Commands
@@ -39,9 +64,14 @@ make dev
 make status
 ```
 
+`make dev` uses `scripts/start_dashboard.sh`, which starts the API only and
+prints the frontend command to run separately.
+
 ## Refactor Safety Checklist
 
-- Keep `scripts/start_dashboard.sh` working until a replacement is proven.
+- Keep `scripts/start_dashboard.sh` working as a local API helper until a better
+  replacement is proven.
 - Keep `scripts/api_server.py` working as the compatibility API entrypoint.
 - Run `cd webpage && npm run build` after frontend or shared type changes.
-- Avoid committing runtime data, logs, private docs, or generated dependency directories.
+- Avoid committing runtime data, logs, private docs, or generated dependency
+  directories.
