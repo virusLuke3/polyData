@@ -1,7 +1,7 @@
 .PHONY: dev api web-build status
 
 API_HOST ?= 127.0.0.1
-API_PORT ?= 5000
+API_PORT ?= 18500
 
 dev:
 	bash scripts/start_dashboard.sh

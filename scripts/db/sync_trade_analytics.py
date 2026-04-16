@@ -7,6 +7,9 @@
 1. 为地址分析生成 `trade_addresses`、`address_trade_daily_stats`、`address_trade_totals`。
 2. 为网站查询生成 `market_trade_daily_stats`、`market_latest_prices`。
 3. 不直接对超大 `trades` 主表做高风险重 DDL，而是通过增量派生表提速。
+
+如果只需要 market panel 的基础数据，可使用 --market-only，仅写入
+`market_trade_daily_stats`、`market_latest_prices` 和 `sync_state`。
 """
 
 from __future__ import annotations
@@ -204,6 +207,8 @@ def _fetch_trade_batch(conn, last_trade_id: int, batch_size: int) -> List[Dict[s
 
 def _build_trade_address_rows(
     trades: Sequence[Dict[str, Any]],
+    *,
+    include_address_stats: bool = True,
 ) -> Tuple[
     List[Tuple[Any, ...]],
     Dict[Tuple[str, int], Dict[str, Any]],
@@ -283,6 +288,9 @@ def _build_trade_address_rows(
             latest_entry["yes"] = latest_point
         if outcome == "NO" and _is_newer_trade(block_number, log_index, latest_entry["no"]):
             latest_entry["no"] = latest_point
+
+        if not include_address_stats:
+            continue
 
         participants: List[Tuple[str, str, str, Decimal]] = []
         maker = _normalize_address(row.get("maker"))
@@ -752,6 +760,7 @@ def sync_trade_analytics(
     max_batches: Optional[int] = None,
     sync_state_key: str = TRADE_ANALYTICS_SYNC_KEY,
     include_trade_addresses: bool = False,
+    include_address_stats: bool = True,
     verbose: bool = True,
 ) -> Dict[str, int]:
     init_schema(db_path=db_path)
@@ -778,14 +787,15 @@ def sync_trade_analytics(
                 address_totals,
                 address_market,
                 market_latest,
-            ) = _build_trade_address_rows(trades)
+            ) = _build_trade_address_rows(trades, include_address_stats=include_address_stats or include_trade_addresses)
 
             if include_trade_addresses:
                 _insert_trade_addresses(conn, address_rows)
             _upsert_market_daily(conn, market_daily.values())
-            _upsert_address_daily(conn, address_daily.values())
-            _upsert_address_totals(conn, address_totals.values())
-            _upsert_address_market(conn, address_market.values())
+            if include_address_stats:
+                _upsert_address_daily(conn, address_daily.values())
+                _upsert_address_totals(conn, address_totals.values())
+                _upsert_address_market(conn, address_market.values())
             _upsert_market_latest(conn, market_latest)
 
             latest_seen_trade_id = max(_parse_int(row.get("id")) or latest_seen_trade_id for row in trades)
@@ -818,6 +828,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="每批处理多少条 trades")
     parser.add_argument("--max-batches", type=int, default=None, help="最多处理多少批；默认直到追平")
     parser.add_argument("--sync-state-key", default=TRADE_ANALYTICS_SYNC_KEY, help="sync_state 中记录处理进度的 key")
+    parser.add_argument(
+        "--market-only",
+        action="store_true",
+        help="只写 market_trade_daily_stats、market_latest_prices 和 sync_state；跳过 address_* 与 trade_addresses",
+    )
     parser.add_argument("--with-trade-addresses", action="store_true", help="额外落全量 trade_addresses 明细表；更占磁盘")
     parser.add_argument("--watch", action="store_true", help="持续监控并按间隔重复增量同步")
     parser.add_argument(
@@ -830,8 +845,12 @@ def main() -> None:
     args = parser.parse_args()
     configure_db_from_args(args)
     db_path = args.sqlite_path
+    if args.market_only and args.with_trade_addresses:
+        parser.error("--market-only 不能和 --with-trade-addresses 同时使用")
 
     print(f"[trade-analytics] target={describe_db_target()}", file=sys.stderr)
+    if args.market_only:
+        print("[trade-analytics] mode=market-only address_stats=off trade_addresses=off", file=sys.stderr)
     interval_seconds = max(1, int(args.interval))
 
     try:
@@ -844,6 +863,7 @@ def main() -> None:
                 max_batches=args.max_batches,
                 sync_state_key=args.sync_state_key,
                 include_trade_addresses=args.with_trade_addresses,
+                include_address_stats=not args.market_only,
                 verbose=True,
             )
             print(
