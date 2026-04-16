@@ -19,11 +19,11 @@ env/
 dist/
 build/
 
-# 数据库与大数据文件（可选：若不想把库和样本数据推上仓库可取消注释）
-# database/*.db
-# database/*.db-wal
-# database/*.db-shm
-# database/trades_sample.json
+# 前端构建与依赖
+webpage/node_modules/
+webpage/dist/
+webpage/.next/
+webpage/.vite/
 
 # IDE / OS
 .idea/
@@ -38,7 +38,11 @@ Thumbs.db
 database/*.db
 database/*.db-wal
 database/*.db-shm
+data/*.sqlite3
+data/*.sqlite3-wal
+data/*.sqlite3-shm
 
 runtime_logs/
 
+# 私有文档。公开文档请放 docs/。
 document/
