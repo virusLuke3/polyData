@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { WorldFlatMap } from '@/components/WorldFlatMap';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { PANEL_LIBRARY, PANEL_REGISTRY } from '@/panels/registry';
@@ -23,6 +23,7 @@ import type {
   BootstrapPayload,
   ContentItem,
   MarketListItem,
+  MarketsPayload,
   MarketSummary,
   OracleEvent,
   PanelRenderContext,
@@ -134,6 +135,26 @@ type RuntimePanelRefreshOptions = {
   bootstrapPayload?: BootstrapPayload | null;
 };
 
+type IdleSchedulerWindow = Window & typeof globalThis & {
+  requestIdleCallback?: (callback: () => void) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+function scheduleIdleTask(task: () => void) {
+  if (typeof window === 'undefined') return () => undefined;
+  const idleWindow = window as IdleSchedulerWindow;
+  if (typeof idleWindow.requestIdleCallback === 'function') {
+    const handle = idleWindow.requestIdleCallback(() => task());
+    return () => {
+      if (typeof idleWindow.cancelIdleCallback === 'function') {
+        idleWindow.cancelIdleCallback(handle);
+      }
+    };
+  }
+  const handle = window.setTimeout(task, 0);
+  return () => window.clearTimeout(handle);
+}
+
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
@@ -173,23 +194,18 @@ export function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const bootstrapRef = useRef<BootstrapPayload | null>(null);
+  const slowRefreshCancelRef = useRef<(() => void) | null>(null);
+  const slowRefreshInFlightRef = useRef(false);
 
-  async function refreshRuntimePanels(options: RuntimePanelRefreshOptions = {}) {
-    const bootstrapPayload = options.bootstrapPayload || bootstrap;
+  async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null }> {
+    const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
     const settled = await Promise.allSettled([
       fetchSystemHealth(),
       fetchRecentTrades(24),
       fetchRecentOracle(16),
       fetchLatestContent(12),
       fetchAllActiveMarkets('', 160),
-      fetchRuntimeCommodities(),
-      fetchRuntimeCrypto(),
-      fetchRuntimeNba(10),
-      fetchRuntimeNbaIntel(12),
-      fetchRuntimeInflationNowcast(),
-      fetchRuntimeAlpha(8),
-      fetchRuntimeWhales(14),
-      fetchRuntimeSuspicious(12),
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
@@ -208,18 +224,53 @@ export function App() {
     if (settled[4].status === 'fulfilled') setMarkets(settled[4].value.items || []);
     else if (fallbackMarkets.length) setMarkets(fallbackMarkets);
 
-    if (settled[5].status === 'fulfilled') setCommodities(settled[5].value);
-    if (settled[6].status === 'fulfilled') setCrypto(settled[6].value);
-    if (settled[7].status === 'fulfilled') setNba(settled[7].value);
-    if (settled[8].status === 'fulfilled') setNbaIntel(settled[8].value);
-    if (settled[9].status === 'fulfilled') setInflationNowcast(settled[9].value);
-    if (settled[10].status === 'fulfilled') setAlphaSignals(settled[10].value);
-    if (settled[11].status === 'fulfilled') setWhaleTrades(settled[11].value);
-    if (settled[12].status === 'fulfilled') setSuspiciousTrades(settled[12].value);
-
     return {
       marketsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
     };
+  }
+
+  async function refreshSlowRuntimePanels() {
+    const settled = await Promise.allSettled([
+      fetchRuntimeCommodities(),
+      fetchRuntimeCrypto(),
+      fetchRuntimeNba(10),
+      fetchRuntimeNbaIntel(12),
+      fetchRuntimeInflationNowcast(),
+      fetchRuntimeAlpha(8),
+      fetchRuntimeWhales(14),
+      fetchRuntimeSuspicious(12),
+    ]);
+
+    if (settled[0].status === 'fulfilled') setCommodities(settled[0].value);
+    if (settled[1].status === 'fulfilled') setCrypto(settled[1].value);
+    if (settled[2].status === 'fulfilled') setNba(settled[2].value);
+    if (settled[3].status === 'fulfilled') setNbaIntel(settled[3].value);
+    if (settled[4].status === 'fulfilled') setInflationNowcast(settled[4].value);
+    if (settled[5].status === 'fulfilled') setAlphaSignals(settled[5].value);
+    if (settled[6].status === 'fulfilled') setWhaleTrades(settled[6].value);
+    if (settled[7].status === 'fulfilled') setSuspiciousTrades(settled[7].value);
+  }
+
+  function scheduleSlowRuntimePanels() {
+    if (slowRefreshCancelRef.current || slowRefreshInFlightRef.current) return;
+    slowRefreshCancelRef.current = scheduleIdleTask(() => {
+      slowRefreshCancelRef.current = null;
+      if (slowRefreshInFlightRef.current) return;
+      slowRefreshInFlightRef.current = true;
+      void refreshSlowRuntimePanels()
+        .catch((loadError) => {
+          setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh slow runtime panels.'));
+        })
+        .finally(() => {
+          slowRefreshInFlightRef.current = false;
+        });
+    });
+  }
+
+  async function refreshRuntimePanels(options: RuntimePanelRefreshOptions = {}) {
+    const fastResult = await refreshFastRuntimePanels(options);
+    scheduleSlowRuntimePanels();
+    return fastResult;
   }
 
   useEffect(() => {
@@ -258,6 +309,15 @@ export function App() {
   }, [mapZoom]);
 
   useEffect(() => {
+    bootstrapRef.current = bootstrap;
+  }, [bootstrap]);
+
+  useEffect(() => () => {
+    slowRefreshCancelRef.current?.();
+    slowRefreshCancelRef.current = null;
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function load() {
@@ -284,6 +344,7 @@ export function App() {
             ? sanitizePanelIds([...current, ...defaultPanelIds])
             : defaultPanelIds
         ));
+        setLoading(false);
 
         void refreshRuntimePanels({ bootstrapPayload })
           .then(({ marketsPayload }) => {
@@ -300,9 +361,10 @@ export function App() {
             }
           });
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard.');
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard.');
+          setLoading(false);
+        }
       }
     }
 
