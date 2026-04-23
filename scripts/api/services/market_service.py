@@ -1,11 +1,129 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
+
+
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active"
+PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
+PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")
+YAHOO_QUOTE_RE = re.compile(r"finance\.yahoo\.com/quote/([^/?\"' )]+)", re.IGNORECASE)
+
+NAME_TO_YAHOO_SYMBOL = {
+    "bitcoin": "BTC-USD",
+    "btc": "BTC-USD",
+    "ethereum": "ETH-USD",
+    "eth": "ETH-USD",
+    "solana": "SOL-USD",
+    "sol": "SOL-USD",
+    "xrp": "XRP-USD",
+    "dogecoin": "DOGE-USD",
+    "doge": "DOGE-USD",
+    "s&p 500": "^GSPC",
+    "spx": "^GSPC",
+    "nasdaq 100": "^NDX",
+    "ndx": "^NDX",
+    "gold": "GC=F",
+    "silver": "SI=F",
+    "oil": "CL=F",
+}
+
+
+def _parse_numeric_target(value: str, suffix: str | None = None) -> Optional[float]:
+    text = str(value or "").replace(",", "").strip()
+    if not text:
+        return None
+    try:
+        numeric = float(text)
+    except (TypeError, ValueError):
+        return None
+    normalized_suffix = str(suffix or "").strip().lower()
+    if normalized_suffix == "k":
+        numeric *= 1_000
+    elif normalized_suffix == "m":
+        numeric *= 1_000_000
+    elif normalized_suffix == "b":
+        numeric *= 1_000_000_000
+    return numeric
+
+
+def _resolve_yahoo_symbol(title: str, description: str) -> Optional[str]:
+    yahoo_match = YAHOO_QUOTE_RE.search(description)
+    if yahoo_match:
+        return unquote(yahoo_match.group(1))
+
+    pair_match = PAIR_RE.search(description)
+    if pair_match:
+        base, quote = pair_match.group(1).split("/", 1)
+        base = base.strip().upper()
+        quote = quote.strip().upper()
+        if quote in {"USDT", "USD"}:
+            return f"{base}-USD"
+
+    haystack = f"{title} {description}".lower()
+    for label, symbol in NAME_TO_YAHOO_SYMBOL.items():
+        if label in haystack:
+            return symbol
+    return None
+
+
+def _extract_market_chart_context(ctx: dict, market: Optional[Dict[str, Any]], range_name: str) -> Optional[Dict[str, Any]]:
+    if not market:
+        return None
+
+    title = str(market.get("title") or "").strip()
+    description = str(market.get("description") or "").strip()
+    if not title and not description:
+        return None
+
+    title_match = PRICE_TARGET_RE.search(title)
+    desc_match = PRICE_TARGET_RE.search(description)
+    target_match = title_match or desc_match
+    target_price = None
+    if target_match:
+        target_price = _parse_numeric_target(target_match.group(1), target_match.group(2))
+
+    pair_match = PAIR_RE.search(description)
+    pair_label = pair_match.group(1) if pair_match else None
+    yahoo_symbol = _resolve_yahoo_symbol(title, description)
+    is_up_down = "up or down" in title.lower() or "close price is greater than or equal to the open price" in description.lower()
+    is_price_target = target_price is not None and (
+        "price specified in the title" in description.lower()
+        or "hit" in title.lower()
+        or "reach" in title.lower()
+    )
+
+    if not yahoo_symbol or not (is_up_down or is_price_target):
+        return None
+
+    source_label = "Yahoo Finance" if "finance.yahoo.com/quote/" in description.lower() else "Underlying"
+    if "binance" in description.lower():
+        source_label = "Underlying proxy"
+
+    yahoo_interval = "5m" if range_name in {"1h", "1d"} else "30m"
+    yahoo_range = "1d" if range_name == "1h" else "5d"
+    snapshot = ctx["get_yahoo_market_snapshot"](yahoo_symbol, interval=yahoo_interval, range_name=yahoo_range)
+    if not snapshot or not snapshot.get("points"):
+        return None
+
+    return {
+        "kind": "underlying-price",
+        "sourceSymbol": yahoo_symbol,
+        "sourceLabel": source_label,
+        "pairLabel": pair_label,
+        "targetPrice": target_price,
+        "targetLabel": "Target" if is_price_target else "Price to beat",
+        "referenceRule": "close >= open" if is_up_down else "hit threshold",
+        "currentUnderlyingPrice": snapshot.get("price"),
+        "underlyingChangePercent": snapshot.get("changePercent"),
+        "points": snapshot.get("points") or [],
+    }
 
 
 def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
@@ -241,13 +359,30 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
 
 def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", interval: str = "5m") -> Dict[str, Any]:
     market = get_market_by_id(ctx, market_id)
+    chart_context = _extract_market_chart_context(ctx, market, range_name)
+    if chart_context:
+        return {
+            "marketId": market_id,
+            "range": range_name,
+            "interval": interval,
+            "kind": chart_context.get("kind"),
+            "sourceSymbol": chart_context.get("sourceSymbol"),
+            "sourceLabel": chart_context.get("sourceLabel"),
+            "pairLabel": chart_context.get("pairLabel"),
+            "currentUnderlyingPrice": chart_context.get("currentUnderlyingPrice"),
+            "underlyingChangePercent": chart_context.get("underlyingChangePercent"),
+            "targetPrice": chart_context.get("targetPrice"),
+            "targetLabel": chart_context.get("targetLabel"),
+            "referenceRule": chart_context.get("referenceRule"),
+            "points": chart_context.get("points"),
+        }
     points = ctx["get_market_clob_price_series"](market, range_name=range_name, interval=interval)
     if not points:
         limit = 400
         if range_name == "7d":
             limit = 700
         points = ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
-    return {"marketId": market_id, "range": range_name, "interval": interval, "points": points}
+    return {"marketId": market_id, "range": range_name, "interval": interval, "kind": "probability", "points": points}
 
 
 def get_market_oracle_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
@@ -358,6 +493,17 @@ def _market_change(ctx: dict, current: Any, past: Any) -> Any:
     return ctx["format_trade_decimal"](delta)
 
 
+def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
+    if bool(row.get("has_settle")):
+        return "Settled"
+    if bool(row.get("has_propose")):
+        return "Proposed"
+    end_date = row.get("end_date")
+    if end_date not in (None, "") and str(end_date) < now_iso:
+        return "Closed"
+    return "Active"
+
+
 def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
@@ -379,6 +525,42 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    if not market_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in market_ids)
+    rows = ctx["query_all"](
+        f"""
+        SELECT
+            m.id,
+            m.slug,
+            m.title,
+            m.condition_id,
+            m.question_id,
+            m.yes_token_id,
+            m.no_token_id,
+            m.category,
+            m.tags,
+            m.clob_token_ids,
+            m.end_date,
+            m.created_at,
+            COALESCE(mls.latest_price, mlp.latest_yes_price) AS latest_price,
+            COALESCE(mls.latest_trade_at, mlp.latest_trade_at) AS latest_trade_at,
+            mls.price_24h_ago
+        FROM markets m
+        LEFT JOIN market_list_serving mls ON mls.market_id = m.id
+        LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        WHERE m.id IN ({placeholders})
+        """,
+        market_ids,
+    )
+    return {
+        int(row["id"]): row
+        for row in rows
+        if row.get("id") is not None
+    }
+
+
 def get_markets_payload(
     ctx: dict,
     *,
@@ -397,10 +579,10 @@ def get_markets_payload(
     filters: List[str] = []
     params: List[Any] = []
     if status == "active":
-        filters.append("(settled.market_id IS NULL AND (proposed.market_id IS NOT NULL OR m.end_date IS NULL OR m.end_date >= ?))")
+        filters.append("(COALESCE(mss.has_settle, 0) = 0 AND (COALESCE(mss.has_propose, 0) = 1 OR m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
     elif status == "closed":
-        filters.append("(settled.market_id IS NOT NULL OR (settled.market_id IS NULL AND proposed.market_id IS NULL AND m.end_date IS NOT NULL AND m.end_date < ?))")
+        filters.append("(COALESCE(mss.has_settle, 0) = 1 OR (COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
         params.append(now_iso)
     if query:
         pattern = f"%{query}%"
@@ -408,102 +590,61 @@ def get_markets_payload(
         params.extend([pattern, pattern, pattern, pattern])
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
-    stats_since = ctx["utc_date_days_ago"](1)
-    row_params = [stats_since, now_iso, *params, page_size + 1, offset]
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
-        return get_active_markets_snapshot(ctx, page_size=page_size)
+        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=False)
 
     def build_payload() -> Dict[str, Any]:
-        rows = ctx["query_all"](
+        candidate_rows = ctx["query_all"](
             f"""
-            WITH settled_markets AS (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'settle' AND market_id IS NOT NULL
-            ),
-            proposed_markets AS (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'propose' AND market_id IS NOT NULL
-            ),
-            stats_24h AS (
-                SELECT
-                    market_id,
-                    SUM(trade_count) AS trade_count_24h,
-                    SUM(volume_notional) AS volume_24h,
-                    MAX(last_trade_at) AS last_trade_at
-                FROM market_trade_daily_stats
-                WHERE trade_date >= ?
-                GROUP BY market_id
-            ),
-            filtered_markets AS (
-                SELECT
-                    m.id,
-                    m.slug,
-                    m.title,
-                    m.condition_id,
-                    m.question_id,
-                    m.yes_token_id,
-                    m.no_token_id,
-                    m.category,
-                    m.tags,
-                    m.clob_token_ids,
-                    m.end_date,
-                    m.created_at,
-                    CASE
-                        WHEN settled.market_id IS NOT NULL THEN 'Settled'
-                        WHEN proposed.market_id IS NOT NULL THEN 'Proposed'
-                        WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
-                        ELSE 'Active'
-                    END AS status,
-                    mlp.latest_yes_price AS latest_price,
-                    mlp.latest_trade_at,
-                    stats_24h.trade_count_24h,
-                    stats_24h.volume_24h,
-                    stats_24h.last_trade_at
-                FROM markets m
-                LEFT JOIN settled_markets settled ON settled.market_id = m.id
-                LEFT JOIN proposed_markets proposed ON proposed.market_id = m.id
-                LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
-                LEFT JOIN stats_24h ON stats_24h.market_id = m.id
-                {where_clause}
-            ),
-            paged_markets AS (
-                SELECT *
-                FROM filtered_markets
-                ORDER BY COALESCE(volume_24h, 0) DESC, COALESCE(trade_count_24h, 0) DESC, last_trade_at DESC, created_at DESC
-                LIMIT ? OFFSET ?
-            )
             SELECT
-                pm.id,
-                pm.slug,
-                pm.title,
-                pm.condition_id,
-                pm.question_id,
-                pm.yes_token_id,
-                pm.no_token_id,
-                pm.category,
-                pm.tags,
-                pm.clob_token_ids,
-                pm.end_date,
-                pm.created_at,
-                pm.status,
-                pm.latest_price,
-                pm.latest_trade_at,
-                pm.trade_count_24h,
-                pm.volume_24h,
-                pm.last_trade_at
-            FROM paged_markets pm
-            ORDER BY COALESCE(pm.volume_24h, 0) DESC, COALESCE(pm.trade_count_24h, 0) DESC, pm.last_trade_at DESC, pm.created_at DESC
+                m.id,
+                m.end_date,
+                m.created_at,
+                COALESCE(mss.has_settle, 0) AS has_settle,
+                COALESCE(mss.has_propose, 0) AS has_propose,
+                mls.trade_count_24h,
+                mls.volume_24h,
+                mls.last_trade_at,
+                mls.latest_trade_at,
+                mls.price_24h_ago
+            FROM markets m
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            LEFT JOIN market_list_serving mls ON mls.market_id = m.id
+            {where_clause}
+            ORDER BY COALESCE(mls.volume_24h, 0) DESC, COALESCE(mls.trade_count_24h, 0) DESC, mls.last_trade_at DESC, m.created_at DESC
+            LIMIT ? OFFSET ?
             """,
-            row_params,
+            [*params, page_size + 1, offset],
         )
-        has_more = len(rows) > page_size
+        has_more = len(candidate_rows) > page_size
+        visible_candidates = candidate_rows[:page_size]
+        visible_market_ids = [int(row["id"]) for row in visible_candidates if row.get("id") is not None]
+        detail_rows = _get_market_detail_rows_by_ids(ctx, visible_market_ids)
+        visible_rows: List[Dict[str, Any]] = []
+        for candidate in visible_candidates:
+            market_id = candidate.get("id")
+            if market_id is None:
+                continue
+            detail_row = detail_rows.get(int(market_id))
+            if not detail_row:
+                continue
+            normalized = dict(detail_row)
+            normalized.update(
+                {
+                    "trade_count_24h": candidate.get("trade_count_24h"),
+                    "volume_24h": candidate.get("volume_24h"),
+                    "last_trade_at": candidate.get("last_trade_at") or candidate.get("latest_trade_at"),
+                    "price_24h_ago": candidate.get("price_24h_ago"),
+                    "has_settle": candidate.get("has_settle"),
+                    "has_propose": candidate.get("has_propose"),
+                }
+            )
+            normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
+            visible_rows.append(normalized)
         max_runtime_updates = min(page_size, 8 if page_size >= 120 else (10 if page_size >= 60 else 16))
-        visible_rows = enrich_market_rows_with_runtime_prices(ctx, rows[:page_size], max_updates=max_runtime_updates)
-        visible_rows = enrich_market_rows_with_24h_change(ctx, visible_rows)
+        visible_rows = enrich_market_rows_with_runtime_prices(ctx, visible_rows, max_updates=max_runtime_updates)
         return {
             "items": [_market_list_item(ctx, row) for row in visible_rows],
             "pagination": {
@@ -518,95 +659,98 @@ def get_markets_payload(
     return ctx["get_markets_payload_cached"](cache_key, build_payload)
 
 
-def build_active_markets_payload(ctx: dict, page_size: int = 40) -> Dict[str, Any]:
+def build_active_markets_payload(
+    ctx: dict,
+    page_size: int = 40,
+    *,
+    include_runtime_prices: bool = False,
+    include_change_24h: bool = False,
+) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
-    raw_limit = max(page_size * 6, 120)
+    raw_limit = max(page_size * 3, 180)
     candidate_rows = ctx["query_all"](
         """
         SELECT
             m.id,
-            m.slug,
-            m.title,
-            m.condition_id,
-            m.question_id,
-            m.yes_token_id,
-            m.no_token_id,
-            m.category,
-            m.tags,
-            m.clob_token_ids,
             m.end_date,
             m.created_at,
-            mlp.latest_yes_price AS latest_price,
-            mlp.latest_trade_at,
+            COALESCE(mss.has_settle, 0) AS has_settle,
+            COALESCE(mss.has_propose, 0) AS has_propose,
             stats_24h.trade_count_24h,
             stats_24h.volume_24h,
-            stats_24h.last_trade_at
+            stats_24h.last_trade_at,
+            stats_24h.latest_trade_at,
+            stats_24h.price_24h_ago
         FROM markets m
-        LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
-        LEFT JOIN (
-            SELECT
-                market_id,
-                SUM(trade_count) AS trade_count_24h,
-                SUM(volume_notional) AS volume_24h,
-                MAX(last_trade_at) AS last_trade_at
-            FROM market_trade_daily_stats
-            WHERE trade_date >= ?
-            GROUP BY market_id
-        ) stats_24h ON stats_24h.market_id = m.id
-        WHERE m.end_date IS NULL OR m.end_date >= ?
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+        LEFT JOIN market_list_serving stats_24h ON stats_24h.market_id = m.id
+        WHERE COALESCE(mss.has_settle, 0) = 0 AND (COALESCE(mss.has_propose, 0) = 1 OR m.end_date IS NULL OR m.end_date >= ?)
         ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
         LIMIT ?
         """,
-        (ctx["utc_date_days_ago"](1), now_iso, raw_limit),
+        (now_iso, raw_limit),
     )
-    candidate_market_ids = [int(row["id"]) for row in candidate_rows if row.get("id") is not None]
-    status_map: Dict[int, Dict[str, bool]] = {}
-    if candidate_market_ids:
-        placeholders = ", ".join("?" for _ in candidate_market_ids)
-        status_rows = ctx["query_all"](
-            f"""
-            SELECT
-                market_id,
-                MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
-                MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
-            FROM oracle_events
-            WHERE market_id IN ({placeholders})
-            GROUP BY market_id
-            """,
-            candidate_market_ids,
-        )
-        status_map = {
-            int(row["market_id"]): {"has_settle": bool(row.get("has_settle")), "has_propose": bool(row.get("has_propose"))}
-            for row in status_rows
-            if row.get("market_id") is not None
+    candidate_stats_map = {
+        int(row["id"]): {
+            "trade_count_24h": row.get("trade_count_24h"),
+            "volume_24h": row.get("volume_24h"),
+            "last_trade_at": row.get("last_trade_at") or row.get("latest_trade_at"),
+            "price_24h_ago": row.get("price_24h_ago"),
+            "has_settle": row.get("has_settle"),
+            "has_propose": row.get("has_propose"),
         }
-    rows: List[Dict[str, Any]] = []
+        for row in candidate_rows
+        if row.get("id") is not None
+    }
+    ordered_market_ids: List[int] = []
     for row in candidate_rows:
         market_id = row.get("id")
         if market_id is None:
             continue
-        flags = status_map.get(int(market_id), {})
-        if flags.get("has_settle"):
-            continue
-        normalized = dict(row)
-        normalized["status"] = "Proposed" if flags.get("has_propose") else "Active"
-        rows.append(normalized)
-        if len(rows) >= page_size:
+        ordered_market_ids.append(int(market_id))
+        if len(ordered_market_ids) >= page_size:
             break
-    rows = enrich_market_rows_with_runtime_prices(ctx, rows, max_updates=min(page_size, 10 if page_size >= 40 else 16))
-    rows = enrich_market_rows_with_24h_change(ctx, rows)
+    detail_rows = _get_market_detail_rows_by_ids(ctx, ordered_market_ids)
+    rows: List[Dict[str, Any]] = []
+    for market_id in ordered_market_ids:
+        detail_row = detail_rows.get(market_id)
+        if not detail_row:
+            continue
+        normalized = dict(detail_row)
+        normalized.update(candidate_stats_map.get(market_id, {}))
+        normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
+        rows.append(normalized)
+    if include_runtime_prices:
+        rows = enrich_market_rows_with_runtime_prices(ctx, rows, max_updates=min(page_size, 6 if page_size >= 80 else 10))
+    if include_change_24h:
+        rows = enrich_market_rows_with_24h_change(ctx, rows)
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
         "pagination": {"page": 1, "pageSize": page_size, "total": len(rows), "totalPages": 1, "hasMore": False},
     }
 
 
-def get_active_markets_snapshot(ctx: dict, page_size: int = 40) -> Dict[str, Any]:
-    cache_key = json.dumps({"page": 1, "pageSize": page_size, "status": "active"}, sort_keys=True, ensure_ascii=True)
+def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runtime_prices: bool = False) -> Dict[str, Any]:
+    cache_key = json.dumps(
+        {
+            "page": 1,
+            "pageSize": page_size,
+            "status": "active",
+            "includeRuntimePrices": include_runtime_prices,
+            "includeChange24h": include_runtime_prices,
+        },
+        sort_keys=True,
+        ensure_ascii=True,
+    )
     return ctx["get_snapshot_payload"](
-        "snapshot:markets_active",
+        ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
         cache_key,
-        lambda: build_active_markets_payload(ctx, page_size=page_size),
+        lambda: build_active_markets_payload(
+            ctx,
+            page_size=page_size,
+            include_runtime_prices=include_runtime_prices,
+            include_change_24h=include_runtime_prices,
+        ),
         ttl_seconds=60,
     )
 

@@ -9,6 +9,8 @@ import type {
   PriceSummary,
   RuntimeMarketGroup,
   RuntimeInflationNowcastPayload,
+  RuntimeF1Payload,
+  RuntimeJin10Payload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeSignalPayload,
@@ -103,6 +105,14 @@ export function fetchRuntimeCommodities() {
 
 export function fetchRuntimeCrypto() {
   return apiGet<RuntimeMarketGroup>('/runtime/markets/crypto');
+}
+
+export function fetchRuntimeF1(limit = 10) {
+  return apiGet<RuntimeF1Payload>(`/runtime/sports/f1?limit=${limit}`);
+}
+
+export function fetchRuntimeJin10(limit = 24) {
+  return apiGet<RuntimeJin10Payload>(`/runtime/macro/jin10?limit=${limit}`);
 }
 
 export function fetchRuntimeNba(limit = 10) {

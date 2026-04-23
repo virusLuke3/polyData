@@ -18,10 +18,10 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in sys.path:
@@ -35,11 +35,14 @@ from db import (  # type: ignore
     get_connection,
     init_schema,
 )
-from db.trade_v2 import get_trade_read_source, sql_identifier, uint256_storage_to_text
+from db.trade_v2 import TRADE_V2_CORE_TABLE, get_trade_stats_source, sql_identifier, uint256_storage_to_text
 
 TRADE_ANALYTICS_SYNC_KEY = "trade_analytics_sync"
+MARKET_STATUS_SNAPSHOT_SYNC_KEY = "market_status_snapshot_sync"
+MARKET_LIST_SERVING_DAY_SYNC_KEY = "market_list_serving_day_sync"
 DEFAULT_BATCH_SIZE = 50_000
 DEFAULT_WATCH_INTERVAL_SECONDS = 15
+DEFAULT_ORACLE_EVENT_BATCH_SIZE = 100_000
 FEE_DIVISOR = Decimal("1000000")
 ZERO = Decimal("0")
 EXCHANGE_ADDRESSES = {
@@ -144,7 +147,13 @@ def _is_newer_trade(
     return next_log_index > current_log_index
 
 
-def _update_sync_state(conn, last_trade_id: int, sync_state_key: str) -> None:
+def _set_sync_state(
+    conn,
+    sync_state_key: str,
+    *,
+    value: Optional[str] = None,
+    last_block: Optional[int] = None,
+) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO sync_state (`key`, value, last_block, updated_at)
@@ -152,11 +161,22 @@ def _update_sync_state(conn, last_trade_id: int, sync_state_key: str) -> None:
         """,
         (
             sync_state_key,
-            str(last_trade_id),
-            last_trade_id,
+            value,
+            last_block,
             datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         ),
     )
+
+
+def _update_sync_state(conn, last_trade_id: int, sync_state_key: str) -> None:
+    _set_sync_state(conn, sync_state_key, value=str(last_trade_id), last_block=last_trade_id)
+
+
+def _get_sync_state_row(conn, sync_state_key: str) -> Dict[str, Any]:
+    cursor = conn.cursor()
+    cursor.execute("SELECT value, last_block FROM sync_state WHERE `key` = ?", (sync_state_key,))
+    row = cursor.fetchone()
+    return row.as_dict() if hasattr(row, "as_dict") else dict(row) if row else {}
 
 
 def get_last_processed_trade_id(
@@ -171,6 +191,418 @@ def get_last_processed_trade_id(
         return int(row[0]) if row and row[0] is not None else 0
     finally:
         conn.close()
+
+
+def _current_stats_since_date() -> str:
+    return (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+
+
+def _threshold_datetime_24h() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=1)
+
+
+def _format_serving_threshold(conn, value: datetime) -> str:
+    if hasattr(conn, "_raw_conn"):
+        return _format_mysql_datetime(value)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _format_trade_threshold(value: datetime, *, trade_source: str) -> str:
+    if trade_source == TRADE_V2_CORE_TABLE:
+        return _format_mysql_datetime(value)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _is_at_or_before_threshold(value: Any, threshold_dt: datetime) -> bool:
+    parsed = _parse_trade_time(value)
+    return parsed is not None and parsed <= threshold_dt
+
+
+def _fetch_price_24h_ago_map(conn, market_ids: Sequence[int], threshold_dt: datetime) -> Dict[int, Any]:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids if market_id})
+    if not normalized_ids:
+        return {}
+    trade_source = sql_identifier(get_trade_stats_source())
+    placeholders = ", ".join("?" for _ in normalized_ids)
+    if trade_source == TRADE_V2_CORE_TABLE:
+        time_column = "block_time"
+        order_columns = "block_time DESC, block_number DESC, log_index DESC"
+        yes_price_expr = "CASE WHEN outcome_code = 2 THEN 1 - price ELSE price END"
+    else:
+        time_column = "timestamp"
+        order_columns = "timestamp DESC, block_number DESC, log_index DESC"
+        yes_price_expr = "CASE WHEN UPPER(COALESCE(outcome, '')) = 'NO' THEN 1 - price ELSE price END"
+    threshold_value = _format_trade_threshold(threshold_dt, trade_source=trade_source)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT market_id, price
+        FROM (
+            SELECT
+                market_id,
+                {yes_price_expr} AS price,
+                ROW_NUMBER() OVER (
+                    PARTITION BY market_id
+                    ORDER BY {order_columns}
+                ) AS row_num
+            FROM {trade_source}
+            WHERE market_id IN ({placeholders}) AND {time_column} <= ?
+        ) ranked_prices
+        WHERE row_num = 1
+        """,
+        (*normalized_ids, threshold_value),
+    )
+    return {
+        int((row.as_dict() if hasattr(row, "as_dict") else dict(row))["market_id"]): (row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("price")
+        for row in cursor.fetchall()
+        if (row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("market_id") is not None
+    }
+
+
+def _refresh_market_list_price_24h_ago(conn, market_ids: Sequence[int], threshold_dt: datetime) -> int:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids if market_id})
+    if not normalized_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in normalized_ids)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT market_id, latest_price, latest_trade_at
+        FROM market_list_serving
+        WHERE market_id IN ({placeholders})
+        """,
+        tuple(normalized_ids),
+    )
+    price_map = _fetch_price_24h_ago_map(conn, normalized_ids, threshold_dt)
+    rows = []
+    for row in cursor.fetchall():
+        payload = row.as_dict() if hasattr(row, "as_dict") else dict(row)
+        market_id = payload.get("market_id")
+        if market_id is None:
+            continue
+        market_id_int = int(market_id)
+        latest_price = payload.get("latest_price")
+        latest_trade_at = payload.get("latest_trade_at")
+        if latest_trade_at is not None and _is_at_or_before_threshold(latest_trade_at, threshold_dt):
+            price_24h_ago = latest_price
+        else:
+            price_24h_ago = price_map.get(market_id_int)
+        rows.append((price_24h_ago, market_id_int))
+    if rows:
+        conn.executemany(
+            """
+            UPDATE market_list_serving
+            SET price_24h_ago = ?
+            WHERE market_id = ?
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids if market_id})
+    if not normalized_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in normalized_ids)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT
+            market_id,
+            MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
+            MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
+        FROM oracle_events
+        WHERE market_id IN ({placeholders})
+        GROUP BY market_id
+        """,
+        tuple(normalized_ids),
+    )
+    grouped_rows = cursor.fetchall()
+    grouped_map = {
+        int((row.as_dict() if hasattr(row, "as_dict") else dict(row))["market_id"]): (
+            int((row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("has_settle") or 0),
+            int((row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("has_propose") or 0),
+        )
+        for row in grouped_rows
+        if (row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("market_id") is not None
+    }
+    rows = [
+        (
+            market_id,
+            grouped_map.get(market_id, (0, 0))[0],
+            grouped_map.get(market_id, (0, 0))[1],
+        )
+        for market_id in normalized_ids
+    ]
+    conn.executemany(
+        """
+        INSERT INTO market_status_snapshot (
+            market_id,
+            has_settle,
+            has_propose
+        ) VALUES (?, ?, ?)
+        ON CONFLICT(market_id) DO UPDATE SET
+            has_settle = excluded.has_settle,
+            has_propose = excluded.has_propose
+        """,
+        rows,
+    )
+    return len(rows)
+
+
+def _full_refresh_market_status_snapshot(conn) -> int:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT
+            market_id,
+            MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
+            MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
+        FROM oracle_events
+        WHERE market_id IS NOT NULL
+        GROUP BY market_id
+        """
+    )
+    rows = []
+    max_event_id = 0
+    for row in cursor.fetchall():
+        payload = row.as_dict() if hasattr(row, "as_dict") else dict(row)
+        market_id = payload.get("market_id")
+        if market_id is None:
+            continue
+        rows.append((int(market_id), int(payload.get("has_settle") or 0), int(payload.get("has_propose") or 0)))
+    conn.execute("DELETE FROM market_status_snapshot")
+    if rows:
+        conn.executemany(
+            """
+            INSERT INTO market_status_snapshot (
+                market_id,
+                has_settle,
+                has_propose
+            ) VALUES (?, ?, ?)
+            """,
+            rows,
+        )
+    max_row = conn.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM oracle_events").fetchone()
+    if max_row:
+        max_payload = max_row.as_dict() if hasattr(max_row, "as_dict") else dict(max_row)
+        max_event_id = int(max_payload.get("max_id") or 0)
+    _set_sync_state(
+        conn,
+        MARKET_STATUS_SNAPSHOT_SYNC_KEY,
+        value=str(max_event_id),
+        last_block=max_event_id,
+    )
+    return len(rows)
+
+
+def _sync_market_status_snapshot(conn, *, oracle_batch_size: int = DEFAULT_ORACLE_EVENT_BATCH_SIZE) -> Dict[str, int]:
+    sync_row = _get_sync_state_row(conn, MARKET_STATUS_SNAPSHOT_SYNC_KEY)
+    last_event_id = int(sync_row.get("last_block") or 0)
+    table_row = conn.execute("SELECT COUNT(*) AS c FROM market_status_snapshot").fetchone()
+    table_count = int((table_row.as_dict() if hasattr(table_row, "as_dict") else dict(table_row)).get("c") or 0) if table_row else 0
+    if last_event_id <= 0 and table_count == 0:
+        return {"mode": 1, "updated_markets": _full_refresh_market_status_snapshot(conn), "last_event_id": int(_get_sync_state_row(conn, MARKET_STATUS_SNAPSHOT_SYNC_KEY).get("last_block") or 0)}
+
+    updated_market_ids: Set[int] = set()
+    latest_seen_event_id = last_event_id
+    while True:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, market_id
+            FROM oracle_events
+            WHERE id > ? AND market_id IS NOT NULL
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (latest_seen_event_id, oracle_batch_size),
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            break
+        for row in rows:
+            payload = row.as_dict() if hasattr(row, "as_dict") else dict(row)
+            market_id = payload.get("market_id")
+            if market_id is not None:
+                updated_market_ids.add(int(market_id))
+            latest_seen_event_id = max(latest_seen_event_id, int(payload.get("id") or latest_seen_event_id))
+        if len(rows) < oracle_batch_size:
+            break
+    if updated_market_ids:
+        _upsert_market_status_snapshot(conn, sorted(updated_market_ids))
+    if latest_seen_event_id != last_event_id:
+        _set_sync_state(
+            conn,
+            MARKET_STATUS_SNAPSHOT_SYNC_KEY,
+            value=str(latest_seen_event_id),
+            last_block=latest_seen_event_id,
+        )
+    return {"mode": 0, "updated_markets": len(updated_market_ids), "last_event_id": latest_seen_event_id}
+
+
+def _upsert_market_list_serving(conn, market_ids: Sequence[int], stats_since: str) -> int:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids if market_id})
+    if not normalized_ids:
+        return 0
+    threshold_dt = _threshold_datetime_24h()
+    placeholders = ", ".join("?" for _ in normalized_ids)
+    params: Tuple[Any, ...] = (stats_since, *normalized_ids, *normalized_ids)
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT
+            m.id AS market_id,
+            mlp.latest_yes_price AS latest_price,
+            mlp.latest_trade_at,
+            stats_24h.trade_count_24h,
+            stats_24h.volume_24h,
+            stats_24h.last_trade_at
+        FROM markets m
+        LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN (
+            SELECT
+                market_id,
+                SUM(trade_count) AS trade_count_24h,
+                SUM(volume_notional) AS volume_24h,
+                MAX(last_trade_at) AS last_trade_at
+            FROM market_trade_daily_stats
+            WHERE trade_date >= ? AND market_id IN ({placeholders})
+            GROUP BY market_id
+        ) stats_24h ON stats_24h.market_id = m.id
+        WHERE m.id IN ({placeholders})
+        """,
+        params,
+    )
+    rows = []
+    recent_market_ids: List[int] = []
+    for row in cursor.fetchall():
+        payload = row.as_dict() if hasattr(row, "as_dict") else dict(row)
+        market_id = payload.get("market_id")
+        if market_id is None:
+            continue
+        market_id_int = int(market_id)
+        latest_trade_at = payload.get("latest_trade_at")
+        latest_price = payload.get("latest_price")
+        if latest_trade_at is not None and _is_at_or_before_threshold(latest_trade_at, threshold_dt):
+            price_24h_ago = latest_price
+        else:
+            price_24h_ago = None
+            recent_market_ids.append(market_id_int)
+        rows.append(
+            (
+                market_id_int,
+                latest_price,
+                latest_trade_at,
+                price_24h_ago,
+                int(payload.get("trade_count_24h") or 0),
+                _db_decimal(_parse_decimal(payload.get("volume_24h"))),
+                payload.get("last_trade_at"),
+            )
+        )
+    price_24h_map = _fetch_price_24h_ago_map(conn, recent_market_ids, threshold_dt)
+    if price_24h_map:
+        normalized_rows = []
+        for market_id, latest_price, latest_trade_at, price_24h_ago, trade_count_24h, volume_24h, last_trade_at in rows:
+            normalized_rows.append(
+                (
+                    market_id,
+                    latest_price,
+                    latest_trade_at,
+                    price_24h_map.get(market_id, price_24h_ago),
+                    trade_count_24h,
+                    volume_24h,
+                    last_trade_at,
+                )
+            )
+        rows = normalized_rows
+    if not rows:
+        return 0
+    conn.executemany(
+        """
+        INSERT INTO market_list_serving (
+            market_id,
+            latest_price,
+            latest_trade_at,
+            price_24h_ago,
+            trade_count_24h,
+            volume_24h,
+            last_trade_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(market_id) DO UPDATE SET
+            latest_price = excluded.latest_price,
+            latest_trade_at = excluded.latest_trade_at,
+            price_24h_ago = excluded.price_24h_ago,
+            trade_count_24h = excluded.trade_count_24h,
+            volume_24h = excluded.volume_24h,
+            last_trade_at = excluded.last_trade_at
+        """,
+        rows,
+    )
+    return len(rows)
+
+
+def _full_refresh_market_list_serving(conn, stats_since: str) -> int:
+    threshold_dt = _threshold_datetime_24h()
+    serving_threshold = _format_serving_threshold(conn, threshold_dt)
+    conn.execute("DELETE FROM market_list_serving")
+    conn.execute(
+        """
+        INSERT INTO market_list_serving (
+            market_id,
+            latest_price,
+            latest_trade_at,
+            price_24h_ago,
+            trade_count_24h,
+            volume_24h,
+            last_trade_at
+        )
+        SELECT
+            m.id AS market_id,
+            mlp.latest_yes_price AS latest_price,
+            mlp.latest_trade_at,
+            CASE
+                WHEN mlp.latest_trade_at IS NOT NULL AND mlp.latest_trade_at <= ? THEN mlp.latest_yes_price
+                ELSE NULL
+            END AS price_24h_ago,
+            COALESCE(stats_24h.trade_count_24h, 0) AS trade_count_24h,
+            COALESCE(stats_24h.volume_24h, 0) AS volume_24h,
+            stats_24h.last_trade_at
+        FROM markets m
+        LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN (
+            SELECT
+                market_id,
+                SUM(trade_count) AS trade_count_24h,
+                SUM(volume_notional) AS volume_24h,
+                MAX(last_trade_at) AS last_trade_at
+            FROM market_trade_daily_stats
+            WHERE trade_date >= ?
+            GROUP BY market_id
+        ) stats_24h ON stats_24h.market_id = m.id
+        """,
+        (serving_threshold, stats_since),
+    )
+    recent_rows = conn.execute(
+        """
+        SELECT market_id
+        FROM market_list_serving
+        WHERE latest_trade_at IS NOT NULL AND latest_trade_at > ?
+        ORDER BY COALESCE(volume_24h, 0) DESC, COALESCE(trade_count_24h, 0) DESC, last_trade_at DESC
+        """,
+        (serving_threshold,),
+    ).fetchall()
+    recent_market_ids = [
+        int((row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("market_id"))
+        for row in recent_rows
+        if (row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("market_id") is not None
+    ]
+    for index in range(0, len(recent_market_ids), 1000):
+        _refresh_market_list_price_24h_ago(conn, recent_market_ids[index:index + 1000], threshold_dt)
+    count_row = conn.execute("SELECT COUNT(*) AS c FROM market_list_serving").fetchone()
+    _set_sync_state(conn, MARKET_LIST_SERVING_DAY_SYNC_KEY, value=stats_since, last_block=None)
+    return int((count_row.as_dict() if hasattr(count_row, "as_dict") else dict(count_row)).get("c") or 0) if count_row else 0
 
 
 def _fetch_trade_batch(conn, last_trade_id: int, batch_size: int) -> List[Dict[str, Any]]:
@@ -770,8 +1202,16 @@ def sync_trade_analytics(
     processed_trades = 0
     last_trade_id = get_last_processed_trade_id(db_path=db_path, sync_state_key=sync_state_key)
     latest_seen_trade_id = last_trade_id
+    stats_since = _current_stats_since_date()
+    serving_sync_row = _get_sync_state_row(conn, MARKET_LIST_SERVING_DAY_SYNC_KEY)
 
     try:
+        status_sync_result = _sync_market_status_snapshot(conn)
+        serving_refreshed = 0
+        if serving_sync_row.get("value") != stats_since:
+            serving_refreshed = _full_refresh_market_list_serving(conn, stats_since)
+        conn.commit()
+
         while True:
             if max_batches is not None and batches >= max_batches:
                 break
@@ -788,6 +1228,9 @@ def sync_trade_analytics(
                 address_market,
                 market_latest,
             ) = _build_trade_address_rows(trades, include_address_stats=include_address_stats or include_trade_addresses)
+            impacted_market_ids = set(market_daily.keys())
+            impacted_market_ids = {market_id for (_trade_date, market_id) in impacted_market_ids}
+            impacted_market_ids.update(int(market_id) for market_id in market_latest.keys())
 
             if include_trade_addresses:
                 _insert_trade_addresses(conn, address_rows)
@@ -797,6 +1240,8 @@ def sync_trade_analytics(
                 _upsert_address_totals(conn, address_totals.values())
                 _upsert_address_market(conn, address_market.values())
             _upsert_market_latest(conn, market_latest)
+            if impacted_market_ids:
+                _upsert_market_list_serving(conn, sorted(impacted_market_ids), stats_since)
 
             latest_seen_trade_id = max(_parse_int(row.get("id")) or latest_seen_trade_id for row in trades)
             _update_sync_state(conn, latest_seen_trade_id, sync_state_key)
@@ -814,6 +1259,8 @@ def sync_trade_analytics(
             "batches": batches,
             "processed_trades": processed_trades,
             "last_trade_id": latest_seen_trade_id,
+            "status_updated_markets": int(status_sync_result.get("updated_markets") or 0),
+            "serving_refreshed_rows": serving_refreshed,
         }
     except Exception:
         conn.rollback()

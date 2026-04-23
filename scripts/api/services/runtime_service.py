@@ -1,34 +1,60 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
 def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
-    cache_key = json.dumps({"kind": kind}, sort_keys=True, ensure_ascii=True)
+    ttl_seconds = 10 if kind == "crypto" else ctx["FINANCE_RUNTIME_TTL_SECONDS"]
+    cache_key = json.dumps(
+        {
+            "kind": kind,
+            "symbols": [symbol for _, _, symbol in items],
+            "snapshotVersion": 2 if kind == "crypto" else 1,
+        },
+        sort_keys=True,
+        ensure_ascii=True,
+    )
 
     def _builder() -> Dict[str, Any]:
-        rows = []
-        for key, label, symbol in items:
+        rows_by_symbol: Dict[str, Dict[str, Any]] = {}
+
+        def _load_row(entry: tuple[str, str, str]) -> tuple[str, Optional[Dict[str, Any]]]:
+            key, label, symbol = entry
+            is_crypto = kind == "crypto"
             try:
-                snapshot = ctx["get_yahoo_market_snapshot"](symbol)
+                snapshot = ctx["get_yahoo_market_snapshot"](
+                    symbol,
+                    interval="5m" if is_crypto else "30m",
+                    range_name="1d" if is_crypto else "5d",
+                    ttl_seconds=5 if is_crypto else None,
+                )
             except Exception:
                 ctx["app"].logger.exception("yahoo snapshot failed symbol=%s", symbol)
                 snapshot = None
             if not snapshot:
-                continue
-            rows.append(
-                {
-                    "id": key,
-                    "label": label,
-                    "symbol": symbol,
-                    "price": snapshot.get("price"),
-                    "changePercent": snapshot.get("changePercent"),
-                    "points": snapshot.get("points") or [],
-                }
-            )
-        if kind == "crypto" and len(rows) < max(3, len(items) // 2):
+                return symbol, None
+            return symbol, {
+                "id": key,
+                "label": label,
+                "symbol": symbol,
+                "price": snapshot.get("price"),
+                "changePercent": snapshot.get("changePercent"),
+                "points": snapshot.get("points") or [],
+            }
+
+        max_workers = min(8, max(1, len(items)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_load_row, item) for item in items]
+            for future in as_completed(futures):
+                symbol, row = future.result()
+                if row is not None:
+                    rows_by_symbol[symbol] = row
+
+        rows = [rows_by_symbol[symbol] for _, _, symbol in items if symbol in rows_by_symbol]
+        if kind == "crypto" and len(rows) < len(items):
             try:
                 ids = [ctx["CRYPTO_COINGECKO_IDS"][symbol] for _, _, symbol in items if symbol in ctx["CRYPTO_COINGECKO_IDS"]]
                 payload = ctx["http_json_get"](
@@ -43,8 +69,13 @@ def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, k
                     headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
                 ) or []
                 by_id = {str(item.get("id")): item for item in payload if isinstance(item, dict)}
-                rows = []
+                yahoo_rows = {str(item.get("symbol")): item for item in rows if isinstance(item, dict)}
+                merged_rows = []
                 for key, label, symbol in items:
+                    existing = yahoo_rows.get(symbol)
+                    if existing:
+                        merged_rows.append(existing)
+                        continue
                     coin = by_id.get(ctx["CRYPTO_COINGECKO_IDS"].get(symbol, ""))
                     if not coin:
                         continue
@@ -57,21 +88,24 @@ def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, k
                         for value in spark
                         if ctx["_safe_float"](value) is not None
                     ]
-                    rows.append(
+                    merged_rows.append(
                         {
                             "id": key,
                             "label": label,
-                            "symbol": symbol.replace("-USD", ""),
+                            "symbol": symbol,
                             "price": ctx["_safe_float"](coin.get("current_price")),
                             "changePercent": ctx["_safe_float"](coin.get("price_change_percentage_24h")),
                             "points": points,
                         }
                     )
+                rows = merged_rows
             except Exception:
                 ctx["app"].logger.exception("coingecko crypto fallback failed")
         return {"kind": kind, "items": rows, "generatedAt": ctx["utc_now_iso"]()}
 
-    return ctx["get_snapshot_payload"](f"snapshot:markets:{kind}", cache_key, _builder, ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"])
+    if kind == "crypto":
+        return _builder()
+    return ctx["get_snapshot_payload"](f"snapshot:markets:{kind}", cache_key, _builder, ttl_seconds=ttl_seconds)
 
 
 def get_nba_scoreboard_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
@@ -239,4 +273,3 @@ def get_inflation_nowcast_snapshot(ctx: dict) -> Dict[str, Any]:
         _builder,
         ttl_seconds=max(ctx["FINANCE_RUNTIME_TTL_SECONDS"], 1800),
     )
-

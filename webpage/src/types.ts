@@ -31,6 +31,7 @@ export type BootstrapPayload = {
   globalTradesPreview: TradeRow[];
   globalOraclePreview: OracleEvent[];
   latestContentPreview: ContentItem[];
+  commoditiesPreview?: RuntimeMarketGroup | null;
   recentTradesPreview: TradeRow[];
   oraclePreview: OracleEvent[];
   contentPreview: ContentItem[];
@@ -138,12 +139,22 @@ export type ChartPoint = {
   timestamp: string;
   yesPrice?: string | number | null;
   noPrice?: string | number | null;
+  value?: string | number | null;
 };
 
 export type ChartPayload = {
   marketId: number;
   range: string;
   interval: string;
+  kind?: 'probability' | 'underlying-price' | string;
+  sourceSymbol?: string | null;
+  sourceLabel?: string | null;
+  pairLabel?: string | null;
+  currentUnderlyingPrice?: string | number | null;
+  underlyingChangePercent?: number | null;
+  targetPrice?: string | number | null;
+  targetLabel?: string | null;
+  referenceRule?: string | null;
   points: ChartPoint[];
 };
 
@@ -224,6 +235,69 @@ export type RuntimeMarketGroup = {
   kind: string;
   items: RuntimeMarketTicker[];
   generatedAt?: string;
+};
+
+export type RuntimeF1PanelCard = {
+  id?: string;
+  kind?: 'meeting' | 'session' | 'result' | 'news' | string;
+  status?: 'live' | 'upcoming' | 'completed' | string;
+  topic?: string | null;
+  phase?: string | null;
+  detail?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  primaryMetric?: string | null;
+  secondaryMetric?: string | null;
+  tertiaryMetric?: string | null;
+  quaternaryMetric?: string | null;
+  accentColor?: string | null;
+  url?: string | null;
+  source?: string | null;
+  publishedAt?: string | null;
+};
+
+export type RuntimeF1Meeting = {
+  meetingKey?: number | null;
+  meetingName?: string | null;
+  officialName?: string | null;
+  location?: string | null;
+  countryName?: string | null;
+  circuitName?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  status?: string | null;
+};
+
+export type RuntimeF1Payload = {
+  generatedAt?: string;
+  season?: number;
+  source?: string | null;
+  sourceUrl?: string | null;
+  status?: string | null;
+  focusMeeting?: RuntimeF1Meeting | null;
+  cards: RuntimeF1PanelCard[];
+};
+
+export type RuntimeJin10Item = {
+  id: string;
+  timestamp?: string | null;
+  headline?: string | null;
+  summary?: string | null;
+  source?: string | null;
+  url?: string | null;
+  important?: boolean;
+  locked?: boolean;
+  vipLevel?: number | string | null;
+  assetHints?: string[];
+  channelIds?: number[];
+};
+
+export type RuntimeJin10Payload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  status?: string | null;
+  items: RuntimeJin10Item[];
 };
 
 export type RuntimeNbaGame = {
@@ -378,6 +452,8 @@ export type PanelRenderContext = {
   latestContent: ContentItem[];
   commodities?: RuntimeMarketGroup | null;
   crypto?: RuntimeMarketGroup | null;
+  f1?: RuntimeF1Payload | null;
+  jin10?: RuntimeJin10Payload | null;
   nba?: RuntimeNbaPayload | null;
   nbaIntel?: RuntimeNbaIntelPayload | null;
   inflationNowcast?: RuntimeInflationNowcastPayload | null;

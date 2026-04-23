@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v1"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v2"
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
+_PREWARM_LAST_RUN_LOCK = threading.Lock()
+_PREWARM_LAST_RUN: Dict[str, float] = {}
 
 
 def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
@@ -390,6 +393,16 @@ def _schedule_bootstrap_refresh(ctx: dict, reason: str) -> None:
     thread.start()
 
 
+def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
+    now = time.monotonic()
+    with _PREWARM_LAST_RUN_LOCK:
+        last_run = _PREWARM_LAST_RUN.get(task_name, 0.0)
+        if now - last_run < interval_seconds:
+            return False
+        _PREWARM_LAST_RUN[task_name] = now
+    return True
+
+
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
         "active-markets-preview-v2",
@@ -443,13 +456,19 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=8)},
         ttl_seconds=300,
     ).get("items", [])
+    commodities_preview = ctx["get_bootstrap_component_cached"](
+        "commodities-preview-v1",
+        lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
+        ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
+    )
     system_health = ctx["get_bootstrap_component_cached"]("system-health", ctx["build_system_health_payload"], ttl_seconds=15)
     return {
         "generatedAt": ctx["utc_now_iso"](),
         "defaultWorkspace": {
             "name": "Hackathon Demo",
             "panels": [
-                "active-markets","global-orderfilled","oracle-feed","market-summary","featured-market","world-brief","price-implications","price-chart","sample-chain-trades","oracle-timeline","related-news","related-video","report-feed","research-feed","alpha-signal","whale-tracker","suspicious-flow","commodities-watch","crypto-watch","nba-scoreboard","nba-intel","inflation-nowcast","bbo-monitor","lob-depth","live-api-status","system-health",
+                "active-markets","global-orderfilled","oracle-feed","market-summary","featured-market","world-brief","price-implications","price-chart","sample-chain-trades","oracle-timeline","related-news","related-video","report-feed","research-feed","alpha-signal","whale-tracker","suspicious-flow","commodities-watch","crypto-watch","nba-scoreboard","nba-intel","inflation-nowcast","jin10-flash","bbo-monitor","lob-depth","live-api-status","system-health",
+                "f1-trackside",
             ],
         },
         "featuredMarket": featured_market,
@@ -457,6 +476,7 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         "globalTradesPreview": global_trades_preview,
         "globalOraclePreview": global_oracle_preview,
         "latestContentPreview": latest_content_preview,
+        "commoditiesPreview": commodities_preview,
         "recentTradesPreview": recent_trade_preview,
         "oraclePreview": oracle_preview,
         "contentPreview": content_preview,
@@ -519,24 +539,56 @@ def get_bootstrap_payload_cached(ctx: dict) -> Dict[str, Any]:
 
 def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
-        ("bootstrap:active-markets-preview", lambda: ctx["get_bootstrap_component_cached"](
+        ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
+        ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
             "active-markets-preview-v2",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),
-        ("oracle:12", lambda: ctx["get_recent_oracle_snapshot"](limit=12)),
-        ("oracle:16", lambda: ctx["get_recent_oracle_snapshot"](limit=16)),
-        ("trades:18", lambda: ctx["get_recent_trades_snapshot"](limit=18)),
-        ("trades:24", lambda: ctx["get_recent_trades_snapshot"](limit=24)),
-        ("content:8", lambda: ctx["get_bootstrap_component_cached"](
+        ("markets:80", 15, lambda: ctx["get_active_markets_snapshot"](page_size=80)),
+        ("oracle:12", 15, lambda: ctx["get_recent_oracle_snapshot"](limit=12)),
+        ("oracle:16", 15, lambda: ctx["get_recent_oracle_snapshot"](limit=16)),
+        ("trades:18", 15, lambda: ctx["get_recent_trades_snapshot"](limit=18)),
+        ("trades:24", 15, lambda: ctx["get_recent_trades_snapshot"](limit=24)),
+        ("content:8", 300, lambda: ctx["get_bootstrap_component_cached"](
             "latest-content-preview-v1",
             lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=8)},
             ttl_seconds=300,
         )),
-        ("content:12", lambda: ctx["get_bootstrap_component_cached"](
+        ("content:12", 300, lambda: ctx["get_bootstrap_component_cached"](
             "latest-content-preview-v2",
             lambda: {"items": _get_bootstrap_latest_content_preview(ctx, limit=12)},
             ttl_seconds=300,
+        )),
+        ("bootstrap:commodities-preview", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_bootstrap_component_cached"](
+            "commodities-preview-v1",
+            lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
+            ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
+        )),
+        ("whales", 30, lambda: ctx["get_whale_trades_snapshot"](limit=14)),
+        ("suspicious", 30, lambda: ctx["get_suspicious_trades_snapshot"](limit=12)),
+        ("alpha", 45, lambda: ctx["get_alpha_signal_snapshot"](limit=8)),
+        ("jin10", max(15, int(ctx["SIGNAL_RUNTIME_TTL_SECONDS"])), lambda: ctx["get_jin10_panel_snapshot"](limit=24)),
+        ("bootstrap", 15, ctx["get_bootstrap_payload_cached"]),
+    ]
+    for name, interval_seconds, builder in tasks:
+        if not _claim_prewarm_slot(name, interval_seconds):
+            continue
+        started_at = time.perf_counter()
+        try:
+            builder()
+            ctx["app"].logger.info("snapshot-prewarm done task=%s duration_ms=%.2f", name, (time.perf_counter() - started_at) * 1000)
+        except Exception:
+            ctx["app"].logger.exception("snapshot-prewarm failed task=%s", name)
+
+
+def prewarm_critical_payloads(ctx: dict) -> None:
+    tasks = [
+        ("commodities", lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
+        ("bootstrap:commodities-preview", lambda: ctx["get_bootstrap_component_cached"](
+            "commodities-preview-v1",
+            lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
+            ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
         ("bootstrap", ctx["get_bootstrap_payload_cached"]),
     ]
@@ -544,9 +596,9 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
         started_at = time.perf_counter()
         try:
             builder()
-            ctx["app"].logger.info("snapshot-prewarm done task=%s duration_ms=%.2f", name, (time.perf_counter() - started_at) * 1000)
+            ctx["app"].logger.info("startup-prewarm done task=%s duration_ms=%.2f", name, (time.perf_counter() - started_at) * 1000)
         except Exception:
-            ctx["app"].logger.exception("snapshot-prewarm failed task=%s", name)
+            ctx["app"].logger.exception("startup-prewarm failed task=%s", name)
 
 
 def start_snapshot_prewarm_thread(ctx: dict) -> None:

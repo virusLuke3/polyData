@@ -63,18 +63,27 @@ function nbaIntelPanel(ctx: PanelRenderContext) {
 function nbaGames(items: NonNullable<PanelRenderContext['nba']>['items']) {
   if (!items.length) return emptyState('No NBA games loaded.');
   return (
-    <div className="wm-panel-list">
+    <div className="wm-scoreboard-list">
       {items.map((game) => (
-        <article className="wm-oracle-card" key={game.id || game.name}>
-          <div className="wm-oracle-header">
+        <article className="wm-score-card" key={game.id || game.name}>
+          <div className="wm-score-card-head">
             <strong>{game.awayTeam} @ {game.homeTeam}</strong>
             <span>{game.state || 'pre'}</span>
           </div>
-          <div className="wm-summary-grid">
-            <div className="wm-summary-row"><span>TIP</span><strong>{formatDate(game.tipoff || null)}</strong></div>
-            <div className="wm-summary-row"><span>SCORE</span><strong>{`${game.awayScore ?? '-'} - ${game.homeScore ?? '-'}`}</strong></div>
+          <div className="wm-score-card-body">
+            <div className="wm-score-team-row">
+              <span>{game.awayTeam || 'Away'}</span>
+              <strong>{game.awayScore ?? '-'}</strong>
+            </div>
+            <div className="wm-score-team-row">
+              <span>{game.homeTeam || 'Home'}</span>
+              <strong>{game.homeScore ?? '-'}</strong>
+            </div>
           </div>
-          <div className="wm-news-meta">{game.status || game.broadcast || '--'}</div>
+          <div className="wm-score-card-meta">
+            <span>{formatDate(game.tipoff || null)}</span>
+            <span>{game.status || game.broadcast || '--'}</span>
+          </div>
         </article>
       ))}
     </div>
@@ -99,4 +108,3 @@ export const sportsPanelRenderers: PanelRenderMap = {
     ),
   },
 };
-

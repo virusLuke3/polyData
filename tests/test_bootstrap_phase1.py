@@ -194,6 +194,8 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         ctx: Dict[str, Any] = {
             "BOOTSTRAP_CACHE_TTL_SECONDS": 30,
             "BOOTSTRAP_COMPONENT_TTL_SECONDS": 60,
+            "FINANCE_RUNTIME_TTL_SECONDS": 300,
+            "COMMODITY_SYMBOLS": [],
             "SNAPSHOT_STORE": snapshot_store,
             "_bootstrap_cache": {"value": None, "expires_at": 0.0, "refresh_in_progress": False},
             "_bootstrap_cache_lock": threading.Lock(),
@@ -210,6 +212,7 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "get_recent_trades_snapshot": lambda limit=18: [{"marketId": 1, "txHash": "0xglobal"}],
             "get_recent_oracle_snapshot": lambda limit=12: [{"marketId": 1, "eventStatus": "propose"}],
             "get_latest_content_snapshot": lambda limit=8: {"items": [{"id": 7, "title": "Latest article"}]},
+            "get_market_group_snapshot": lambda symbols, kind="commodities": {"kind": kind, "items": []},
             "build_system_health_payload": lambda: {"apiStatus": "ok", "redis": True},
             "table_exists": lambda table_name: latest_content_from_db if table_name in {"content_items", "content_links"} else True,
             "parse_json_list": parse_json_list,
@@ -301,10 +304,19 @@ class BootstrapPhase1TestCase(unittest.TestCase):
     def test_prewarm_snapshot_payloads_continues_after_failure(self):
         counters: Dict[str, int] = {}
         ctx = {
+            "FINANCE_RUNTIME_TTL_SECONDS": 300,
+            "SIGNAL_RUNTIME_TTL_SECONDS": 45,
+            "COMMODITY_SYMBOLS": [],
             "get_bootstrap_component_cached": lambda component_key, builder, ttl_seconds=60: builder(),
+            "get_market_group_snapshot": lambda symbols, kind="commodities": {"kind": kind, "items": []},
             "get_recent_oracle_snapshot": lambda limit=12: (_ for _ in ()).throw(RuntimeError("boom")) if limit == 12 else counters.__setitem__("oracle16", counters.get("oracle16", 0) + 1),
             "get_recent_trades_snapshot": lambda limit=18: counters.__setitem__(f"trades{limit}", counters.get(f"trades{limit}", 0) + 1),
+            "get_active_markets_snapshot": lambda page_size=40: {"items": []},
             "get_bootstrap_payload_cached": lambda: counters.__setitem__("bootstrap", counters.get("bootstrap", 0) + 1),
+            "get_whale_trades_snapshot": lambda limit=14: {"items": []},
+            "get_suspicious_trades_snapshot": lambda limit=12: {"items": []},
+            "get_alpha_signal_snapshot": lambda limit=8: {"items": []},
+            "get_jin10_panel_snapshot": lambda limit=12: {"items": []},
             "table_exists": lambda table_name: table_name == "content_items",
             "get_latest_content_snapshot": lambda limit=8: {"items": [{"id": limit}]},
             "query_all": lambda sql, params=(): [],

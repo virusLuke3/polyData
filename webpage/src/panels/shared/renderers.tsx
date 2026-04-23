@@ -1,19 +1,26 @@
-import type { ChartPoint, ContentItem, OracleEvent, RuntimeMarketTicker, RuntimeTradeSignal, TradeRow } from '@/types';
+import type { ChartPoint, ContentItem, L2Level, OracleEvent, RuntimeMarketTicker, RuntimeTradeSignal, TradeRow } from '@/types';
 import { formatCompact, formatDate, formatPercent, formatRelative, shortHash } from './formatters';
 
 function emptyState(message: string) {
-  return <div className="wm-empty">{message}</div>;
+  return (
+    <div className="wm-empty wm-empty-card">
+      <span>Standby</span>
+      <strong>{message}</strong>
+      <em>Panel will hydrate as soon as the runtime feed returns rows.</em>
+    </div>
+  );
 }
 
 function priceLine(points: ChartPoint[]) {
+  const isRawValueSeries = points.some((point) => point.value !== undefined && point.value !== null);
   const clean = points
-    .map((point, index) => ({ index, value: Number(point.yesPrice) }))
+    .map((point, index) => ({ index, value: Number(isRawValueSeries ? point.value : point.yesPrice) }))
     .filter((point) => Number.isFinite(point.value));
 
   if (clean.length < 2) return emptyState('No price history loaded yet.');
 
   const width = 520;
-  const height = 160;
+  const height = 180;
   const min = Math.min(...clean.map((point) => point.value));
   const max = Math.max(...clean.map((point) => point.value));
   const span = max - min || 1;
@@ -25,27 +32,28 @@ function priceLine(points: ChartPoint[]) {
     })
     .join(' ');
   const areaPath = `${path} L ${width} ${height} L 0 ${height} Z`;
+  const axisValue = (value: number) => (isRawValueSeries ? `$${formatCompact(value)}` : formatPercent(value));
 
   return (
     <div className="wm-line-chart">
       <svg viewBox={`0 0 ${width} ${height}`} className="wm-line-chart-svg" preserveAspectRatio="none">
         <defs>
           <linearGradient id="wmPriceLine" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#ff5555" />
-            <stop offset="60%" stopColor="#ff8c37" />
-            <stop offset="100%" stopColor="#ffcf4b" />
+            <stop offset="0%" stopColor="#39ff73" />
+            <stop offset="55%" stopColor="#88ffbf" />
+            <stop offset="100%" stopColor="#f5f7f7" />
           </linearGradient>
           <linearGradient id="wmPriceArea" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="rgba(255, 168, 42, 0.42)" />
-            <stop offset="100%" stopColor="rgba(255, 168, 42, 0.03)" />
+            <stop offset="0%" stopColor="rgba(57, 255, 115, 0.26)" />
+            <stop offset="100%" stopColor="rgba(57, 255, 115, 0.02)" />
           </linearGradient>
         </defs>
         <path d={areaPath} fill="url(#wmPriceArea)" />
-        <path d={path} fill="none" stroke="url(#wmPriceLine)" strokeWidth="3" strokeLinecap="round" />
+        <path d={path} fill="none" stroke="url(#wmPriceLine)" strokeWidth="2.8" strokeLinecap="round" />
       </svg>
       <div className="wm-line-axis">
-        <span>{formatPercent(min)}</span>
-        <span>{formatPercent(max)}</span>
+        <span>LOW {axisValue(min)}</span>
+        <span>HIGH {axisValue(max)}</span>
       </div>
     </div>
   );
@@ -75,71 +83,210 @@ function sparkline(points: Array<{ value?: number | null }>, color = '#39ff73') 
   );
 }
 
+function tradeNotional(trade: TradeRow) {
+  const size = Number(trade.size);
+  const price = Number(trade.price);
+  if (!Number.isFinite(size) || !Number.isFinite(price)) return null;
+  return size * price;
+}
+
+function tradeActor(trade: TradeRow) {
+  return shortHash(trade.taker || trade.maker || trade.txHash || '', 7, 4);
+}
+
+function tradeActorFull(trade: TradeRow) {
+  return trade.taker || trade.maker || trade.txHash || '--';
+}
+
+function formatDateExact(value?: string | null) {
+  if (!value) return '--';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
 
 function tradeList(trades: TradeRow[], limit = 8) {
   if (!trades.length) return emptyState('Waiting for trade rows.');
   return (
-    <div className="wm-panel-list">
-      {trades.slice(0, limit).map((trade) => (
-        <article className="wm-trade-card" key={`${trade.txHash}-${trade.logIndex}`}>
-          <div className="wm-trade-header">
-            <span className={`wm-chip ${String(trade.side).toLowerCase() === 'buy' ? 'positive' : 'critical'}`}>
-              {trade.side || 'UNKNOWN'}
-            </span>
-            <span className="wm-dim">{trade.outcome || '--'}</span>
-          </div>
-          <div className="wm-trade-price">{formatPercent(trade.price)}</div>
-          <div className="wm-trade-market">{trade.marketTitle || `Market #${trade.marketId || '--'}`}</div>
-          <div className="wm-trade-meta">
-            <span>{shortHash(trade.txHash)}</span>
-            <span>{formatDate(trade.timestamp || null)}</span>
-          </div>
-        </article>
-      ))}
+    <div className="wm-tape-list">
+      {trades.slice(0, limit).map((trade) => {
+        const side = String(trade.side || '').toUpperCase();
+        const tone = side === 'BUY' ? 'positive' : 'critical';
+        return (
+          <article className={`wm-tape-row ${tone}`} key={`${trade.txHash}-${trade.logIndex}`}>
+            <div className="wm-tape-time">{formatRelative(trade.timestamp || null)}</div>
+            <div className="wm-tape-party">{tradeActor(trade)}</div>
+            <div className="wm-tape-main">
+              <div className="wm-tape-title">{trade.marketTitle || `Market #${trade.marketId || '--'}`}</div>
+              <div className="wm-tape-meta">
+                <span>{shortHash(trade.txHash)}</span>
+                <span>{formatDate(trade.timestamp || null)}</span>
+              </div>
+            </div>
+            <div className="wm-tape-action">
+              <span className={`wm-chip ${tone}`}>{side || 'FLOW'}</span>
+              <em>{String(trade.outcome || '--').toUpperCase()}</em>
+            </div>
+            <div className="wm-tape-price">
+              <strong>{formatPercent(trade.price)}</strong>
+              <span>{tradeNotional(trade) ? `$${formatCompact(tradeNotional(trade))}` : formatCompact(trade.size)}</span>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
+}
+
+function tradePriceCents(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${Math.round(numeric * 100)}c`;
+}
+
+function orderfilledList(
+  trades: TradeRow[],
+  limit = 8,
+  resolveMarketTitle?: (trade: TradeRow) => string | null | undefined,
+) {
+  if (!trades.length) return emptyState('Waiting for trade rows.');
+  return (
+    <div className="wm-orderfilled-list">
+      {trades.slice(0, limit).map((trade) => {
+        const side = String(trade.side || '').toUpperCase();
+        const outcome = String(trade.outcome || '--').toUpperCase();
+        const tone = side === 'BUY' ? 'positive' : 'critical';
+        const actor = tradeActor(trade);
+        const actorFull = tradeActorFull(trade);
+        const marketTitle = resolveMarketTitle?.(trade) || trade.marketTitle || null;
+        return (
+          <article className={`wm-orderfilled-row ${tone}`} key={`${trade.txHash}-${trade.logIndex}`}>
+            <div className="wm-orderfilled-top">
+              <div className="wm-orderfilled-headline">
+                <span className={`wm-chip ${tone}`}>{side || 'FLOW'}</span>
+                <span className={`wm-orderfilled-outcome ${outcome === 'YES' ? 'yes' : outcome === 'NO' ? 'no' : ''}`}>{outcome}</span>
+                <strong>{tradePriceCents(trade.price)}</strong>
+                <em>{tradeNotional(trade) ? `$${formatCompact(tradeNotional(trade))}` : '$--'}</em>
+              </div>
+              {trade.marketId ? <span className="wm-orderfilled-market-id">MKT #{trade.marketId}</span> : null}
+            </div>
+            <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div>
+            <div className="wm-orderfilled-meta">
+              <span>{formatRelative(trade.timestamp || null)}</span>
+              <span>{actor}</span>
+            </div>
+            <div className="wm-orderfilled-tooltip" role="tooltip" aria-hidden="true">
+              <div className="wm-orderfilled-tooltip-title">{marketTitle || `Market #${trade.marketId || '--'}`}</div>
+              <div className="wm-orderfilled-tooltip-row">
+                <span>Address</span>
+                <strong>{actorFull}</strong>
+              </div>
+              <div className="wm-orderfilled-tooltip-row">
+                <span>Time</span>
+                <strong>{formatDateExact(trade.timestamp)}</strong>
+              </div>
+              {trade.marketId ? (
+                <div className="wm-orderfilled-tooltip-row">
+                  <span>Market</span>
+                  <strong>#{trade.marketId}</strong>
+                </div>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function oracleTone(status?: string | null) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized.includes('sett')) return 'positive';
+  if (normalized.includes('disput') || normalized.includes('reject')) return 'critical';
+  if (normalized.includes('propos')) return 'warning';
+  return 'muted';
 }
 
 function oracleList(events: OracleEvent[], limit = 8) {
   if (!events.length) return emptyState('No oracle activity loaded.');
   return (
-    <div className="wm-panel-list">
-      {events.slice(0, limit).map((event, index) => (
-        <article className="wm-oracle-card" key={`${event.id || index}-${event.blockNumber || index}`}>
-          <div className="wm-oracle-header">
-            <strong>{event.marketTitle || event.eventStatus || 'Oracle event'}</strong>
-            <span>{event.eventStatus || 'event'}</span>
-          </div>
-          <div className="wm-oracle-meta">
-            <span>{formatDate(event.eventTime || null)}</span>
-            <span>{shortHash(event.questionId || event.conditionId || '', 8, 5)}</span>
-          </div>
-        </article>
-      ))}
+    <div className="wm-oracle-list">
+      {events.slice(0, limit).map((event, index) => {
+        const price = event.settledPrice ?? event.proposedPrice;
+        return (
+          <article className="wm-oracle-event-card" key={`${event.id || index}-${event.blockNumber || index}`}>
+            <div className="wm-oracle-event-top">
+              <strong>{event.marketTitle || event.eventStatus || 'Oracle event'}</strong>
+              <span className={`wm-status-pill ${oracleTone(event.eventStatus)}`}>{event.eventStatus || 'event'}</span>
+            </div>
+            <div className="wm-oracle-event-middle">
+              <span>{event.sourceAdapter || event.sourceOracle || event.requester || 'uma oracle'}</span>
+              <em>{price !== null && price !== undefined ? formatPercent(price) : 'pending'}</em>
+            </div>
+            <div className="wm-oracle-event-meta">
+              <span>{formatDate(event.eventTime || null)}</span>
+              <span>{shortHash(event.questionId || event.conditionId || event.txHash || '', 8, 5)}</span>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
+}
+
+function contentTone(type?: string | null) {
+  const normalized = String(type || '').toLowerCase();
+  if (normalized.includes('video')) return 'video';
+  if (normalized.includes('report')) return 'report';
+  if (normalized.includes('research')) return 'research';
+  return 'news';
 }
 
 function contentList(items: ContentItem[], emptyMessage: string) {
   if (!items.length) return emptyState(emptyMessage);
   return (
-    <div className="wm-panel-list">
-      {items.slice(0, 6).map((item, index) => (
-        <a className="wm-news-card" href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
-          <div className="wm-news-source">{item.source || item.contentType || 'intel'}</div>
-          <div className="wm-news-title">{item.title || 'Untitled item'}</div>
-          <div className="wm-news-meta">{formatDate(item.publishedAt || null)}</div>
-        </a>
-      ))}
+    <div className="wm-intel-list">
+      {items.slice(0, 8).map((item, index) => {
+        const tone = contentTone(item.contentType);
+        return (
+          <a className={`wm-intel-card ${tone}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
+            <div className="wm-intel-topline">
+              <div className="wm-news-source">{item.source || item.contentType || 'intel'}</div>
+              <span className={`wm-status-pill ${tone === 'news' ? 'positive' : 'muted'}`}>{(item.contentType || tone).toUpperCase()}</span>
+            </div>
+            <div className="wm-news-title">{item.title || 'Untitled item'}</div>
+            {item.summary ? <p className="wm-intel-summary">{item.summary}</p> : null}
+            <div className="wm-news-meta">
+              <span>{formatDate(item.publishedAt || null)}</span>
+              <span>{tone}</span>
+            </div>
+          </a>
+        );
+      })}
     </div>
   );
+}
+
+function summaryTone(value: string) {
+  const normalized = String(value).toLowerCase();
+  if (normalized.includes('ok') || normalized.includes('online') || normalized.includes('live') || normalized.includes('active')) return 'positive';
+  if (normalized.includes('off') || normalized.includes('down') || normalized.includes('error')) return 'critical';
+  if (normalized.includes('warn') || normalized.includes('delay') || normalized.includes('pending')) return 'warning';
+  return 'muted';
 }
 
 function summaryRows(rows: Array<{ label: string; value: string }>) {
   return (
     <div className="wm-summary-grid">
       {rows.map((row) => (
-        <div className="wm-summary-row" key={row.label}>
+        <div className={`wm-summary-row ${summaryTone(row.value)}`} key={row.label}>
           <span>{row.label}</span>
           <strong>{row.value}</strong>
         </div>
@@ -152,18 +299,21 @@ function marketTickerGrid(items: RuntimeMarketTicker[], emptyMessage: string) {
   if (!items.length) return emptyState(emptyMessage);
   return (
     <div className="wm-market-grid">
-      {items.map((item) => (
-        <article className="wm-market-ticker-card" key={item.symbol}>
-          <div className="wm-market-ticker-top">
-            <span>{item.label}</span>
-            <strong>{item.price == null ? '--' : Number(item.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
-          </div>
-          <div className="wm-market-spark-wrap">{sparkline(item.points || [], (item.changePercent || 0) >= 0 ? '#39ff73' : '#ff6464')}</div>
-          <div className={`wm-market-change ${(item.changePercent || 0) >= 0 ? 'up' : 'down'}`}>
-            {item.changePercent == null ? '--' : `${item.changePercent > 0 ? '+' : ''}${item.changePercent.toFixed(2)}%`}
-          </div>
-        </article>
-      ))}
+      {items.map((item) => {
+        const isUp = (item.changePercent || 0) >= 0;
+        return (
+          <article className="wm-market-ticker-card" key={item.symbol}>
+            <div className="wm-market-ticker-top">
+              <span>{item.label}</span>
+              <strong>{item.price == null ? '--' : Number(item.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
+            </div>
+            <div className="wm-market-spark-wrap">{sparkline(item.points || [], isUp ? '#39ff73' : '#ff6464')}</div>
+            <div className={`wm-market-change ${isUp ? 'up' : 'down'}`}>
+              {item.changePercent == null ? '--' : `${item.changePercent > 0 ? '+' : ''}${item.changePercent.toFixed(2)}%`}
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -180,9 +330,7 @@ function marketTickerList(items: RuntimeMarketTicker[], emptyMessage: string) {
               <strong>{item.label}</strong>
               <span>{item.symbol}</span>
             </div>
-            <div className="wm-ticker-spark">
-              {sparkline(item.points || [], isUp ? '#39ff73' : '#ff6464')}
-            </div>
+            <div className="wm-ticker-spark">{sparkline(item.points || [], isUp ? '#39ff73' : '#ff6464')}</div>
             <div className="wm-ticker-value">
               <strong>{item.price == null ? '--' : Number(item.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}</strong>
               <span className={isUp ? 'up' : 'down'}>
@@ -231,11 +379,14 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
             <div className="wm-signal-content">
               <div className="wm-signal-topline">
                 <div className="wm-signal-source">
-                  <span className="wm-signal-icon">N</span>
+                  <span className="wm-signal-icon">{item.sourceTag?.slice(0, 1) || 'S'}</span>
                   <strong>{item.sourceLabel || (item.relatedContent?.length ? 'NEWS+$' : 'CHAIN+$')}</strong>
                   <em className={bias}>{bias}</em>
                 </div>
-                {!!item.timestamp && <span className="wm-signal-age">{formatRelative(item.timestamp)}</span>}
+                <div className="wm-signal-topline-right">
+                  {!!item.timestamp && <span className="wm-signal-age">{formatRelative(item.timestamp)}</span>}
+                  <span className={`wm-signal-severity ${severity}`}>{severity.toUpperCase()}</span>
+                </div>
               </div>
 
               <div className="wm-signal-copy-row">
@@ -331,9 +482,17 @@ function tradeSignalList(items: RuntimeTradeSignal[], emptyMessage: string) {
   );
 }
 
+function levelTotal(levels: L2Level[]) {
+  return levels.reduce((sum, level) => {
+    const size = Number(level.size);
+    return Number.isFinite(size) ? sum + size : sum;
+  }, 0);
+}
 
 export {
   emptyState,
+  levelTotal,
+  orderfilledList,
   priceLine,
   sparkline,
   tradeList,

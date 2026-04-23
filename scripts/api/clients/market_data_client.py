@@ -38,11 +38,20 @@ def range_to_seconds(range_name: str) -> int:
     return mapping.get(normalized, 86400)
 
 
-def get_yahoo_market_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
+def get_yahoo_market_snapshot(
+    ctx: dict,
+    symbol: str,
+    *,
+    interval: str = "30m",
+    range_name: str = "5d",
+    ttl_seconds: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     cache_key = json.dumps({"symbol": symbol, "interval": interval, "range": range_name}, sort_keys=True, ensure_ascii=True)
-    cached = ctx["get_cached_runtime_payload"]("yahoo-chart", cache_key)
-    if cached is not None:
-        return cached
+    use_runtime_cache = ttl_seconds is None or int(ttl_seconds) > 5
+    if use_runtime_cache:
+        cached = ctx["get_cached_runtime_payload"]("yahoo-chart", cache_key)
+        if cached is not None:
+            return cached
     payload = http_json_get(
         ctx,
         f"{ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')}/{symbol}",
@@ -88,7 +97,10 @@ def get_yahoo_market_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", 
         "name": meta.get("symbol") or symbol,
         "points": points[-48:],
     }
-    return ctx["set_cached_runtime_payload"]("yahoo-chart", cache_key, snapshot, ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"])
+    cache_ttl = max(1, int(ttl_seconds if ttl_seconds is not None else ctx["FINANCE_RUNTIME_TTL_SECONDS"]))
+    if use_runtime_cache:
+        return ctx["set_cached_runtime_payload"]("yahoo-chart", cache_key, snapshot, ttl_seconds=cache_ttl)
+    return snapshot
 
 
 def _fetch_clob_prices_history(ctx: dict, token_id: str, *, start_ts: int, end_ts: int, fidelity_minutes: int) -> List[Dict[str, Any]]:
@@ -288,4 +300,3 @@ def get_market_clob_price_series(ctx: dict, market: Optional[Dict[str, Any]], ra
             )
 
     return ctx["set_cached_runtime_payload"]("clob-price-series", cache_key, points[-400:])
-

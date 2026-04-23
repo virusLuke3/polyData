@@ -11,22 +11,13 @@ def fetch_dashboard_market_status(ctx: dict, now_iso: str) -> List[Dict[str, Any
         FROM (
             SELECT
                 CASE
-                    WHEN settled.market_id IS NOT NULL THEN 'Settled'
-                    WHEN proposed.market_id IS NOT NULL THEN 'Proposed'
+                    WHEN COALESCE(mss.has_settle, 0) = 1 THEN 'Settled'
+                    WHEN COALESCE(mss.has_propose, 0) = 1 THEN 'Proposed'
                     WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
                     ELSE 'Active'
                 END AS status
             FROM markets m
-            LEFT JOIN (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'settle' AND market_id IS NOT NULL
-            ) settled ON settled.market_id = m.id
-            LEFT JOIN (
-                SELECT DISTINCT market_id
-                FROM oracle_events
-                WHERE event_status = 'propose' AND market_id IS NOT NULL
-            ) proposed ON proposed.market_id = m.id
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         ) status_rows
         GROUP BY status
         ORDER BY value DESC

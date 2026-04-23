@@ -21,6 +21,8 @@ export const PANEL_LIBRARY: PanelDefinition[] = [
   { id: 'system-health', title: 'System Health', eyebrow: 'system', description: 'Infra and sync readiness.' },
   { id: 'commodities-watch', title: 'Commodities Watch', eyebrow: 'macro', description: 'Commodity price boards and sparklines.' },
   { id: 'crypto-watch', title: 'Crypto Watch', eyebrow: 'macro', description: 'Crypto spot trends and sparklines.' },
+  { id: 'jin10-flash', title: 'Jin10 Flash', eyebrow: 'macro', description: 'Jin10 macro flash feed in market-card form.' },
+  { id: 'f1-trackside', title: 'BWE News', eyebrow: 'news', description: 'BWENews runtime RSS flashes with cached auto-refresh.' },
   { id: 'nba-scoreboard', title: 'NBA Scoreboard', eyebrow: 'sports', description: 'Upcoming and live NBA games.' },
   { id: 'nba-intel', title: 'NBA Intel', eyebrow: 'sports', description: 'ESPN news, starting lineups, and pregame rumors.' },
   { id: 'inflation-nowcast', title: 'Inflation Nowcast', eyebrow: 'macro', description: 'Cleveland Fed CPI/PCE nowcasting panel.' },
@@ -28,4 +30,3 @@ export const PANEL_LIBRARY: PanelDefinition[] = [
   { id: 'whale-tracker', title: 'Whale Tracker', eyebrow: 'chain', description: 'Largest recent on-chain trades.' },
   { id: 'suspicious-flow', title: 'Suspicious Flow', eyebrow: 'chain', description: 'Pre-oracle or unusual trade flow.' },
 ];
-

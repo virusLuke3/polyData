@@ -3,6 +3,8 @@ import type { PanelRenderMap, RegistryEntry } from './types';
 import { briefPanelRenderers } from './brief-panels';
 import { chainPanelRenderers } from './chain-panels';
 import { contentPanelRenderers } from './content-panels';
+import { f1PanelRenderers } from './f1-panels';
+import { jin10PanelRenderers } from './jin10-panels';
 import { macroPanelRenderers } from './macro-panels';
 import { marketPanelRenderers } from './market-panels';
 import { oraclePanelRenderers } from './oracle-panels';
@@ -19,6 +21,8 @@ const PANEL_RENDERERS: PanelRenderMap = {
   ...chainPanelRenderers,
   ...oraclePanelRenderers,
   ...contentPanelRenderers,
+  ...f1PanelRenderers,
+  ...jin10PanelRenderers,
   ...systemPanelRenderers,
   ...macroPanelRenderers,
   ...sportsPanelRenderers,

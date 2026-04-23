@@ -34,6 +34,7 @@ Thumbs.db
 
 # 日志与临时
 *.log
+wget-log
 .cache/
 database/*.db
 database/*.db-wal

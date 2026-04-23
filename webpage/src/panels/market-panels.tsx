@@ -3,8 +3,79 @@ import { Panel } from '@/components/Panel';
 import type { MarketListItem } from '@/types';
 import type { PanelRenderMap } from './types';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, formatSignedPercent, shortHash, signedClass } from './shared/formatters';
-import { emptyState, priceLine, summaryRows } from './shared/renderers';
+import { emptyState, priceLine } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
+
+type ImpactLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
+type ScoredMarket = MarketListItem & { impactScore: number; impactLevel: ImpactLevel };
+
+function numericValue(value: string | number | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function percentileRanks(values: number[]) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return values.map((value) => {
+    let low = 0;
+    let high = sorted.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if ((sorted[mid] ?? 0) < value) low = mid + 1;
+      else high = mid;
+    }
+    return sorted.length > 1 ? low / (sorted.length - 1) : 0.5;
+  });
+}
+
+function impactLevel(score: number): ImpactLevel {
+  if (score >= 80) return 'critical';
+  if (score >= 60) return 'high';
+  if (score >= 35) return 'medium';
+  if (score >= 15) return 'low';
+  return 'info';
+}
+
+function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
+  if (!markets.length) return [];
+  const now = Date.now();
+  const volumeValues = markets.map((market) => Math.log1p(Math.max(0, numericValue(market.volume24h))));
+  const changeValues = markets.map((market) => Math.abs(numericValue(market.change24h)));
+  const tradesValues = markets.map((market) => Math.log1p(Math.max(0, numericValue(market.tradeCount24h))));
+
+  const volumeRanks = percentileRanks(volumeValues);
+  const changeRanks = percentileRanks(changeValues);
+  const tradesRanks = percentileRanks(tradesValues);
+
+  return markets.map((market, index) => {
+    let recencyScore = 0;
+    if (market.createdAt) {
+      const ageHours = (now - new Date(market.createdAt).getTime()) / (1000 * 60 * 60);
+      if (ageHours < 6) recencyScore = 15;
+      else if (ageHours < 24) recencyScore = 10;
+      else if (ageHours < 48) recencyScore = 5;
+    }
+
+    const score = Math.round(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          volumeRanks[index]! * 45 +
+          changeRanks[index]! * 30 +
+          tradesRanks[index]! * 15 +
+          recencyScore,
+        ),
+      ),
+    );
+
+    return {
+      ...market,
+      impactScore: score,
+      impactLevel: impactLevel(score),
+    };
+  });
+}
 
 function marketTopic(market: MarketListItem) {
   const tag = market.tags?.find((item) => String(item || '').trim());
@@ -34,7 +105,7 @@ function marketAccent(market: MarketListItem) {
   return '#22c55e';
 }
 
-function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
+function activeMarketsList(markets: ScoredMarket[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
   if (!markets.length) return emptyState('No active markets yet.');
   return (
     <div className="wm-poly-market-list">
@@ -73,7 +144,7 @@ function activeMarketsList(markets: MarketListItem[], selectedMarketId: number |
   );
 }
 
-type ActiveMarketSort = 'impact' | 'volume' | 'new';
+type ActiveMarketSort = 'impact' | 'volume' | 'change' | 'new';
 
 function ActiveMarketsPanel({
   markets,
@@ -104,19 +175,34 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : [...markets];
+    const scored = scoreMarkets(filtered);
 
     if (sortOrder === 'volume') {
-      return filtered.sort(
+      return scored.sort(
         (a, b) =>
           Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
           Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
           new Date(b.lastTradeAt || 0).getTime() - new Date(a.lastTradeAt || 0).getTime()
       );
     }
-    if (sortOrder === 'new') {
-      return filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    if (sortOrder === 'change') {
+      return scored
+        .filter((market) => Number.isFinite(Number(market.change24h)))
+        .sort(
+          (a, b) =>
+            Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0)) ||
+            Number(b.volume24h || 0) - Number(a.volume24h || 0)
+        );
     }
-    return filtered;
+    if (sortOrder === 'new') {
+      return scored.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    }
+    return scored.sort(
+      (a, b) =>
+        b.impactScore - a.impactScore ||
+        Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
+        Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0))
+    );
   }, [markets, search, sortOrder]);
 
   return (
@@ -148,6 +234,7 @@ function ActiveMarketsPanel({
           >
             <option value="impact">Impact</option>
             <option value="volume">Volume</option>
+            <option value="change">Change</option>
             <option value="new">Newest</option>
           </select>
         </div>
@@ -172,47 +259,98 @@ export const marketPanelRenderers: PanelRenderMap = {
   'featured-market': {
     render: (ctx) => (
       <Panel title="FEATURED MARKET" badge={ctx.selectedMarket?.status || 'ACTIVE'} status="live">
-        {summaryRows([
-          { label: 'MARKET', value: ctx.selectedMarket?.title || '--' },
-          { label: 'CATEGORY', value: ctx.selectedMarket?.category || '--' },
-          { label: 'PRICE', value: formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice) },
-          { label: 'END', value: formatDate(ctx.selectedMarket?.endDate || null) },
-        ])}
+        <div className="wm-feature-panel">
+          <div className="wm-feature-hero">
+            <span className="wm-feature-kicker">{ctx.selectedMarket?.category || 'market focus'}</span>
+            <strong>{ctx.selectedMarket?.title || 'No market selected.'}</strong>
+            <div className="wm-feature-foot">
+              <span>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</span>
+              <em>{ctx.selectedMarket?.endDate ? formatRelative(ctx.selectedMarket.endDate) : 'rolling'}</em>
+            </div>
+          </div>
+          <div className="wm-feature-grid">
+            <article className="wm-feature-stat">
+              <span>CATEGORY</span>
+              <strong>{ctx.selectedMarket?.category || '--'}</strong>
+            </article>
+            <article className="wm-feature-stat">
+              <span>PRICE</span>
+              <strong>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</strong>
+            </article>
+            <article className="wm-feature-stat">
+              <span>VOLUME</span>
+              <strong>{formatCurrencyCompact(globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId)?.volume24h)}</strong>
+            </article>
+            <article className="wm-feature-stat">
+              <span>END</span>
+              <strong>{formatDate(ctx.selectedMarket?.endDate || null)}</strong>
+            </article>
+          </div>
+        </div>
       </Panel>
     ),
   },
   'market-summary': {
     render: (ctx) => (
       <Panel title="MARKET SUMMARY" badge="MARKET" status="live">
-        {summaryRows([
-          { label: 'CONDITION', value: shortHash(ctx.selectedMarket?.conditionId || '', 10, 8) },
-          { label: 'QUESTION', value: shortHash(ctx.selectedMarket?.questionId || '', 10, 8) },
-          { label: 'YES TOKEN', value: shortHash(ctx.selectedMarket?.yesTokenId || '', 10, 8) },
-          { label: 'NO TOKEN', value: shortHash(ctx.selectedMarket?.noTokenId || '', 10, 8) },
-          { label: 'STATUS', value: ctx.selectedMarket?.status || '--' },
-          { label: 'ORACLE', value: shortHash(ctx.selectedMarket?.oracle || '', 10, 8) },
-        ])}
+        <div className="wm-detail-stack">
+          {[
+            { label: 'CONDITION', value: shortHash(ctx.selectedMarket?.conditionId || '', 10, 8) },
+            { label: 'QUESTION', value: shortHash(ctx.selectedMarket?.questionId || '', 10, 8) },
+            { label: 'YES TOKEN', value: shortHash(ctx.selectedMarket?.yesTokenId || '', 10, 8) },
+            { label: 'NO TOKEN', value: shortHash(ctx.selectedMarket?.noTokenId || '', 10, 8) },
+            { label: 'STATUS', value: ctx.selectedMarket?.status || '--' },
+            { label: 'ORACLE', value: shortHash(ctx.selectedMarket?.oracle || '', 10, 8) },
+          ].map((row) => (
+            <article className="wm-detail-row" key={row.label}>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </article>
+          ))}
+        </div>
       </Panel>
     ),
   },
   'price-implications': {
     render: (ctx) => (
       <Panel title="AI MARKET IMPLICATIONS" badge="LIVE" status="live">
-        {summaryRows([
-          { label: 'LATEST', value: formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice) },
-          { label: '1H', value: formatPercent(ctx.bundle?.price?.change1h) },
-          { label: '24H VOL', value: formatCompact(ctx.bundle?.price?.volume24h) },
-          { label: '24H TRADES', value: String(ctx.bundle?.price?.tradeCount24h || 0) },
-        ])}
+        <div className="wm-implications-grid">
+          {[
+            { label: 'LATEST', value: formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice), tone: 'positive' },
+            { label: '1H', value: formatPercent(ctx.bundle?.price?.change1h), tone: 'muted' },
+            { label: '24H VOL', value: formatCompact(ctx.bundle?.price?.volume24h), tone: 'warning' },
+            { label: '24H TRADES', value: String(ctx.bundle?.price?.tradeCount24h || 0), tone: 'muted' },
+          ].map((row) => (
+            <article className={`wm-implication-card ${row.tone}`} key={row.label}>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </article>
+          ))}
+        </div>
       </Panel>
     ),
   },
   'price-chart': {
     render: (ctx) => (
       <Panel title="PRICE SURFACE" badge="YES" status="live" count={ctx.bundle?.chart?.points.length || 0}>
-        {priceLine(ctx.bundle?.chart?.points || [])}
+        <div className="wm-price-surface">
+          <div className="wm-price-surface-head">
+            <article>
+              <span>LAST</span>
+              <strong>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</strong>
+            </article>
+            <article>
+              <span>1H</span>
+              <strong>{formatPercent(ctx.bundle?.price?.change1h)}</strong>
+            </article>
+            <article>
+              <span>24H TRADES</span>
+              <strong>{String(ctx.bundle?.price?.tradeCount24h || 0)}</strong>
+            </article>
+          </div>
+          {priceLine(ctx.bundle?.chart?.points || [])}
+        </div>
       </Panel>
     ),
   },
 };
-

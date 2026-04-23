@@ -90,6 +90,11 @@ class ApiSettings:
     espn_nba_base_url: str
     nba_lineups_base_url: str
     cleveland_fed_nowcast_url: str
+    f1_panel_path: str
+    jin10_flash_api_url: str
+    jin10_flash_channel: str
+    jin10_flash_app_id: str
+    jin10_flash_version: str
 
 
 @lru_cache(maxsize=1)
@@ -125,4 +130,12 @@ def load_api_settings() -> ApiSettings:
             "POLYDATA_CLEVELAND_FED_NOWCAST_URL",
             "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting",
         ),
+        f1_panel_path=_get_str(
+            "POLYDATA_F1_PANEL_PATH",
+            str((PROJECT_ROOT / "data" / "runtime" / "f1" / "panel.json").resolve()),
+        ),
+        jin10_flash_api_url=_get_str("POLYDATA_JIN10_FLASH_API_URL", "https://flash-api.jin10.com/get_flash_list"),
+        jin10_flash_channel=_get_str("POLYDATA_JIN10_FLASH_CHANNEL", "-8200"),
+        jin10_flash_app_id=_get_str("POLYDATA_JIN10_APP_ID", "SO1EJGmNgCtmpcPF"),
+        jin10_flash_version=_get_str("POLYDATA_JIN10_VERSION", "1.0.0"),
     )

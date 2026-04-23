@@ -9,6 +9,8 @@ from .bootstrap import create_bootstrap_blueprint
 from .content import create_content_blueprint
 from .lob import create_lob_blueprint
 from .markets import create_markets_blueprint
+from .runtime_f1 import create_runtime_f1_blueprint
+from .runtime_jin10 import create_runtime_jin10_blueprint
 from .runtime_macro import create_runtime_macro_blueprint
 from .runtime_markets import create_runtime_markets_blueprint
 from .runtime_signals import create_runtime_signals_blueprint
@@ -24,7 +26,9 @@ def register_blueprints(app: Flask, helpers: dict) -> None:
         create_markets_blueprint,
         create_runtime_markets_blueprint,
         create_runtime_sports_blueprint,
+        create_runtime_f1_blueprint,
         create_runtime_macro_blueprint,
+        create_runtime_jin10_blueprint,
         create_runtime_signals_blueprint,
         create_content_blueprint,
         create_analytics_blueprint,

@@ -660,6 +660,35 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
     )
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS market_status_snapshot (
+            market_id INTEGER PRIMARY KEY,
+            has_settle INTEGER NOT NULL DEFAULT 0,
+            has_propose INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_list_serving (
+            market_id INTEGER PRIMARY KEY,
+            latest_price REAL,
+            latest_trade_at TEXT,
+            price_24h_ago REAL,
+            trade_count_24h INTEGER NOT NULL DEFAULT 0,
+            volume_24h REAL NOT NULL DEFAULT 0,
+            last_trade_at TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    try:
+        cursor.execute("ALTER TABLE market_list_serving ADD COLUMN price_24h_ago REAL")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS trade_addresses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             trade_id INTEGER,
@@ -805,6 +834,9 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
+        ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
         ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
         ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
@@ -938,6 +970,32 @@ def _init_mysql_schema(conn) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS market_status_snapshot (
+            market_id BIGINT NOT NULL PRIMARY KEY,
+            has_settle TINYINT NOT NULL DEFAULT 0,
+            has_propose TINYINT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_market_status_snapshot_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS market_list_serving (
+            market_id BIGINT NOT NULL PRIMARY KEY,
+            latest_price DECIMAL(20, 10),
+            latest_trade_at DATETIME(6),
+            price_24h_ago DECIMAL(20, 10),
+            trade_count_24h BIGINT NOT NULL DEFAULT 0,
+            volume_24h DECIMAL(38, 18) NOT NULL DEFAULT 0,
+            last_trade_at DATETIME(6),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_market_list_serving_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS trade_addresses (
             id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             trade_id BIGINT,
@@ -1063,6 +1121,7 @@ def _init_mysql_schema(conn) -> None:
         ("contract", "VARCHAR(255)"),
     ):
         ensure_column_exists(conn, "trades", col, col_type)
+    ensure_column_exists(conn, "market_list_serving", "price_24h_ago", "DECIMAL(20, 10)")
     _ensure_mysql_uma_adapter_mapping_schema(conn)
     _ensure_mysql_neg_risk_request_mapping_schema(conn)
     for table, index_name, cols in (
@@ -1076,6 +1135,9 @@ def _init_mysql_schema(conn) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
+        ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
         ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
         ("trade_addresses", "idx_trade_addresses_market_time", ["market_id", "trade_time", "block_number", "log_index"]),
@@ -1090,6 +1152,7 @@ def _init_mysql_schema(conn) -> None:
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),
         ("oracle_events", "idx_oracle_events_status", ["event_status"]),
+        ("oracle_events", "idx_oracle_events_status_market_id", ["event_status", "market_id"]),
         ("oracle_events", "idx_oracle_events_matched_by", ["matched_by"]),
         ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_question_id", ["question_id"]),
         ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_source_operator", ["source_operator"]),

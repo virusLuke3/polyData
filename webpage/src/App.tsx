@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { WorldFlatMap } from '@/components/WorldFlatMap';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { PANEL_LIBRARY, PANEL_REGISTRY } from '@/panels/registry';
@@ -11,6 +12,8 @@ import {
   fetchRuntimeAlpha,
   fetchRuntimeCommodities,
   fetchRuntimeCrypto,
+  fetchRuntimeF1,
+  fetchRuntimeJin10,
   fetchRuntimeNba,
   fetchRuntimeNbaIntel,
   fetchRuntimeInflationNowcast,
@@ -29,6 +32,8 @@ import type {
   PanelRenderContext,
   RuntimeMarketGroup,
   RuntimeInflationNowcastPayload,
+  RuntimeF1Payload,
+  RuntimeJin10Payload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeSignalPayload,
@@ -52,6 +57,9 @@ const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
+const FAST_MARKETS_PAGE_SIZE = 80;
+const SEARCH_MARKETS_PAGE_SIZE = 120;
+const CRYPTO_REFRESH_INTERVAL_MS = 5000;
 
 const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'markets', label: 'Polymarket Markets', icon: '◎', enabled: true, hint: 'ACTIVE' },
@@ -73,6 +81,7 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
 ];
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
+const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled']);
 
 function clampMapZoom(value: unknown) {
   const numeric = Number(value);
@@ -136,7 +145,10 @@ type RuntimePanelRefreshOptions = {
 };
 
 type IdleSchedulerWindow = Window & typeof globalThis & {
-  requestIdleCallback?: (callback: () => void) => number;
+  requestIdleCallback?: (
+    callback: (deadline: IdleDeadline) => void,
+    options?: { timeout: number },
+  ) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
 
@@ -144,7 +156,8 @@ function scheduleIdleTask(task: () => void) {
   if (typeof window === 'undefined') return () => undefined;
   const idleWindow = window as IdleSchedulerWindow;
   if (typeof idleWindow.requestIdleCallback === 'function') {
-    const handle = idleWindow.requestIdleCallback(() => task());
+    // Give slow runtime panels a bounded delay so animated views do not starve them forever.
+    const handle = idleWindow.requestIdleCallback(() => task(), { timeout: 1200 });
     return () => {
       if (typeof idleWindow.cancelIdleCallback === 'function') {
         idleWindow.cancelIdleCallback(handle);
@@ -166,6 +179,8 @@ export function App() {
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
   const [commodities, setCommodities] = useState<RuntimeMarketGroup | null>(null);
   const [crypto, setCrypto] = useState<RuntimeMarketGroup | null>(null);
+  const [f1, setF1] = useState<RuntimeF1Payload | null>(null);
+  const [jin10, setJin10] = useState<RuntimeJin10Payload | null>(null);
   const [nba, setNba] = useState<RuntimeNbaPayload | null>(null);
   const [nbaIntel, setNbaIntel] = useState<RuntimeNbaIntelPayload | null>(null);
   const [inflationNowcast, setInflationNowcast] = useState<RuntimeInflationNowcastPayload | null>(null);
@@ -205,7 +220,10 @@ export function App() {
       fetchRecentTrades(24),
       fetchRecentOracle(16),
       fetchLatestContent(12),
-      fetchAllActiveMarkets('', 160),
+      fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
+      fetchRuntimeCommodities(),
+      fetchRuntimeF1(),
+      fetchRuntimeJin10(24),
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
@@ -224,6 +242,12 @@ export function App() {
     if (settled[4].status === 'fulfilled') setMarkets(settled[4].value.items || []);
     else if (fallbackMarkets.length) setMarkets(fallbackMarkets);
 
+    if (settled[5].status === 'fulfilled') setCommodities(settled[5].value);
+    else if (bootstrapPayload?.commoditiesPreview) setCommodities(bootstrapPayload.commoditiesPreview);
+
+    if (settled[6].status === 'fulfilled') setF1(settled[6].value);
+    if (settled[7].status === 'fulfilled') setJin10(settled[7].value);
+
     return {
       marketsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
     };
@@ -231,7 +255,6 @@ export function App() {
 
   async function refreshSlowRuntimePanels() {
     const settled = await Promise.allSettled([
-      fetchRuntimeCommodities(),
       fetchRuntimeCrypto(),
       fetchRuntimeNba(10),
       fetchRuntimeNbaIntel(12),
@@ -241,14 +264,13 @@ export function App() {
       fetchRuntimeSuspicious(12),
     ]);
 
-    if (settled[0].status === 'fulfilled') setCommodities(settled[0].value);
-    if (settled[1].status === 'fulfilled') setCrypto(settled[1].value);
-    if (settled[2].status === 'fulfilled') setNba(settled[2].value);
-    if (settled[3].status === 'fulfilled') setNbaIntel(settled[3].value);
-    if (settled[4].status === 'fulfilled') setInflationNowcast(settled[4].value);
-    if (settled[5].status === 'fulfilled') setAlphaSignals(settled[5].value);
-    if (settled[6].status === 'fulfilled') setWhaleTrades(settled[6].value);
-    if (settled[7].status === 'fulfilled') setSuspiciousTrades(settled[7].value);
+    if (settled[0].status === 'fulfilled') setCrypto(settled[0].value);
+    if (settled[1].status === 'fulfilled') setNba(settled[1].value);
+    if (settled[2].status === 'fulfilled') setNbaIntel(settled[2].value);
+    if (settled[3].status === 'fulfilled') setInflationNowcast(settled[3].value);
+    if (settled[4].status === 'fulfilled') setAlphaSignals(settled[4].value);
+    if (settled[5].status === 'fulfilled') setWhaleTrades(settled[5].value);
+    if (settled[6].status === 'fulfilled') setSuspiciousTrades(settled[6].value);
   }
 
   function scheduleSlowRuntimePanels() {
@@ -338,6 +360,7 @@ export function App() {
         setGlobalTrades(bootstrapPayload.globalTradesPreview || []);
         setGlobalOracle(bootstrapPayload.globalOraclePreview || []);
         setLatestContent(bootstrapPayload.latestContentPreview || []);
+        setCommodities(bootstrapPayload.commoditiesPreview || null);
         setSelectedMarketId(liveFeatured || bootstrapPayload.featuredMarket?.id || null);
         setActivePanelIds((current) => (
           current.length
@@ -400,16 +423,41 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+
+    async function refreshCryptoPanel() {
+      try {
+        const payload = await fetchRuntimeCrypto();
+        if (!cancelled) setCrypto(payload);
+      } catch {
+        // Keep the latest visible quote board rather than flashing empty on transient market-data errors.
+      }
+    }
+
+    void refreshCryptoPanel();
+
+    const timer = window.setInterval(() => {
+      void refreshCryptoPanel();
+    }, CRYPTO_REFRESH_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!marketQuery.trim()) return;
+    let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await fetchAllActiveMarkets(marketQuery.trim(), marketQuery.trim() ? 120 : 160);
+        const payload = await fetchAllActiveMarkets(marketQuery.trim(), SEARCH_MARKETS_PAGE_SIZE);
         if (!cancelled) setMarkets(payload.items || []);
       } catch (loadError) {
         if (!cancelled) {
           setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh market search.'));
         }
       }
-    }, marketQuery.trim() ? 220 : 0);
+    }, 220);
 
     return () => {
       cancelled = true;
@@ -508,6 +556,8 @@ export function App() {
     : sanitizePanelIds(bootstrap?.defaultWorkspace?.panels || []);
   const mapBottomPanelIds = displayPanelIds.filter((panelId) => MAP_BOTTOM_PANEL_IDS.includes(panelId));
   const sidePanelIds = displayPanelIds.filter((panelId) => !MAP_BOTTOM_PANEL_IDS.includes(panelId));
+  const activeMarketsEntry = PANEL_REGISTRY['active-markets'];
+  const remainingSidePanelIds = sidePanelIds.filter((panelId) => !FOCUSED_STRIP_PANEL_IDS.has(panelId));
 
   const liveMetrics = [
     { label: 'ACTIVE MARKETS', value: displayMarkets.length || availableMarkets.length || 0 },
@@ -529,6 +579,8 @@ export function App() {
     latestContent: currentLatestContent,
     commodities,
     crypto,
+    f1,
+    jin10,
     nba,
     nbaIntel,
     inflationNowcast,
@@ -717,8 +769,19 @@ export function App() {
           </div>
         </section>
 
+        <section className="wm-focused-market-row">
+          {activeMarketsEntry ? (
+            <div className="wm-panel-slot wm-focused-market-list">
+              {activeMarketsEntry.render(panelContext)}
+            </div>
+          ) : null}
+          <div className="wm-focused-market-right">
+            <FocusedMarketStrip {...panelContext} />
+          </div>
+        </section>
+
         <section className="wm-panels-grid">
-          {sidePanelIds.map((panelId) => {
+          {remainingSidePanelIds.map((panelId) => {
             const entry = PANEL_REGISTRY[panelId];
             if (!entry) return null;
             const sizeClass = entry.size ? `size-${entry.size}` : '';

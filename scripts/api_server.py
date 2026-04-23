@@ -72,7 +72,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, lob_service, market_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, f1_runtime_service, jin10_runtime_service, lob_service, market_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -151,7 +151,9 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_alpha_signal_snapshot": get_alpha_signal_snapshot,
         "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
         "get_dashboard_payload_cached": get_dashboard_payload_cached,
+        "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_inflation_nowcast_snapshot": get_inflation_nowcast_snapshot,
+        "get_jin10_panel_snapshot": get_jin10_panel_snapshot,
         "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
         "get_market_by_id": get_market_by_id,
         "get_market_by_slug": get_market_by_slug,
@@ -253,6 +255,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_bootstrap_payload_cached": get_bootstrap_payload_cached,
         "get_cached_json": get_cached_json,
         "get_cached_runtime_payload": get_cached_runtime_payload,
+        "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_existing_trade_read_source": get_existing_trade_read_source,
         "get_latest_content_snapshot": get_latest_content_snapshot,
         "get_market_by_id": lambda market_id: market_service.get_market_by_id(build_service_context(), market_id),
@@ -277,6 +280,7 @@ def build_service_context() -> Dict[str, Any]:
             page_size=page_size,
         ),
         "get_inflation_nowcast_snapshot": lambda: runtime_service.get_inflation_nowcast_snapshot(build_service_context()),
+        "get_jin10_panel_snapshot": lambda limit=24: jin10_runtime_service.get_jin10_panel_snapshot(build_service_context(), limit=limit),
         "get_nba_intel_snapshot": lambda limit=12: runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit),
         "get_nba_scoreboard_snapshot": lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit),
         "get_oracle_events_by_market_id": lambda market_id: market_service.get_oracle_events_by_market_id(build_service_context(), market_id),
@@ -293,11 +297,12 @@ def build_service_context() -> Dict[str, Any]:
         "get_trade_market_projection_sql": get_trade_market_projection_sql,
         "get_trades_by_market_id": lambda market_id, limit=100, offset=0: market_service.get_trades_by_market_id(build_service_context(), market_id, limit=limit, offset=offset),
         "get_whale_trades_snapshot": get_whale_trades_snapshot,
-        "get_yahoo_market_snapshot": lambda symbol, interval="30m", range_name="5d": market_data_client.get_yahoo_market_snapshot(
+        "get_yahoo_market_snapshot": lambda symbol, interval="30m", range_name="5d", ttl_seconds=None: market_data_client.get_yahoo_market_snapshot(
             build_service_context(),
             symbol,
             interval=interval,
             range_name=range_name,
+            ttl_seconds=ttl_seconds,
         ),
         "http_json_get": lambda url, params=None, timeout=12, headers=None: market_data_client.http_json_get(
             build_service_context(),
@@ -384,6 +389,10 @@ def parse_json_list(value: Any) -> List[Any]:
         except Exception:
             return [item.strip() for item in text.split(",") if item.strip()]
     return [value]
+
+
+def get_f1_panel_snapshot(limit: int = 10) -> Dict[str, Any]:
+    return f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit)
 
 
 def normalize_address(value: Optional[str]) -> str:
@@ -542,11 +551,39 @@ def _to_percent_text(value: Optional[Decimal]) -> Optional[str]:
 
 
 COMMODITY_SYMBOLS = [
+    ("vix", "VIX", "^VIX"),
     ("gold", "GOLD", "GC=F"),
     ("silver", "SILVER", "SI=F"),
-    ("oil", "WTI CRUDE", "CL=F"),
-    ("natgas", "NAT GAS", "NG=F"),
     ("copper", "COPPER", "HG=F"),
+    ("platinum", "PLATINUM", "PL=F"),
+    ("palladium", "PALLADIUM", "PA=F"),
+    ("aluminum", "ALUMINUM", "ALI=F"),
+    ("oil", "OIL", "CL=F"),
+    ("brent", "BRENT", "BZ=F"),
+    ("natgas", "NATGAS", "NG=F"),
+    ("ttf", "TTF GAS", "TTF=F"),
+    ("gasoline", "GASOLINE", "RB=F"),
+    ("heating-oil", "HEATING OIL", "HO=F"),
+    ("uranium", "URANIUM", "URA"),
+    ("lithium", "LITHIUM", "LIT"),
+    ("coal", "COAL", "MTF=F"),
+    ("wheat", "WHEAT", "ZW=F"),
+    ("corn", "CORN", "ZC=F"),
+    ("soybeans", "SOYBEANS", "ZS=F"),
+    ("rice", "RICE", "ZR=F"),
+    ("coffee", "COFFEE", "KC=F"),
+    ("sugar", "SUGAR", "SB=F"),
+    ("cocoa", "COCOA", "CC=F"),
+    ("cotton", "COTTON", "CT=F"),
+    ("eurusd", "EUR/USD", "EURUSD=X"),
+    ("gbpusd", "GBP/USD", "GBPUSD=X"),
+    ("usdjpy", "USD/JPY", "USDJPY=X"),
+    ("usdcny", "USD/CNY", "USDCNY=X"),
+    ("usdinr", "USD/INR", "USDINR=X"),
+    ("audusd", "AUD/USD", "AUDUSD=X"),
+    ("usdchf", "USD/CHF", "USDCHF=X"),
+    ("usdcad", "USD/CAD", "USDCAD=X"),
+    ("usdtry", "USD/TRY", "USDTRY=X"),
 ]
 
 CRYPTO_SYMBOLS = [
@@ -555,6 +592,14 @@ CRYPTO_SYMBOLS = [
     ("sol", "SOL", "SOL-USD"),
     ("doge", "DOGE", "DOGE-USD"),
     ("bnb", "BNB", "BNB-USD"),
+    ("xrp", "XRP", "XRP-USD"),
+    ("ada", "ADA", "ADA-USD"),
+    ("avax", "AVAX", "AVAX-USD"),
+    ("link", "LINK", "LINK-USD"),
+    ("ltc", "LTC", "LTC-USD"),
+    ("dot", "DOT", "DOT-USD"),
+    ("trx", "TRX", "TRX-USD"),
+    ("bch", "BCH", "BCH-USD"),
 ]
 
 CRYPTO_COINGECKO_IDS = {
@@ -563,11 +608,31 @@ CRYPTO_COINGECKO_IDS = {
     "SOL-USD": "solana",
     "DOGE-USD": "dogecoin",
     "BNB-USD": "binancecoin",
+    "XRP-USD": "ripple",
+    "ADA-USD": "cardano",
+    "AVAX-USD": "avalanche-2",
+    "LINK-USD": "chainlink",
+    "LTC-USD": "litecoin",
+    "DOT-USD": "polkadot",
+    "TRX-USD": "tron",
+    "BCH-USD": "bitcoin-cash",
 }
 
 
-def get_yahoo_market_snapshot(symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
-    return market_data_client.get_yahoo_market_snapshot(build_service_context(), symbol, interval=interval, range_name=range_name)
+def get_yahoo_market_snapshot(
+    symbol: str,
+    *,
+    interval: str = "30m",
+    range_name: str = "5d",
+    ttl_seconds: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    return market_data_client.get_yahoo_market_snapshot(
+        build_service_context(),
+        symbol,
+        interval=interval,
+        range_name=range_name,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 def get_market_group_snapshot(items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
@@ -584,6 +649,10 @@ def get_nba_intel_snapshot(limit: int = 12) -> Dict[str, Any]:
 
 def get_inflation_nowcast_snapshot() -> Dict[str, Any]:
     return runtime_service.get_inflation_nowcast_snapshot(build_service_context())
+
+
+def get_jin10_panel_snapshot(limit: int = 24) -> Dict[str, Any]:
+    return jin10_runtime_service.get_jin10_panel_snapshot(build_service_context(), limit=limit)
 
 
 def get_whale_trades_snapshot(limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
@@ -689,8 +758,8 @@ def handle_unexpected_exception(error: Exception):
 def build_market_status_case(now_iso: str) -> str:
     return (
         "CASE "
-        "WHEN EXISTS (SELECT 1 FROM oracle_events oe WHERE oe.market_id = m.id AND oe.event_status = 'settle') THEN 'Settled' "
-        "WHEN EXISTS (SELECT 1 FROM oracle_events oe WHERE oe.market_id = m.id AND oe.event_status = 'propose') THEN 'Proposed' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND mss.has_settle = 1) THEN 'Settled' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND mss.has_propose = 1) THEN 'Proposed' "
         "WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed' "
         "ELSE 'Active' END"
     )
@@ -1084,6 +1153,10 @@ def prewarm_snapshot_payloads() -> None:
     bootstrap_service.prewarm_snapshot_payloads(build_service_context())
 
 
+def prewarm_critical_payloads() -> None:
+    bootstrap_service.prewarm_critical_payloads(build_service_context())
+
+
 def start_snapshot_prewarm_thread() -> None:
     bootstrap_service.start_snapshot_prewarm_thread(build_service_context())
 
@@ -1310,6 +1383,7 @@ def main():
     create_app()
     app.logger.info("Starting API server at http://%s:%s", args.host, args.port)
     app.logger.info("Database: %s", describe_db_target())
+    prewarm_critical_payloads()
     start_snapshot_prewarm_thread()
     app.run(host=args.host, port=args.port, debug=False)
 

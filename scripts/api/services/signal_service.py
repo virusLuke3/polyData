@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from . import address_intel_service, signal_cluster_service
 
 
 CRITICAL_NOTIONAL = Decimal("2500")
 ELEVATED_NOTIONAL = Decimal("1000")
+SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
+SIGNAL_SNAPSHOT_NAMESPACE_WHALES = "snapshot:signals:whales"
+SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
+_SIGNAL_REFRESH_LOCK = threading.Lock()
+_SIGNAL_REFRESH_STATE: Dict[str, bool] = {}
 
 
 def _severity_for_notional(ctx: dict, notional: Any) -> str:
@@ -75,32 +82,145 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
     return rows[: max(limit * 2, limit)]
 
 
-def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit, "lookbackDays": lookback_days}, sort_keys=True, ensure_ascii=True)
+def _store_runtime_snapshot(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+    ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
+    return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, ttl_seconds)
 
-    def _builder() -> Dict[str, Any]:
-        rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
-        items: List[Dict[str, Any]] = []
-        seen_hashes: set[str] = set()
-        for row in rows:
-            tx_hash = str(row.get("tx_hash") or "")
-            if tx_hash and tx_hash in seen_hashes:
-                continue
-            if tx_hash:
-                seen_hashes.add(tx_hash)
-            items.append(_format_trade_item(ctx, row))
-            if len(items) >= limit:
-                break
-        return {"items": items, "generatedAt": ctx["utc_now_iso"]()}
 
-    cached = ctx["get_cached_runtime_payload"]("runtime:trades:whales", cache_key)
+def _refresh_runtime_snapshot(
+    ctx: dict,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+    builder: Callable[[], Dict[str, Any]],
+    refresh_state_key: str,
+    label: str,
+    reason: str,
+) -> Optional[Dict[str, Any]]:
+    started_at = time.perf_counter()
+    ctx["app"].logger.info("%s refresh-start reason=%s", label, reason)
+    try:
+        payload = builder()
+    except Exception:
+        with _SIGNAL_REFRESH_LOCK:
+            _SIGNAL_REFRESH_STATE[refresh_state_key] = False
+        ctx["app"].logger.exception("%s refresh-failed reason=%s", label, reason)
+        return None
+    stored = _store_runtime_snapshot(ctx, namespace, cache_key, payload, ttl_seconds)
+    with _SIGNAL_REFRESH_LOCK:
+        _SIGNAL_REFRESH_STATE[refresh_state_key] = False
+    ctx["app"].logger.info("%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000)
+    return stored
+
+
+def _schedule_runtime_snapshot_refresh(
+    ctx: dict,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+    builder: Callable[[], Dict[str, Any]],
+    refresh_state_key: str,
+    label: str,
+    reason: str,
+) -> None:
+    with _SIGNAL_REFRESH_LOCK:
+        if _SIGNAL_REFRESH_STATE.get(refresh_state_key):
+            return
+        _SIGNAL_REFRESH_STATE[refresh_state_key] = True
+    thread = ctx["threading"].Thread(
+        target=lambda: _refresh_runtime_snapshot(
+            ctx,
+            namespace=namespace,
+            cache_key=cache_key,
+            ttl_seconds=ttl_seconds,
+            builder=builder,
+            refresh_state_key=refresh_state_key,
+            label=label,
+            reason=reason,
+        ),
+        name=f"{label}-refresh",
+        daemon=True,
+    )
+    thread.start()
+
+
+def _get_stale_first_runtime_snapshot(
+    ctx: dict,
+    *,
+    namespace: str,
+    cache_key: str,
+    ttl_seconds: int,
+    builder: Callable[[], Dict[str, Any]],
+    refresh_state_key: str,
+    label: str,
+) -> Dict[str, Any]:
+    cached = ctx["get_cached_runtime_payload"](namespace, cache_key)
     if cached is not None:
         return cached
-    return ctx["set_cached_runtime_payload"](
-        "runtime:trades:whales",
-        cache_key,
-        _builder(),
+
+    fresh_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
+    if fresh_payload is not None:
+        return ctx["set_cached_runtime_payload"](namespace, cache_key, fresh_payload, ttl_seconds)
+
+    stale_payload = ctx["SNAPSHOT_STORE"].get_stale(namespace, cache_key)
+    if stale_payload is not None:
+        ctx["app"].logger.info("%s stale-hit scheduling_refresh=true", label)
+        ctx["set_cached_runtime_payload"](namespace, cache_key, stale_payload, ttl_seconds)
+        _schedule_runtime_snapshot_refresh(
+            ctx,
+            namespace=namespace,
+            cache_key=cache_key,
+            ttl_seconds=ttl_seconds,
+            builder=builder,
+            refresh_state_key=refresh_state_key,
+            label=label,
+            reason="stale-hit",
+        )
+        return stale_payload
+
+    payload = _refresh_runtime_snapshot(
+        ctx,
+        namespace=namespace,
+        cache_key=cache_key,
+        ttl_seconds=ttl_seconds,
+        builder=builder,
+        refresh_state_key=refresh_state_key,
+        label=label,
+        reason="cold-miss",
+    )
+    if payload is not None:
+        return payload
+    raise RuntimeError(f"{label} snapshot refresh failed")
+
+
+def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+    rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
+    items: List[Dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    for row in rows:
+        tx_hash = str(row.get("tx_hash") or "")
+        if tx_hash and tx_hash in seen_hashes:
+            continue
+        if tx_hash:
+            seen_hashes.add(tx_hash)
+        items.append(_format_trade_item(ctx, row))
+        if len(items) >= limit:
+            break
+    return {"items": items, "generatedAt": ctx["utc_now_iso"]()}
+
+
+def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+    cache_key = json.dumps({"limit": limit, "lookbackDays": lookback_days}, sort_keys=True, ensure_ascii=True)
+    return _get_stale_first_runtime_snapshot(
+        ctx,
+        namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
+        cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        builder=lambda: _build_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
+        refresh_state_key=f"whales:{cache_key}",
+        label="whales-snapshot",
     )
 
 
@@ -123,15 +243,14 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
 
 def get_suspicious_trades_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
-
-    cached = ctx["get_cached_runtime_payload"]("runtime:trades:suspicious", cache_key)
-    if cached is not None:
-        return cached
-    return ctx["set_cached_runtime_payload"](
-        "runtime:trades:suspicious",
-        cache_key,
-        {"items": _build_suspicious_trade_items(ctx, limit), "generatedAt": ctx["utc_now_iso"]()},
+    return _get_stale_first_runtime_snapshot(
+        ctx,
+        namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
+        cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        builder=lambda: {"items": _build_suspicious_trade_items(ctx, limit), "generatedAt": ctx["utc_now_iso"]()},
+        refresh_state_key=f"suspicious:{cache_key}",
+        label="suspicious-snapshot",
     )
 
 
@@ -228,131 +347,131 @@ def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, t
     )
 
 
-def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    recent_trades = ctx["get_recent_trades"](limit=max(260, limit * 40))
+    addresses_by_market: Dict[int, set[str]] = {}
+    for trade in recent_trades:
+        market_id = trade.get("marketId") or trade.get("market_id")
+        if market_id is None:
+            continue
+        try:
+            market_id_int = int(market_id)
+        except (TypeError, ValueError):
+            continue
+        addresses_by_market.setdefault(market_id_int, set()).update(signal_cluster_service.collect_trade_addresses(ctx, [trade]))
+    address_profiles_by_market = {
+        market_id: address_intel_service.get_address_profiles(ctx, addresses, market_id=market_id)
+        for market_id, addresses in addresses_by_market.items()
+        if addresses
+    }
+    polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
+        ctx,
+        recent_trades,
+        address_profiles_by_market,
+        limit=limit,
+    )
 
-    def _builder() -> Dict[str, Any]:
-        recent_trades = ctx["get_recent_trades"](limit=max(260, limit * 40))
-        addresses_by_market: Dict[int, set[str]] = {}
-        for trade in recent_trades:
-            market_id = trade.get("marketId") or trade.get("market_id")
-            if market_id is None:
-                continue
-            try:
-                market_id_int = int(market_id)
-            except (TypeError, ValueError):
-                continue
-            addresses_by_market.setdefault(market_id_int, set()).update(signal_cluster_service.collect_trade_addresses(ctx, [trade]))
-        address_profiles_by_market = {
-            market_id: address_intel_service.get_address_profiles(ctx, addresses, market_id=market_id)
-            for market_id, addresses in addresses_by_market.items()
-            if addresses
-        }
-        polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
-            ctx,
-            recent_trades,
-            address_profiles_by_market,
-            limit=limit,
+    signals: List[Dict[str, Any]] = list(polybeats_clusters)
+
+    whales = [_format_trade_item(ctx, row) for row in _query_whale_rows(ctx, limit=6, lookback_days=7)[:6]] if len(signals) < limit else []
+    for trade in whales[:3]:
+        if len(signals) >= limit:
+            break
+        _append_signal(
+            signals,
+            kind="whale",
+            severity=trade.get("severity") or "elevated",
+            title=trade.get("marketTitle") or "Whale flow",
+            summary=f"{str(trade.get('side') or 'trade').upper()} {trade.get('outcome') or '--'} at {trade.get('price') or '--'} on-chain, notional {trade.get('notional') or '--'}",
+            timestamp=trade.get("timestamp"),
+            contributors=["whale", "onchain"],
         )
 
-        signals: List[Dict[str, Any]] = list(polybeats_clusters)
+    suspicious = _build_suspicious_trade_items(ctx, limit=6) if len(signals) < limit else []
+    for trade in suspicious[:3]:
+        if len(signals) >= limit:
+            break
+        _append_signal(
+            signals,
+            kind="suspicious",
+            severity=trade.get("severity") or "watch",
+            title=trade.get("marketTitle") or "Pre-oracle activity",
+            summary=f"{trade.get('eventStatus') or 'oracle'} proximity trade, notional {trade.get('notional') or '--'}",
+            timestamp=trade.get("timestamp"),
+            contributors=["oracle", "timing"],
+        )
 
-        whales = [_format_trade_item(ctx, row) for row in _query_whale_rows(ctx, limit=6, lookback_days=7)[:6]] if len(signals) < limit else []
-        for trade in whales[:3]:
-            if len(signals) >= limit:
-                break
+    for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:2]:
+        if len(signals) >= limit:
+            break
+        price = ctx["_safe_decimal"](market.get("latestPrice"))
+        change_24h = ctx["_safe_decimal"](market.get("change24h"))
+        if price is None:
+            continue
+        severity = "watch"
+        if change_24h is not None and abs(change_24h) >= Decimal("0.08"):
+            severity = "elevated"
+        _append_signal(
+            signals,
+            kind="momentum",
+            severity=severity,
+            title=market.get("title"),
+            summary=f"Live probability {ctx['format_trade_decimal'](price)} with 24h change {ctx['format_trade_decimal'](change_24h) or '--'}",
+            timestamp=ctx["utc_now_iso"](),
+            contributors=["price", "market"],
+        )
+
+    if len(signals) < limit:
+        crypto = ctx["get_market_group_snapshot"](ctx["CRYPTO_SYMBOLS"][:3], kind="crypto").get("items", [])
+        for item in crypto[:2]:
+            change = ctx["_safe_float"](item.get("changePercent"))
             _append_signal(
                 signals,
-                kind="whale",
-                severity=trade.get("severity") or "elevated",
-                title=trade.get("marketTitle") or "Whale flow",
-                summary=f"{str(trade.get('side') or 'trade').upper()} {trade.get('outcome') or '--'} at {trade.get('price') or '--'} on-chain, notional {trade.get('notional') or '--'}",
-                timestamp=trade.get("timestamp"),
-                contributors=["whale", "onchain"],
-            )
-
-        suspicious = _build_suspicious_trade_items(ctx, limit=6) if len(signals) < limit else []
-        for trade in suspicious[:3]:
-            if len(signals) >= limit:
-                break
-            _append_signal(
-                signals,
-                kind="suspicious",
-                severity=trade.get("severity") or "watch",
-                title=trade.get("marketTitle") or "Pre-oracle activity",
-                summary=f"{trade.get('eventStatus') or 'oracle'} proximity trade, notional {trade.get('notional') or '--'}",
-                timestamp=trade.get("timestamp"),
-                contributors=["oracle", "timing"],
-            )
-
-        for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:2]:
-            if len(signals) >= limit:
-                break
-            price = ctx["_safe_decimal"](market.get("latestPrice"))
-            change_24h = ctx["_safe_decimal"](market.get("change24h"))
-            if price is None:
-                continue
-            severity = "watch"
-            if change_24h is not None and abs(change_24h) >= Decimal("0.08"):
-                severity = "elevated"
-            _append_signal(
-                signals,
-                kind="momentum",
-                severity=severity,
-                title=market.get("title"),
-                summary=f"Live probability {ctx['format_trade_decimal'](price)} with 24h change {ctx['format_trade_decimal'](change_24h) or '--'}",
+                kind="macro",
+                severity="elevated" if change is not None and abs(change) >= 2 else "watch",
+                title=f"{item.get('label')} momentum",
+                summary=f"24h move {change:+.2f}% with runtime quote {item.get('price')}" if change is not None else "Runtime quote available",
                 timestamp=ctx["utc_now_iso"](),
-                contributors=["price", "market"],
+                contributors=["crypto", "macro"],
+            )
+            if len(signals) >= limit:
+                break
+
+    if len(signals) < limit:
+        nowcast = ctx["get_inflation_nowcast_snapshot"]()
+        mom = nowcast.get("monthOverMonth") or {}
+        if mom:
+            _append_signal(
+                signals,
+                kind="macro",
+                severity="watch",
+                title="Cleveland Fed nowcast",
+                summary=f"CPI MoM {mom.get('CPI', '--')} / Core CPI {mom.get('Core CPI', '--')}",
+                timestamp=ctx["utc_now_iso"](),
+                contributors=["macro", "inflation"],
             )
 
-        if len(signals) < limit:
-            crypto = ctx["get_market_group_snapshot"](ctx["CRYPTO_SYMBOLS"][:3], kind="crypto").get("items", [])
-            for item in crypto[:2]:
-                change = ctx["_safe_float"](item.get("changePercent"))
-                _append_signal(
-                    signals,
-                    kind="macro",
-                    severity="elevated" if change is not None and abs(change) >= 2 else "watch",
-                    title=f"{item.get('label')} momentum",
-                    summary=f"24h move {change:+.2f}% with runtime quote {item.get('price')}" if change is not None else "Runtime quote available",
-                    timestamp=ctx["utc_now_iso"](),
-                    contributors=["crypto", "macro"],
-                )
-                if len(signals) >= limit:
-                    break
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for signal in signals:
+        key = (signal.get("kind"), signal.get("title"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(signal)
+        if len(deduped) >= limit:
+            break
+    return {"items": deduped, "generatedAt": ctx["utc_now_iso"]()}
 
-        if len(signals) < limit:
-            nowcast = ctx["get_inflation_nowcast_snapshot"]()
-            mom = nowcast.get("monthOverMonth") or {}
-            if mom:
-                _append_signal(
-                    signals,
-                    kind="macro",
-                    severity="watch",
-                    title="Cleveland Fed nowcast",
-                    summary=f"CPI MoM {mom.get('CPI', '--')} / Core CPI {mom.get('Core CPI', '--')}",
-                    timestamp=ctx["utc_now_iso"](),
-                    contributors=["macro", "inflation"],
-                )
 
-        deduped: List[Dict[str, Any]] = []
-        seen = set()
-        for signal in signals:
-            key = (signal.get("kind"), signal.get("title"))
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(signal)
-            if len(deduped) >= limit:
-                break
-        return {"items": deduped, "generatedAt": ctx["utc_now_iso"]()}
-
-    cached = ctx["get_cached_runtime_payload"]("runtime:signals:alpha", cache_key)
-    if cached is not None:
-        return cached
-    return ctx["set_cached_runtime_payload"](
-        "runtime:signals:alpha",
-        cache_key,
-        _builder(),
+def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+    return _get_stale_first_runtime_snapshot(
+        ctx,
+        namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
+        cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        builder=lambda: _build_alpha_signal_payload(ctx, limit=limit),
+        refresh_state_key=f"alpha:{cache_key}",
+        label="alpha-snapshot",
     )

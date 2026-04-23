@@ -69,10 +69,12 @@ CHAIN_REGISTRY_EVENTS = (
     ("ctf", CTF_EXCHANGE_ADDRESS, SYNC_KEY_CHAIN_REGISTRY_CTF),
     ("neg_risk", NEG_RISK_EXCHANGE_ADDRESS, SYNC_KEY_CHAIN_REGISTRY_NEG_RISK),
 )
+GENERIC_CATEGORY_TAG_SLUGS = {"all", "featured", "hide-from-new", "recurring"}
 
 
 def _attach_event_meta_to_market(m: Dict, ev: Dict) -> None:
     """把 event 的 negRisk、slug、category、tags 挂到 market 上，供 normalize_market_from_gamma 使用。"""
+    m["_event_id"] = ev.get("id")
     m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
     m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
     m["_event_category"] = ev.get("category")
@@ -97,6 +99,42 @@ def _ensure_0x(value: str) -> str:
     if not text:
         return ""
     return text if text.startswith("0x") else f"0x{text}"
+
+
+def _normalize_tag_slug(tag: Any) -> str:
+    if isinstance(tag, dict):
+        value = tag.get("slug") or tag.get("label") or ""
+    else:
+        value = tag
+    return str(value or "").strip().lower()
+
+
+def _normalize_tags_payload(tags_raw: Any) -> List[str]:
+    if isinstance(tags_raw, str):
+        try:
+            parsed = json.loads(tags_raw)
+            if isinstance(parsed, list):
+                tags_raw = parsed
+            elif parsed:
+                tags_raw = [parsed]
+        except Exception:
+            tags_raw = [tags_raw]
+    if not isinstance(tags_raw, list):
+        tags_raw = [tags_raw] if tags_raw else []
+
+    tags: List[str] = []
+    for item in tags_raw:
+        slug = _normalize_tag_slug(item)
+        if slug and slug not in tags:
+            tags.append(slug)
+    return tags
+
+
+def _derive_category_from_tags(tags: List[str]) -> str:
+    for tag in tags:
+        if tag and tag not in GENERIC_CATEGORY_TAG_SLUGS:
+            return tag
+    return tags[0] if tags else ""
 
 
 def _topic_to_int(topic: Any) -> int:
@@ -232,6 +270,93 @@ def fetch_market_by_condition_id_from_clob(condition_id: str) -> Optional[Dict]:
     return data
 
 
+def _fetch_tags_endpoint(url: str) -> List[str]:
+    try:
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        resp.close()
+    except Exception:
+        return []
+    return _normalize_tags_payload(data)
+
+
+def _fetch_market_tags_by_id(gamma_market_id: Any) -> List[str]:
+    market_id = str(gamma_market_id or "").strip()
+    if not market_id:
+        return []
+    return _fetch_tags_endpoint(f"{GAMMA_MARKETS_URL}/{market_id}/tags")
+
+
+def _fetch_event_tags_by_id(event_id: Any) -> List[str]:
+    event_id_text = str(event_id or "").strip()
+    if not event_id_text:
+        return []
+    return _fetch_tags_endpoint(f"{GAMMA_EVENTS_URL}/{event_id_text}/tags")
+
+
+def _fetch_clob_tags_by_condition_id(condition_id: Any) -> List[str]:
+    cid = _ensure_0x(str(condition_id or "").strip())
+    if not cid:
+        return []
+    try:
+        resp = requests.get(f"{CLOB_API_BASE}/markets/{cid}", timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        resp.close()
+    except Exception:
+        return []
+    return _normalize_tags_payload((data or {}).get("tags") if isinstance(data, dict) else None)
+
+
+def _needs_taxonomy_hydration(m: Dict) -> bool:
+    gamma_market_id = str(m.get("id") or m.get("gamma_market_id") or "").strip()
+    tags = _normalize_tags_payload(
+        m.get("_event_tags")
+        or m.get("tags")
+        or (((m.get("events") or [{}])[0]).get("tags") if isinstance(m.get("events"), list) and m.get("events") else None)
+    )
+    return not gamma_market_id or not tags
+
+
+def _hydrate_market_taxonomy_and_ids(m: Dict) -> Dict:
+    gamma_market_id = str(m.get("id") or m.get("gamma_market_id") or "").strip()
+    if gamma_market_id and not m.get("id"):
+        m["id"] = gamma_market_id
+
+    existing_tags = _normalize_tags_payload(
+        m.get("_event_tags")
+        or m.get("tags")
+        or (((m.get("events") or [{}])[0]).get("tags") if isinstance(m.get("events"), list) and m.get("events") else None)
+    )
+    event_id = m.get("_event_id")
+    if not event_id and isinstance(m.get("events"), list) and m.get("events"):
+        event_id = (m.get("events") or [{}])[0].get("id")
+
+    if not existing_tags and gamma_market_id:
+        existing_tags = _fetch_market_tags_by_id(gamma_market_id)
+    if not existing_tags and event_id:
+        existing_tags = _fetch_event_tags_by_id(event_id)
+    if not existing_tags:
+        existing_tags = _fetch_clob_tags_by_condition_id(m.get("conditionId") or m.get("condition_id"))
+
+    if existing_tags:
+        m["_event_tags"] = existing_tags
+        if not m.get("tags"):
+            m["tags"] = list(existing_tags)
+
+    if not (m.get("_event_category") or m.get("category")):
+        derived_category = _derive_category_from_tags(existing_tags)
+        if derived_category:
+            m["_event_category"] = derived_category
+    return m
+
+
+def _normalize_market_record(m: Dict) -> Optional[Dict]:
+    _hydrate_market_taxonomy_and_ids(m)
+    return normalize_market_from_gamma(m)
+
+
 def _build_minimal_market_from_registry(
     condition_id: str,
     token0: str,
@@ -321,7 +446,7 @@ def fetch_and_upsert_markets_for_token_ids_via_onchain(
                 continue
             raw = fetch_market_by_condition_id_from_clob(condition_id)
             if raw:
-                norm = normalize_market_from_gamma(raw)
+                norm = _normalize_market_record(raw)
             else:
                 norm = _build_minimal_market_from_registry(condition_id, token_id, complement, exchange_name)
             if norm:
@@ -389,7 +514,7 @@ def supplement_missing_markets_from_onchain_registry(
                         continue
                     raw = fetch_market_by_condition_id_from_clob(condition_id)
                     if raw:
-                        norm = normalize_market_from_gamma(raw)
+                        norm = _normalize_market_record(raw)
                     else:
                         norm = _build_minimal_market_from_registry(
                             condition_id,
@@ -801,6 +926,12 @@ def _flush_buffer_to_db(
     """将 buffer 规范化后批量写入 DB，清空 buffer。返回 (空 buffer, 新的 total_written)"""
     if not buffer:
         return buffer, total_written
+    hydrate_targets = [item for item in buffer if _needs_taxonomy_hydration(item)]
+    if hydrate_targets:
+        with ThreadPoolExecutor(max_workers=min(12, len(hydrate_targets))) as ex:
+            futures = [ex.submit(_hydrate_market_taxonomy_and_ids, item) for item in hydrate_targets]
+            for future in as_completed(futures):
+                future.result()
     norms = []
     for m in buffer:
         n = normalize_market_from_gamma(m)
@@ -1196,29 +1327,8 @@ def fetch_markets_by_clob_token_ids(token_ids: List[str]) -> List[Dict]:
 
 
 def _enrich_market_with_event_by_slug(m: Dict) -> None:
-    """当 market 无 category/tags 时，用 GET /events?slug=... 拉取 event 并挂上 _event_*，便于 normalize 写出分类。"""
-    slug = (m.get("slug") or "").strip()
-    if not slug:
-        return
-    has_cat = m.get("category") or m.get("_event_category")
-    has_tags = m.get("tags") or m.get("_event_tags")
-    if has_cat and has_tags:
-        return
-    try:
-        resp = _get_session().get(GAMMA_EVENTS_URL, params={"slug": slug}, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        events = _response_json(resp, f"GET {GAMMA_EVENTS_URL}")
-        resp.close()
-    except Exception:
-        _invalidate_session(f"GET {GAMMA_EVENTS_URL}?slug={slug}")
-        return
-    if not events or not isinstance(events, list) or not events[0]:
-        return
-    ev = events[0]
-    m["_event_category"] = m.get("_event_category") or ev.get("category")
-    m["_event_subcategory"] = m.get("_event_subcategory") or ev.get("subcategory")
-    m["_event_categories"] = m.get("_event_categories") or ev.get("categories")
-    m["_event_tags"] = m.get("_event_tags") or ev.get("tags")
+    """兼容旧调用：现在优先使用 tags 端点和 CLOB 做轻量补全，不再依赖 event slug 猜测。"""
+    _hydrate_market_taxonomy_and_ids(m)
 
 
 def fetch_market_by_slug(slug: str) -> Optional[Dict]:
@@ -1242,7 +1352,7 @@ def fetch_market_by_slug(slug: str) -> Optional[Dict]:
         return None
     if not data or not isinstance(data, dict):
         return None
-    _enrich_market_with_event_by_slug(data)
+    _hydrate_market_taxonomy_and_ids(data)
     return data
 
 
@@ -1269,7 +1379,7 @@ def fetch_and_upsert_markets_for_slugs(
                 continue
             raw["_event_neg_risk"] = raw.get("negRisk", False)
             raw["_event_slug"] = slug
-            n = normalize_market_from_gamma(raw)
+            n = _normalize_market_record(raw)
             if n:
                 norms.append(n)
         if not norms:
@@ -1312,7 +1422,7 @@ def fetch_and_upsert_markets_by_token_ids_via_api(
             m.setdefault("_event_neg_risk", m.get("negRisk", False))
             m.setdefault("_event_slug", m.get("slug", ""))
             _enrich_market_with_event_by_slug(m)
-            n = normalize_market_from_gamma(m)
+            n = _normalize_market_record(m)
             if n:
                 norms.append(n)
         if not norms:
@@ -1437,7 +1547,7 @@ def fetch_and_upsert_markets_for_token_ids(
                         if not cid or cid in seen_condition_ids:
                             continue
                         _attach_event_meta_to_market(m, ev)
-                        norm = normalize_market_from_gamma(m)
+                        norm = _normalize_market_record(m)
                         if norm:
                             seen_condition_ids.add(cid)
                             batch.append(norm)
@@ -1466,7 +1576,7 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     condition_id = m.get("conditionId") or m.get("condition_id")
     if not condition_id:
         return None
-    gamma_market_id = m.get("id")
+    gamma_market_id = m.get("id") or m.get("gamma_market_id")
     gamma_market_id = str(gamma_market_id).strip() if gamma_market_id is not None else ""
 
     # 对齐 trade → market 的关键是 yes/no token_id；question_id/oracle 缺失不应直接丢弃市场。
@@ -1526,7 +1636,7 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     created_at = m.get("createdAt") or m.get("created_at")
     end_date = m.get("endDate") or m.get("end_date") or m.get("end_date_iso")
 
-    # category: 优先用 event 上的分类（/events 返回的 event 有 category、subcategory、categories），再 fallback 到 market 自身
+    # category: 优先用 event/market 上已有分类；缺失时从 tags 派生一级分类。
     category = (
         m.get("_event_category")
         or m.get("_event_subcategory")
@@ -1546,22 +1656,13 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
         if isinstance(cats, list) and cats and isinstance(cats[0], dict):
             category = cats[0].get("slug", "") or cats[0].get("label", "") or ""
 
-    # tags: 优先用 event 的 tags（Polymarket 分类多在 event 层），再 market 自身或 market.events[0]
     tags_raw = m.get("_event_tags") or m.get("tags")
     if tags_raw is None and m.get("events"):
         ev = m["events"][0] if m["events"] else {}
         tags_raw = ev.get("tags")
-    tags = []
-    if isinstance(tags_raw, list):
-        for t in tags_raw:
-            if isinstance(t, dict):
-                tags.append(t.get("slug") or t.get("label") or str(t))
-            else:
-                tags.append(str(t))
-    elif tags_raw:
-        tags = [str(tags_raw)]
+    tags = _normalize_tags_payload(tags_raw)
     if not category and tags:
-        category = tags[0]
+        category = _derive_category_from_tags(tags)
 
     return {
         "gamma_market_id": gamma_market_id,
@@ -1590,17 +1691,8 @@ def _category_and_tags_from_event(ev: Dict) -> Tuple[str, str]:
     cats = ev.get("categories")
     if not category and isinstance(cats, list) and cats and isinstance(cats[0], dict):
         category = cats[0].get("slug", "") or cats[0].get("label", "") or ""
-    tags_raw = ev.get("tags")
-    tags = []
-    if isinstance(tags_raw, list):
-        for t in tags_raw:
-            if isinstance(t, dict):
-                tags.append(t.get("slug") or t.get("label") or str(t))
-            else:
-                tags.append(str(t))
-    elif tags_raw:
-        tags = [str(tags_raw)]
-    return (category or "", json.dumps(tags, ensure_ascii=False))
+    tags = _normalize_tags_payload(ev.get("tags"))
+    return ((category or _derive_category_from_tags(tags)), json.dumps(tags, ensure_ascii=False))
 
 
 def _event_has_category_or_tags(ev: Dict) -> bool:
@@ -1851,53 +1943,55 @@ def refresh_category_tags_in_db(
                 pass
         return category
 
-    conn = get_connection(db_path)
-    try:
-        batch: List[Tuple[int, str, str]] = []
-        failed_rows: List[Tuple] = []  # (market_id, slug, condition_id, title)
-        completed = 0
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_to_row = {ex.submit(_worker, row): row for row in rows}
-            for future in as_completed(future_to_row):
-                try:
-                    market_id, result = future.result()
-                    row = future_to_row[future]
-                    if result:
-                        category, tags_json = result
-                        category = _norm_result(category, tags_json) or category
-                        batch.append((category, tags_json, market_id))
-                    else:
-                        failed_rows.append(row)
-                except Exception as e:
-                    row = future_to_row.get(future)
-                    if row:
-                        failed_rows.append(row)
-                    print(f"  Worker error for market {row[0] if row else '?'}: {e}", file=sys.stderr)
-                completed += 1
-                if completed % progress_every == 0:
-                    print(f"  ... fetched {completed}/{len(rows)}, updated {len(batch)}", file=sys.stderr)
-
-        # 第二轮：对首轮未拿到结果的记录顺序重试一次，减少漏写
-        if failed_rows:
-            print(f"  Retrying {len(failed_rows)} failed record(s) sequentially (incl. CLOB by condition_id) ...", file=sys.stderr)
-            for market_id, slug, condition_id, _title in failed_rows:
-                result = _fetch_category_tags_for_market((slug or "").strip(), condition_id=(condition_id or "").strip() or None)
+    batch: List[Tuple[str, str, int]] = []
+    failed_rows: List[Tuple] = []  # (market_id, slug, condition_id, title)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_to_row = {ex.submit(_worker, row): row for row in rows}
+        for future in as_completed(future_to_row):
+            try:
+                market_id, result = future.result()
+                row = future_to_row[future]
                 if result:
                     category, tags_json = result
                     category = _norm_result(category, tags_json) or category
                     batch.append((category, tags_json, market_id))
-
-        for category, tags_json, market_id in batch:
-            try:
-                conn.execute(
-                    "UPDATE markets SET category = ?, tags = ? WHERE id = ?",
-                    (category, tags_json, market_id),
-                )
+                else:
+                    failed_rows.append(row)
             except Exception as e:
-                print(f"  UPDATE id={market_id}: {e}", file=sys.stderr)
-        conn.commit()
-    finally:
-        conn.close()
+                row = future_to_row.get(future)
+                if row:
+                    failed_rows.append(row)
+                print(f"  Worker error for market {row[0] if row else '?'}: {e}", file=sys.stderr)
+            completed += 1
+            if completed % progress_every == 0:
+                print(f"  ... fetched {completed}/{len(rows)}, updated {len(batch)}", file=sys.stderr)
+
+    # 第二轮：对首轮未拿到结果的记录顺序重试一次，减少漏写
+    if failed_rows:
+        print(f"  Retrying {len(failed_rows)} failed record(s) sequentially (incl. CLOB by condition_id) ...", file=sys.stderr)
+        for market_id, slug, condition_id, _title in failed_rows:
+            result = _fetch_category_tags_for_market((slug or "").strip(), condition_id=(condition_id or "").strip() or None)
+            if result:
+                category, tags_json = result
+                category = _norm_result(category, tags_json) or category
+                batch.append((category, tags_json, market_id))
+
+    if batch:
+        conn = get_connection(db_path)
+        try:
+            try:
+                conn.ping(reconnect=True)
+            except Exception:
+                pass
+            cursor = conn.cursor()
+            cursor.executemany(
+                "UPDATE markets SET category = ?, tags = ? WHERE id = ?",
+                batch,
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     updated = len(batch)
     print(f"Refreshed category/tags for {updated} market(s).", file=sys.stderr)
@@ -2098,7 +2192,7 @@ def estimate_full_markets(
         pages += 1
 
         for m in batch:
-            norm = normalize_market_from_gamma(m)
+            norm = _normalize_market_record(m)
             if norm:
                 total_normalized += 1
                 # 仅采样前若干条用于大小估算
@@ -2230,7 +2324,7 @@ def run_market_discovery(
     norms: List[Dict] = []
     if markets_to_process:
         for m in markets_to_process:
-            norm = normalize_market_from_gamma(m)
+            norm = _normalize_market_record(m)
             if norm:
                 norms.append(norm)
         if discovery_watermark is None:
@@ -2393,7 +2487,12 @@ def main():
     parser.add_argument(
         "--no-refresh-category-tags",
         action="store_true",
-        help="启用数据库输出时默认在 discovery 结束后补全已有市场的 category/tags；本选项可关闭该补全",
+        help="兼容旧参数：当前默认已不在 discovery 结束后自动全表补分类，本选项可忽略",
+    )
+    parser.add_argument(
+        "--post-refresh-category-tags",
+        action="store_true",
+        help="在 discovery 结束后额外执行一次全表 category/tags 修复；默认关闭，通常只在 repair 时使用",
     )
 
     args = parser.parse_args()
@@ -2557,7 +2656,7 @@ def main():
                 count = _run_once()
                 if db_path:
                     print(f"[watch] Done. Stored/updated {count} markets.", file=sys.stderr)
-                    if not getattr(args, "no_refresh_category_tags", False):
+                    if getattr(args, "post_refresh_category_tags", False):
                         print("[watch] Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
                         refresh_category_tags_in_db(
                             db_path=db_path,
@@ -2580,7 +2679,7 @@ def main():
         if db_path:
             print(f"Database target: {describe_db_target()}", file=sys.stderr)
             print(f"Done. Stored/updated {count} markets to database.", file=sys.stderr)
-            if not getattr(args, "no_refresh_category_tags", False):
+            if getattr(args, "post_refresh_category_tags", False):
                 print("Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
                 refresh_category_tags_in_db(
                     db_path=db_path,
