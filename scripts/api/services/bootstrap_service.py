@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v2"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v3"
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
 _PREWARM_LAST_RUN_LOCK = threading.Lock()
 _PREWARM_LAST_RUN: Dict[str, float] = {}
@@ -121,6 +121,23 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _is_tradeable_bootstrap_row(row: Dict[str, Any]) -> bool:
+    trade_count = _safe_int(row.get("trade_count_24h"))
+    try:
+        volume_24h = float(row.get("volume_24h") or 0)
+    except (TypeError, ValueError):
+        volume_24h = 0.0
+    if trade_count <= 0 and volume_24h <= 0:
+        return False
+    try:
+        latest_price = float(row.get("latest_price")) if row.get("latest_price") not in (None, "") else None
+    except (TypeError, ValueError):
+        latest_price = None
+    if latest_price is None:
+        return True
+    return 0.01 < latest_price < 0.99
+
+
 def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     yes_token_id = str(row.get("yes_token_id") or "").strip()
     no_token_id = str(row.get("no_token_id") or "").strip()
@@ -189,6 +206,28 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         """,
         (ctx["utc_date_days_ago"](1), now_iso, raw_limit),
     )
+    gamma_active_payload = ctx["get_gamma_active_market_filter"]() or {}
+    gamma_condition_ids = {
+        str(value or "").strip().lower()
+        for value in (gamma_active_payload.get("conditionIds") or [])
+        if str(value or "").strip()
+    }
+    gamma_slugs = {
+        str(value or "").strip().lower()
+        for value in (gamma_active_payload.get("slugs") or [])
+        if str(value or "").strip()
+    }
+    if gamma_condition_ids or gamma_slugs:
+        filtered_candidates: List[Dict[str, Any]] = []
+        for row in candidate_rows:
+            condition_id = str(row.get("condition_id") or "").strip().lower()
+            slug = str(row.get("slug") or "").strip().lower()
+            if condition_id and condition_id in gamma_condition_ids:
+                filtered_candidates.append(row)
+                continue
+            if slug and slug in gamma_slugs:
+                filtered_candidates.append(row)
+        candidate_rows = filtered_candidates
     candidate_market_ids = [int(row["id"]) for row in candidate_rows if row.get("id") is not None]
     status_map: Dict[int, Dict[str, bool]] = {}
     if candidate_market_ids:
@@ -221,8 +260,11 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         normalized = dict(row)
         normalized["status"] = "Proposed" if flags.get("has_propose") else "Active"
         rows.append(normalized)
-        if len(rows) >= page_size:
+        if len(rows) >= max(page_size * 3, page_size):
             break
+    rows = ctx["enrich_market_rows_with_runtime_prices"](rows, max_updates=len(rows), force_refresh=True)
+    rows = [row for row in rows if _is_tradeable_bootstrap_row(row)]
+    rows = rows[:page_size]
     return {
         "rows": rows,
         "items": [_normalize_bootstrap_market_item(ctx, row) for row in rows],
@@ -405,7 +447,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v2",
+        "active-markets-preview-v3",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )

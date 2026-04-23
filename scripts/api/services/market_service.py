@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v2"
 PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
 PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")
 YAHOO_QUOTE_RE = re.compile(r"finance\.yahoo\.com/quote/([^/?\"' )]+)", re.IGNORECASE)
@@ -33,6 +33,70 @@ NAME_TO_YAHOO_SYMBOL = {
     "silver": "SI=F",
     "oil": "CL=F",
 }
+
+
+def _normalized_gamma_active_keys(ctx: dict) -> tuple[set[str], set[str]]:
+    payload = ctx["get_gamma_active_market_filter"]() or {}
+    condition_ids = {
+        str(value or "").strip().lower()
+        for value in (payload.get("conditionIds") or [])
+        if str(value or "").strip()
+    }
+    slugs = {
+        str(value or "").strip().lower()
+        for value in (payload.get("slugs") or [])
+        if str(value or "").strip()
+    }
+    return condition_ids, slugs
+
+
+def _filter_candidate_rows_to_gamma_active(ctx: dict, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    condition_ids, slugs = _normalized_gamma_active_keys(ctx)
+    if not condition_ids and not slugs:
+        return rows
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        condition_id = str(row.get("condition_id") or "").strip().lower()
+        slug = str(row.get("slug") or "").strip().lower()
+        if condition_id and condition_id in condition_ids:
+            filtered.append(row)
+            continue
+        if slug and slug in slugs:
+            filtered.append(row)
+    return filtered
+
+
+def _decimal_from_any(value: Any) -> Optional[Decimal]:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _is_tradeable_probability(value: Any) -> bool:
+    price = _decimal_from_any(value)
+    if price is None:
+        return True
+    return Decimal("0.01") < price < Decimal("0.99")
+
+
+def _has_recent_trade_window(row: Dict[str, Any]) -> bool:
+    trade_count = int(row.get("trade_count_24h") or 0)
+    volume_24h = _decimal_from_any(row.get("volume_24h"))
+    return trade_count > 0 or (volume_24h is not None and volume_24h > 0)
+
+
+def _filter_tradeable_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    for row in rows:
+        if not _has_recent_trade_window(row):
+            continue
+        if not _is_tradeable_probability(row.get("latest_price")):
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _parse_numeric_target(value: str, suffix: str | None = None) -> Optional[float]:
@@ -398,14 +462,20 @@ def get_market_oracle_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     }
 
 
-def enrich_market_rows_with_runtime_prices(ctx: dict, rows: List[Dict[str, Any]], *, max_updates: int = 18) -> List[Dict[str, Any]]:
+def enrich_market_rows_with_runtime_prices(
+    ctx: dict,
+    rows: List[Dict[str, Any]],
+    *,
+    max_updates: int = 18,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     enriched_rows: List[Dict[str, Any]] = [dict(row) for row in rows]
     candidates: List[tuple[int, Dict[str, Any]]] = []
     for index, normalized in enumerate(enriched_rows):
-        latest_trade_at = ctx["parse_iso_datetime"](normalized.get("latest_trade_at"))
+        latest_trade_at = ctx["parse_iso_datetime"](normalized.get("last_trade_at") or normalized.get("latest_trade_at"))
         is_stale = latest_trade_at is None or (now - latest_trade_at) > timedelta(hours=6)
-        needs_runtime_price = normalized.get("latest_price") in (None, "") or is_stale
+        needs_runtime_price = force_refresh or normalized.get("latest_price") in (None, "") or is_stale
         if needs_runtime_price and len(candidates) < max_updates:
             candidates.append((index, normalized))
     if not candidates:
@@ -531,11 +601,11 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
     placeholders = ", ".join("?" for _ in market_ids)
     rows = ctx["query_all"](
         f"""
-        SELECT
-            m.id,
-            m.slug,
-            m.title,
-            m.condition_id,
+            SELECT
+                m.id,
+                m.slug,
+                m.title,
+                m.condition_id,
             m.question_id,
             m.yes_token_id,
             m.no_token_id,
@@ -544,7 +614,7 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
             m.clob_token_ids,
             m.end_date,
             m.created_at,
-            COALESCE(mls.latest_price, mlp.latest_yes_price) AS latest_price,
+            COALESCE(mlp.latest_yes_price, mls.latest_price) AS latest_price,
             COALESCE(mls.latest_trade_at, mlp.latest_trade_at) AS latest_trade_at,
             mls.price_24h_ago
         FROM markets m
@@ -593,13 +663,16 @@ def get_markets_payload(
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
-        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=False)
+        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=True)
 
     def build_payload() -> Dict[str, Any]:
+        raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
         candidate_rows = ctx["query_all"](
             f"""
             SELECT
                 m.id,
+                m.slug,
+                m.condition_id,
                 m.end_date,
                 m.created_at,
                 COALESCE(mss.has_settle, 0) AS has_settle,
@@ -614,16 +687,17 @@ def get_markets_payload(
             LEFT JOIN market_list_serving mls ON mls.market_id = m.id
             {where_clause}
             ORDER BY COALESCE(mls.volume_24h, 0) DESC, COALESCE(mls.trade_count_24h, 0) DESC, mls.last_trade_at DESC, m.created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT ?
             """,
-            [*params, page_size + 1, offset],
+            [*params, raw_limit],
         )
-        has_more = len(candidate_rows) > page_size
-        visible_candidates = candidate_rows[:page_size]
-        visible_market_ids = [int(row["id"]) for row in visible_candidates if row.get("id") is not None]
+        if status == "active":
+            candidate_rows = _filter_candidate_rows_to_gamma_active(ctx, candidate_rows)
+        working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
+        visible_market_ids = [int(row["id"]) for row in working_candidates if row.get("id") is not None]
         detail_rows = _get_market_detail_rows_by_ids(ctx, visible_market_ids)
         visible_rows: List[Dict[str, Any]] = []
-        for candidate in visible_candidates:
+        for candidate in working_candidates:
             market_id = candidate.get("id")
             if market_id is None:
                 continue
@@ -643,8 +717,17 @@ def get_markets_payload(
             )
             normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
             visible_rows.append(normalized)
-        max_runtime_updates = min(page_size, 8 if page_size >= 120 else (10 if page_size >= 60 else 16))
-        visible_rows = enrich_market_rows_with_runtime_prices(ctx, visible_rows, max_updates=max_runtime_updates)
+        max_runtime_updates = min(page_size, 40 if page_size >= 80 else (24 if page_size >= 40 else 16))
+        visible_rows = enrich_market_rows_with_runtime_prices(
+            ctx,
+            visible_rows,
+            max_updates=max(len(visible_rows), max(page_size, max_runtime_updates)),
+            force_refresh=True,
+        )
+        if status == "active":
+            visible_rows = _filter_tradeable_market_rows(visible_rows)
+        has_more = len(visible_rows) > page_size
+        visible_rows = visible_rows[:page_size]
         return {
             "items": [_market_list_item(ctx, row) for row in visible_rows],
             "pagination": {
@@ -672,6 +755,8 @@ def build_active_markets_payload(
         """
         SELECT
             m.id,
+            m.slug,
+            m.condition_id,
             m.end_date,
             m.created_at,
             COALESCE(mss.has_settle, 0) AS has_settle,
@@ -690,6 +775,7 @@ def build_active_markets_payload(
         """,
         (now_iso, raw_limit),
     )
+    candidate_rows = _filter_candidate_rows_to_gamma_active(ctx, candidate_rows)
     candidate_stats_map = {
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
@@ -708,7 +794,7 @@ def build_active_markets_payload(
         if market_id is None:
             continue
         ordered_market_ids.append(int(market_id))
-        if len(ordered_market_ids) >= page_size:
+        if len(ordered_market_ids) >= max(page_size * 3, page_size):
             break
     detail_rows = _get_market_detail_rows_by_ids(ctx, ordered_market_ids)
     rows: List[Dict[str, Any]] = []
@@ -721,9 +807,16 @@ def build_active_markets_payload(
         normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
         rows.append(normalized)
     if include_runtime_prices:
-        rows = enrich_market_rows_with_runtime_prices(ctx, rows, max_updates=min(page_size, 6 if page_size >= 80 else 10))
+        rows = enrich_market_rows_with_runtime_prices(
+            ctx,
+            rows,
+            max_updates=len(rows),
+            force_refresh=True,
+        )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
+    rows = _filter_tradeable_market_rows(rows)
+    rows = rows[:page_size]
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
         "pagination": {"page": 1, "pageSize": page_size, "total": len(rows), "totalPages": 1, "hasMore": False},
@@ -738,6 +831,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
+            "v": 2,
         },
         sort_keys=True,
         ensure_ascii=True,
