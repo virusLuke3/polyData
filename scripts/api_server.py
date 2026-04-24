@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
 import threading
 import time
 import uuid
+import fcntl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -114,6 +116,76 @@ ADDRESS_HISTORY_SOURCE = sql_identifier(get_address_history_source())
 CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
 LOB_RUNTIME_MANAGER = LOBRuntimeManager()
 SNAPSHOT_STORE = SnapshotStore(SNAPSHOT_SQLITE_PATH)
+_runtime_init_lock = threading.Lock()
+_runtime_initialized = False
+_snapshot_prewarm_owner_fd = None
+
+
+def _runtime_coordination_dir() -> Path:
+    candidate = Path(SNAPSHOT_SQLITE_PATH).expanduser()
+    base_dir = candidate.parent if candidate.parent != Path("") else Path("/tmp/polydata")
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir
+
+
+def _try_acquire_runtime_lock(lock_name: str):
+    lock_path = _runtime_coordination_dir() / lock_name
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode("utf-8"))
+        return fd
+    except BlockingIOError:
+        os.close(fd)
+        return None
+
+
+def _claim_startup_prewarm_slot() -> bool:
+    cooldown_seconds = max(30, int(os.environ.get("POLYDATA_STARTUP_PREWARM_COOLDOWN_SECONDS", "300")))
+    marker_path = _runtime_coordination_dir() / "startup-prewarm.marker"
+    lock_path = _runtime_coordination_dir() / "startup-prewarm.marker.lock"
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        now = time.time()
+        last_run = 0.0
+        if marker_path.exists():
+            try:
+                payload = json.loads(marker_path.read_text(encoding="utf-8") or "{}")
+                last_run = float(payload.get("last_run_ts") or 0.0)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                last_run = 0.0
+        if now - last_run < cooldown_seconds:
+            app.logger.info(
+                "startup-prewarm skip reason=cooldown pid=%s cooldown_seconds=%s age_seconds=%.2f",
+                os.getpid(),
+                cooldown_seconds,
+                max(0.0, now - last_run),
+            )
+            return False
+        marker_path.write_text(
+            json.dumps({"last_run_ts": now, "pid": os.getpid()}),
+            encoding="utf-8",
+        )
+        app.logger.info("startup-prewarm claim pid=%s cooldown_seconds=%s", os.getpid(), cooldown_seconds)
+        return True
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _claim_snapshot_prewarm_owner() -> bool:
+    global _snapshot_prewarm_owner_fd
+    if _snapshot_prewarm_owner_fd is not None:
+        return True
+    fd = _try_acquire_runtime_lock("snapshot-prewarm.worker.lock")
+    if fd is None:
+        app.logger.info("snapshot-prewarm thread-skip reason=lock-held pid=%s", os.getpid())
+        return False
+    _snapshot_prewarm_owner_fd = fd
+    app.logger.info("snapshot-prewarm thread-owner pid=%s", os.getpid())
+    return True
 
 
 def configure_logging() -> None:
@@ -134,6 +206,11 @@ def create_app() -> Flask:
     app.config["POLYDATA_API_PORT"] = SETTINGS.port
     register_blueprints(app, build_route_helpers())
     return app
+
+
+def api_readonly_enabled() -> bool:
+    raw = os.environ.get("POLYDATA_API_READONLY", "")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def build_route_helpers() -> Dict[str, Any]:
@@ -1384,15 +1461,40 @@ def main():
     configure_db_from_args(args)
     global DB_PATH
     DB_PATH = args.sqlite_path
-    if not args.skip_init_schema:
-        init_schema(db_path=DB_PATH)
-
-    create_app()
-    app.logger.info("Starting API server at http://%s:%s", args.host, args.port)
-    app.logger.info("Database: %s", describe_db_target())
-    prewarm_critical_payloads()
-    start_snapshot_prewarm_thread()
+    skip_init_schema = args.skip_init_schema or api_readonly_enabled()
+    initialize_runtime(
+        host=args.host,
+        port=args.port,
+        skip_init_schema=skip_init_schema,
+        log_startup=True,
+    )
     app.run(host=args.host, port=args.port, debug=False)
+
+
+def initialize_runtime(
+    *,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    skip_init_schema: bool = False,
+    log_startup: bool = False,
+) -> Flask:
+    global DB_PATH
+    global _runtime_initialized
+    with _runtime_init_lock:
+        if _runtime_initialized:
+            return app
+        if not skip_init_schema:
+            init_schema(db_path=DB_PATH)
+        create_app()
+        if log_startup:
+            app.logger.info("Starting API server at http://%s:%s", host or SETTINGS.host, port or SETTINGS.port)
+            app.logger.info("Database: %s", describe_db_target())
+        if _claim_startup_prewarm_slot():
+            prewarm_critical_payloads()
+        if _claim_snapshot_prewarm_owner():
+            start_snapshot_prewarm_thread()
+        _runtime_initialized = True
+        return app
 
 
 if __name__ == "__main__":
