@@ -140,15 +140,37 @@ export function fetchRuntimeSuspicious(limit = 12) {
 }
 
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
-  const [market, trades, oracle, price, chart, content, lob] = await Promise.all([
+  const [
+    marketResult,
+    tradesResult,
+    oracleResult,
+    priceResult,
+    chartResult,
+    contentResult,
+    lobResult,
+  ] = await Promise.allSettled([
     apiGet<MarketSummary>(`/markets/${marketId}`),
     apiGet<TradeRow[]>(`/markets/${marketId}/trades?limit=24`),
     apiGet<OraclePayload>(`/markets/${marketId}/oracle`),
     apiGet<PriceSummary>(`/markets/${marketId}/price`),
     apiGet<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`),
     apiGet<ContentPayload>(`/content/market/${marketId}?limit=6`),
-    apiGet<LobPayload>(`/runtime/lob/${marketId}`).catch(() => null),
+    apiGet<LobPayload>(`/runtime/lob/${marketId}`),
   ]);
 
-  return { market, trades, oracle, price, chart, content, lob };
+  if (marketResult.status !== 'fulfilled') {
+    throw marketResult.reason instanceof Error
+      ? marketResult.reason
+      : new Error(`Failed to load market ${marketId}`);
+  }
+
+  return {
+    market: marketResult.value,
+    trades: tradesResult.status === 'fulfilled' ? tradesResult.value : [],
+    oracle: oracleResult.status === 'fulfilled' ? oracleResult.value : null,
+    price: priceResult.status === 'fulfilled' ? priceResult.value : null,
+    chart: chartResult.status === 'fulfilled' ? chartResult.value : null,
+    content: contentResult.status === 'fulfilled' ? contentResult.value : null,
+    lob: lobResult.status === 'fulfilled' ? lobResult.value : null,
+  };
 }

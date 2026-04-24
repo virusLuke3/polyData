@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from .http_client import http_json_get
 
+GAMMA_EVENTS_BASE_URL = "https://gamma-api.polymarket.com/events"
+
 
 def parse_interval_minutes(interval: str) -> int:
     text = str(interval or "5m").strip().lower()
@@ -300,3 +302,61 @@ def get_market_clob_price_series(ctx: dict, market: Optional[Dict[str, Any]], ra
             )
 
     return ctx["set_cached_runtime_payload"]("clob-price-series", cache_key, points[-400:])
+
+
+def get_gamma_active_market_filter(ctx: dict, *, ttl_seconds: int = 60, max_pages: int = 12) -> Dict[str, Any]:
+    cache_key = json.dumps({"kind": "gamma-active-market-filter", "maxPages": int(max_pages)}, sort_keys=True, ensure_ascii=True)
+    cached = ctx["get_cached_runtime_payload"]("gamma-active-market-filter", cache_key)
+    if cached is not None:
+        return cached
+
+    condition_ids: set[str] = set()
+    slugs: set[str] = set()
+    limit = 100
+
+    for page in range(max(1, int(max_pages))):
+        payload = http_json_get(
+            ctx,
+            GAMMA_EVENTS_BASE_URL,
+            params={
+                "active": "true",
+                "closed": "false",
+                "limit": limit,
+                "offset": page * limit,
+                "order": "volume24hr",
+                "ascending": "false",
+            },
+            timeout=12,
+            headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
+        )
+        events = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
+        if not isinstance(events, list) or not events:
+            break
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            for market in event.get("markets") or []:
+                if not isinstance(market, dict):
+                    continue
+                if market.get("active") is False:
+                    continue
+                if market.get("closed") is True:
+                    continue
+                if market.get("acceptingOrders") is False:
+                    continue
+                condition_id = str(market.get("conditionId") or market.get("condition_id") or "").strip().lower()
+                slug = str(market.get("slug") or market.get("market_slug") or "").strip().lower()
+                if condition_id:
+                    condition_ids.add(condition_id)
+                if slug:
+                    slugs.add(slug)
+        if len(events) < limit:
+            break
+
+    payload = {
+        "conditionIds": sorted(condition_ids),
+        "slugs": sorted(slugs),
+        "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    return ctx["set_cached_runtime_payload"]("gamma-active-market-filter", cache_key, payload, ttl_seconds=ttl_seconds)

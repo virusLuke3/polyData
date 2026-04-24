@@ -212,6 +212,7 @@ export function App() {
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
   const slowRefreshInFlightRef = useRef(false);
+  const bundleRequestSeqRef = useRef(0);
 
   async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
@@ -468,19 +469,21 @@ export function App() {
   useEffect(() => {
     if (!selectedMarketId) return;
     const currentMarketId = selectedMarketId;
+    const requestSeq = ++bundleRequestSeqRef.current;
     let cancelled = false;
+    setBundle(null);
 
     async function loadBundle() {
       setBundleLoading(true);
       try {
         const payload = await fetchWorkspaceBundle(currentMarketId);
-        if (!cancelled) setBundle(payload);
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq) setBundle(payload);
       } catch (loadError) {
-        if (!cancelled) {
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load market bundle.');
         }
       } finally {
-        if (!cancelled) setBundleLoading(false);
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq) setBundleLoading(false);
       }
     }
 
@@ -543,9 +546,11 @@ export function App() {
 
   const selectedMarket = useMemo<MarketSummary | null>(() => {
     if (bundle?.market && bundle.market.id === selectedMarketId) return bundle.market;
+    const selectedListMarket = availableMarkets.find((market) => market.id === selectedMarketId);
+    if (selectedListMarket) return selectedListMarket;
     if (bootstrap?.featuredMarket?.id === selectedMarketId) return bootstrap.featuredMarket;
-    return bundle?.market || bootstrap?.featuredMarket || null;
-  }, [bootstrap?.featuredMarket, bundle?.market, selectedMarketId]);
+    return bootstrap?.featuredMarket || null;
+  }, [availableMarkets, bootstrap?.featuredMarket, bundle?.market, selectedMarketId]);
 
   const currentGlobalTrades = globalTrades.length ? globalTrades : (bootstrap?.globalTradesPreview || []);
   const currentGlobalOracle = globalOracle.length ? globalOracle : (bootstrap?.globalOraclePreview || []);
