@@ -11,6 +11,8 @@ BOOTSTRAP_CACHE_KEY = "workspace-default-v3"
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
 _PREWARM_LAST_RUN_LOCK = threading.Lock()
 _PREWARM_LAST_RUN: Dict[str, float] = {}
+_DASHBOARD_REFRESH_LOCK = threading.Lock()
+_DASHBOARD_REFRESHING = False
 
 
 def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
@@ -72,6 +74,58 @@ def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
     }
 
 
+def _build_dashboard_fallback_payload(ctx: dict) -> Dict[str, Any]:
+    now_iso = ctx["utc_now_iso"]()
+    return {
+        "metrics": {"activeMarkets": 0, "totalTrades": 0, "settlements24h": 0},
+        "volume7d": [],
+        "volume30d": [],
+        "statusShare": [],
+        "recentActiveMarkets": [],
+        "metadata": {
+            "generatedAt": now_iso,
+            "cacheTtlSeconds": ctx["DASHBOARD_CACHE_TTL_SECONDS"],
+            "tradeWindowSize": ctx["RECENT_TRADE_WINDOW"],
+            "tradeWindowEarliestTimestamp": None,
+            "tradeWindowLatestTimestamp": None,
+            "tradeWindowSource": "warming",
+            "tradeWindowCovers7d": False,
+            "tradeWindowCovers30d": False,
+            "totalTradesSource": "warming",
+            "totalTradesAutoIncrement": 0,
+            "sourceMode": "fast-fallback",
+            "status": "warming",
+        },
+    }
+
+
+def _schedule_dashboard_refresh(ctx: dict, reason: str) -> None:
+    global _DASHBOARD_REFRESHING
+    with _DASHBOARD_REFRESH_LOCK:
+        if _DASHBOARD_REFRESHING:
+            return
+        _DASHBOARD_REFRESHING = True
+
+    def refresh() -> None:
+        global _DASHBOARD_REFRESHING
+        started_at = time.perf_counter()
+        try:
+            ctx["app"].logger.info("dashboard-cache refresh-start reason=%s", reason)
+            payload = build_dashboard_payload(ctx)
+            ctx["SNAPSHOT_STORE"].set("snapshot:dashboard", "dashboard", payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])
+            ctx["_dashboard_cache"]["value"] = payload
+            ctx["_dashboard_cache"]["expires_at"] = time.monotonic() + ctx["DASHBOARD_CACHE_TTL_SECONDS"]
+            ctx["set_cached_json"]("dashboard", "dashboard", payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])
+            ctx["app"].logger.info("dashboard-cache refresh-done reason=%s duration_ms=%.2f", reason, (time.perf_counter() - started_at) * 1000)
+        except Exception:
+            ctx["app"].logger.exception("dashboard-cache refresh-failed reason=%s", reason)
+        finally:
+            with _DASHBOARD_REFRESH_LOCK:
+                _DASHBOARD_REFRESHING = False
+
+    ctx["threading"].Thread(target=refresh, name="dashboard-refresh", daemon=True).start()
+
+
 def get_dashboard_payload_cached(ctx: dict) -> Dict[str, Any]:
     redis_cache_key = "dashboard"
     redis_payload = ctx["get_cached_json"]("dashboard", redis_cache_key)
@@ -89,7 +143,19 @@ def get_dashboard_payload_cached(ctx: dict) -> Dict[str, Any]:
             ctx["app"].logger.info("dashboard-cache hit-after-lock")
             return cached
         ctx["app"].logger.info("dashboard-cache rebuild window_size=%s ttl_seconds=%s", ctx["RECENT_TRADE_WINDOW"], ctx["DASHBOARD_CACHE_TTL_SECONDS"])
-        payload = build_dashboard_payload(ctx)
+        snapshot_payload = ctx["SNAPSHOT_STORE"].get("snapshot:dashboard", redis_cache_key)
+        if snapshot_payload is not None:
+            payload = snapshot_payload
+        else:
+            stale_payload = ctx["SNAPSHOT_STORE"].get_stale("snapshot:dashboard", redis_cache_key)
+            if stale_payload is not None:
+                ctx["app"].logger.info("dashboard-cache stale-hit scheduling_refresh=true")
+                _schedule_dashboard_refresh(ctx, "stale-hit")
+                payload = stale_payload
+            else:
+                ctx["app"].logger.info("dashboard-cache cold-miss returning_fallback=true scheduling_refresh=true")
+                _schedule_dashboard_refresh(ctx, "cold-miss")
+                payload = _build_dashboard_fallback_payload(ctx)
         ctx["_dashboard_cache"]["value"] = payload
         ctx["_dashboard_cache"]["expires_at"] = time.monotonic() + ctx["DASHBOARD_CACHE_TTL_SECONDS"]
         ctx["set_cached_json"]("dashboard", redis_cache_key, payload, ctx["DASHBOARD_CACHE_TTL_SECONDS"])

@@ -948,30 +948,7 @@ def build_dashboard_payload() -> Dict[str, Any]:
 
 
 def get_dashboard_payload_cached() -> Dict[str, Any]:
-    redis_cache_key = "dashboard"
-    redis_payload = get_cached_json("dashboard", redis_cache_key)
-    if redis_payload is not None:
-        app.logger.info("dashboard-cache redis-hit")
-        return redis_payload
-
-    now_monotonic = time.monotonic()
-    cached = _dashboard_cache.get("value")
-    if cached is not None and _dashboard_cache.get("expires_at", 0.0) > now_monotonic:
-        app.logger.info("dashboard-cache hit ttl_remaining_ms=%.2f", (_dashboard_cache.get("expires_at", 0.0) - now_monotonic) * 1000)
-        return cached
-
-    with _dashboard_cache_lock:
-        cached = _dashboard_cache.get("value")
-        if cached is not None and _dashboard_cache.get("expires_at", 0.0) > time.monotonic():
-            app.logger.info("dashboard-cache hit-after-lock")
-            return cached
-
-        app.logger.info("dashboard-cache rebuild window_size=%s ttl_seconds=%s", RECENT_TRADE_WINDOW, DASHBOARD_CACHE_TTL_SECONDS)
-        payload = build_dashboard_payload()
-        _dashboard_cache["value"] = payload
-        _dashboard_cache["expires_at"] = time.monotonic() + DASHBOARD_CACHE_TTL_SECONDS
-        set_cached_json("dashboard", redis_cache_key, payload, DASHBOARD_CACHE_TTL_SECONDS)
-        return payload
+    return bootstrap_service.get_dashboard_payload_cached(build_service_context())
 
 
 def get_markets_payload_cached(cache_key: str, builder, *, namespace: str = "markets", ttl_seconds: int = MARKETS_CACHE_TTL_SECONDS) -> Dict[str, Any]:

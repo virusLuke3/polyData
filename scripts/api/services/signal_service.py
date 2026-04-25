@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from datetime import timedelta
@@ -102,16 +103,15 @@ def _refresh_runtime_snapshot(
     ctx["app"].logger.info("%s refresh-start reason=%s", label, reason)
     try:
         payload = builder()
+        stored = _store_runtime_snapshot(ctx, namespace, cache_key, payload, ttl_seconds)
+        ctx["app"].logger.info("%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000)
+        return stored
     except Exception:
-        with _SIGNAL_REFRESH_LOCK:
-            _SIGNAL_REFRESH_STATE[refresh_state_key] = False
         ctx["app"].logger.exception("%s refresh-failed reason=%s", label, reason)
         return None
-    stored = _store_runtime_snapshot(ctx, namespace, cache_key, payload, ttl_seconds)
-    with _SIGNAL_REFRESH_LOCK:
-        _SIGNAL_REFRESH_STATE[refresh_state_key] = False
-    ctx["app"].logger.info("%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000)
-    return stored
+    finally:
+        with _SIGNAL_REFRESH_LOCK:
+            _SIGNAL_REFRESH_STATE[refresh_state_key] = False
 
 
 def _schedule_runtime_snapshot_refresh(
@@ -155,6 +155,7 @@ def _get_stale_first_runtime_snapshot(
     builder: Callable[[], Dict[str, Any]],
     refresh_state_key: str,
     label: str,
+    cold_fallback: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     cached = ctx["get_cached_runtime_payload"](namespace, cache_key)
     if cached is not None:
@@ -180,6 +181,26 @@ def _get_stale_first_runtime_snapshot(
         )
         return stale_payload
 
+    if cold_fallback is not None:
+        ctx["app"].logger.info("%s cold-miss returning_fallback=true scheduling_refresh=true", label)
+        _schedule_runtime_snapshot_refresh(
+            ctx,
+            namespace=namespace,
+            cache_key=cache_key,
+            ttl_seconds=ttl_seconds,
+            builder=builder,
+            refresh_state_key=refresh_state_key,
+            label=label,
+            reason="cold-miss",
+        )
+        fallback_payload = cold_fallback()
+        return ctx["set_cached_runtime_payload"](namespace, cache_key, fallback_payload, min(15, ttl_seconds))
+
+    with _SIGNAL_REFRESH_LOCK:
+        if _SIGNAL_REFRESH_STATE.get(refresh_state_key):
+            payload = {"items": [], "generatedAt": ctx["utc_now_iso"](), "status": "warming"}
+            return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, min(5, ttl_seconds))
+        _SIGNAL_REFRESH_STATE[refresh_state_key] = True
     payload = _refresh_runtime_snapshot(
         ctx,
         namespace=namespace,
@@ -348,7 +369,8 @@ def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, t
 
 
 def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    recent_trades = ctx["get_recent_trades"](limit=max(260, limit * 40))
+    recent_limit = max(96, limit * int(os.environ.get("POLYDATA_ALPHA_TRADE_MULTIPLIER", "12")))
+    recent_trades = ctx["get_recent_trades"](limit=recent_limit)
     addresses_by_market: Dict[int, set[str]] = {}
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -359,10 +381,29 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         except (TypeError, ValueError):
             continue
         addresses_by_market.setdefault(market_id_int, set()).update(signal_cluster_service.collect_trade_addresses(ctx, [trade]))
+    market_notional_rank: Dict[int, Decimal] = {}
+    for trade in recent_trades:
+        market_id = trade.get("marketId") or trade.get("market_id")
+        if market_id is None:
+            continue
+        try:
+            market_id_int = int(market_id)
+        except (TypeError, ValueError):
+            continue
+        price = ctx["_safe_decimal"](trade.get("price")) or Decimal("0")
+        size = ctx["_safe_decimal"](trade.get("size")) or Decimal("0")
+        notional = ctx["_safe_decimal"](trade.get("notional")) or (price * size)
+        market_notional_rank[market_id_int] = market_notional_rank.get(market_id_int, Decimal("0")) + notional
+    max_profile_markets = int(os.environ.get("POLYDATA_ALPHA_PROFILE_MARKETS", "5"))
+    max_profile_addresses = int(os.environ.get("POLYDATA_ALPHA_PROFILE_ADDRESSES", "16"))
+    profiled_market_ids = {
+        market_id
+        for market_id, _ in sorted(market_notional_rank.items(), key=lambda item: item[1], reverse=True)[:max_profile_markets]
+    }
     address_profiles_by_market = {
-        market_id: address_intel_service.get_address_profiles(ctx, addresses, market_id=market_id)
+        market_id: address_intel_service.get_address_profiles(ctx, list(addresses)[:max_profile_addresses], market_id=market_id)
         for market_id, addresses in addresses_by_market.items()
-        if addresses
+        if addresses and market_id in profiled_market_ids
     }
     polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
         ctx,
@@ -464,6 +505,40 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     return {"items": deduped, "generatedAt": ctx["utc_now_iso"]()}
 
 
+def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    for row in _query_whale_rows(ctx, limit=min(6, limit), lookback_days=3):
+        if len(signals) >= limit:
+            break
+        trade = _format_trade_item(ctx, row)
+        _append_signal(
+            signals,
+            kind="whale",
+            severity=trade.get("severity") or "watch",
+            title=trade.get("marketTitle") or "Whale flow",
+            summary=f"{str(trade.get('side') or 'trade').upper()} {trade.get('outcome') or '--'} at {trade.get('price') or '--'}, notional {trade.get('notional') or '--'}",
+            timestamp=trade.get("timestamp"),
+            contributors=["fast-fallback", "whale"],
+        )
+
+    if len(signals) < limit:
+        for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:4]:
+            if len(signals) >= limit:
+                break
+            price = ctx["_safe_decimal"](market.get("latestPrice"))
+            change_24h = ctx["_safe_decimal"](market.get("change24h"))
+            _append_signal(
+                signals,
+                kind="momentum",
+                severity="elevated" if change_24h is not None and abs(change_24h) >= Decimal("0.08") else "watch",
+                title=market.get("title"),
+                summary=f"Fast fallback: live probability {ctx['format_trade_decimal'](price) or '--'} with 24h change {ctx['format_trade_decimal'](change_24h) or '--'}",
+                timestamp=ctx["utc_now_iso"](),
+                contributors=["fast-fallback", "market"],
+            )
+    return {"items": signals[:limit], "generatedAt": ctx["utc_now_iso"](), "status": "warming", "sourceMode": "fast-fallback"}
+
+
 def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
     return _get_stale_first_runtime_snapshot(
@@ -474,4 +549,5 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         builder=lambda: _build_alpha_signal_payload(ctx, limit=limit),
         refresh_state_key=f"alpha:{cache_key}",
         label="alpha-snapshot",
+        cold_fallback=lambda: _build_alpha_fallback_payload(ctx, limit=limit),
     )

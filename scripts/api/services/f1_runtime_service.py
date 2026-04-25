@@ -11,10 +11,13 @@ def get_f1_panel_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
 
     def _builder() -> Dict[str, Any]:
         try:
-            return build_f1_panel_payload(
+            payload = build_f1_panel_payload(
                 requests_lib=ctx.get("requests"),
                 limit=limit,
             )
+            if isinstance(payload, dict) and "items" not in payload:
+                payload["items"] = payload.get("cards") or []
+            return payload
         except Exception:
             ctx["app"].logger.exception("f1 runtime snapshot build failed")
             return {
@@ -22,6 +25,7 @@ def get_f1_panel_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
                 "source": "bwenews-rss",
                 "sourceUrl": "https://x.com/bwenews",
                 "cards": [],
+                "items": [],
                 "focusMeeting": None,
                 "status": "error",
             }

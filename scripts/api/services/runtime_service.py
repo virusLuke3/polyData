@@ -180,15 +180,22 @@ def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
 
         try:
             lineup_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+            nba_headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.nba.com/",
+                "Origin": "https://www.nba.com",
+                "x-nba-stats-origin": "stats",
+                "x-nba-stats-token": "true",
+            }
             payload = ctx["http_json_get"](
                 f"{ctx['SETTINGS'].nba_lineups_base_url.rstrip('/')}/00_daily_lineups_{lineup_date}.json",
-                timeout=12,
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Accept": "application/json, text/plain, */*",
-                    "Referer": "https://www.nba.com/",
-                    "Origin": "https://www.nba.com",
-                },
+                timeout=8,
+                headers=nba_headers,
             ) or {}
             for game in (payload.get("games") or [])[: min(limit, 8)]:
                 home_team = ((game.get("homeTeam") or {}).get("teamName")) or ((game.get("homeTeam") or {}).get("teamTricode"))
@@ -218,6 +225,21 @@ def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
                 )
         except Exception:
             ctx["app"].logger.exception("nba intel lineup fetch failed")
+        if not lineup_items:
+            try:
+                scoreboard = get_nba_scoreboard_snapshot(ctx, limit=min(limit, 8))
+                for game in (scoreboard.get("items") or [])[: min(limit, 8)]:
+                    lineup_items.append(
+                        {
+                            "gameId": game.get("id"),
+                            "label": f"{game.get('awayTeam') or 'Away'} @ {game.get('homeTeam') or 'Home'}",
+                            "status": game.get("status") or game.get("state"),
+                            "starters": [],
+                            "sourceMode": "scoreboard-fallback",
+                        }
+                    )
+            except Exception:
+                ctx["app"].logger.exception("nba intel scoreboard lineup fallback failed")
         return {"items": news_items, "lineups": lineup_items, "generatedAt": ctx["utc_now_iso"]()}
 
     return ctx["get_snapshot_payload"]("snapshot:sports:nba-intel", cache_key, _builder, ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"])
