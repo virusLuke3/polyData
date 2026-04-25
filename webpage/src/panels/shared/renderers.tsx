@@ -438,37 +438,52 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
 }
 
 
-function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string) {
+function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', fontSize: '13px', fontFamily: 'monospace' }}>
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', fontSize: '12px', color: '#888', fontWeight: 'bold', padding: '0 8px' }}>
-        <span style={{ color: '#fff', borderBottom: '1px solid #39ff73', paddingBottom: '4px' }}>Trades</span>
+    <div className="wm-poly-market-list">
+      <div style={{ display: 'flex', gap: '16px', margin: '4px 12px 8px', fontSize: '12px', color: '#888', fontWeight: 'bold', fontFamily: 'monospace' }}>
+        <span style={{ color: '#fff', borderBottom: '1px solid #22c55e', paddingBottom: '4px' }}>Trades</span>
         <span style={{ cursor: 'pointer' }}>Flow</span>
         <span style={{ cursor: 'pointer' }}>Signals</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        {items.map((item, index) => {
-           let timeStr = formatRelative(item.timestamp || null);
-           timeStr = timeStr.replace(' minutes ago', 'm').replace(' minutes', 'm').replace(' hours ago', 'h').replace(' hours', 'h').replace(' seconds ago', 's').replace(' seconds', 's');
-           if (timeStr.includes('just now')) timeStr = '1m';
-           
-           const side = String(item.side || 'BUY').toUpperCase();
-           const isBuy = side === 'BUY';
-           const color = isBuy ? '#39ff73' : '#ff6464';
-           const addressFull = item.txHash || item.addresses?.[0]?.address || 'unknown';
-           const address = shortHash(addressFull, 5, 0).replace('...', '');
-           return (
-             <div key={`${item.txHash || 'trade'}-${index}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px', borderRadius: '4px', background: 'rgba(255,255,255,0.02)' }}>
-               <span style={{ color: '#aaa', width: '35px' }}>{timeStr}</span>
-               <span style={{ color: '#888', width: '65px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{address}</span>
-               <span style={{ color: '#eee', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', margin: '0 12px' }}>{item.marketTitle || 'Unknown Market'}</span>
-               <span style={{ color: color, fontWeight: 'bold', width: '40px', textAlign: 'right' }}>{side}</span>
-               <span style={{ color: '#fff', width: '55px', textAlign: 'right' }}>${formatCompact(item.notional || 0)}</span>
+      {items.map((item, index) => {
+         let timeStr = formatRelative(item.timestamp || null);
+         timeStr = timeStr.replace(' minutes ago', 'm').replace(' minutes', 'm').replace(' hours ago', 'h').replace(' hours', 'h').replace(' seconds ago', 's').replace(' seconds', 's');
+         if (timeStr.includes('just now')) timeStr = '1m';
+         
+         const side = String(item.side || 'BUY').toUpperCase();
+         const isBuy = side === 'BUY';
+         const color = isBuy ? '#22c55e' : '#ef4444';
+         const addressFull = item.txHash || item.addresses?.[0]?.address || 'unknown';
+         const address = shortHash(addressFull, 5, 0).replace('...', '');
+         
+         return (
+           <button
+             key={`${item.txHash || 'trade'}-${index}`}
+             type="button"
+             className="wm-poly-market-card"
+             style={{ borderLeftColor: color, paddingTop: '10px', paddingBottom: '10px' }}
+             onClick={() => item.marketId && onMarketSelect?.(item.marketId)}
+             disabled={!item.marketId}
+           >
+             <div className="wm-poly-market-card-main">
+               <div className="wm-poly-market-meta">
+                 <span className="wm-poly-market-dot" style={{ backgroundColor: color }} />
+                 <span>{address}</span>
+                 <span>·</span>
+                 <span>{timeStr}</span>
+                 <span>·</span>
+                 <strong style={{ color }}>{side}</strong>
+                 <strong style={{ marginLeft: 'auto', color: '#fff', fontSize: '12px' }}>${formatCompact(item.notional || 0)}</strong>
+               </div>
+               <strong className="wm-poly-market-title" style={{ fontSize: '13px', marginTop: '6px' }}>
+                 {item.marketTitle || 'Unknown Market'}
+               </strong>
              </div>
-           );
-        })}
-      </div>
+           </button>
+         );
+      })}
     </div>
   );
 }
