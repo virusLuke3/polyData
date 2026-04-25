@@ -455,6 +455,21 @@ export type RuntimeSignalPayload = {
   generatedAt?: string;
 };
 
+export type RuntimeNewMarketSignalItem = {
+  marketId?: number | null;
+  title?: string | null;
+  initialYesProbability?: string | number | null;
+  probabilitySource?: string | null;
+  observedAt?: string | null;
+  marketCreatedAt?: string | null;
+};
+
+export type RuntimeNewMarketSignalsPayload = {
+  items: RuntimeNewMarketSignalItem[];
+  generatedAt?: string;
+  status?: string | null;
+};
+
 export type PanelDefinition = {
   id: string;
   title: string;

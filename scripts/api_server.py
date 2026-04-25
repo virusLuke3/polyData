@@ -74,7 +74,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, f1_runtime_service, jin10_runtime_service, lob_service, market_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, f1_runtime_service, jin10_runtime_service, lob_service, market_service, new_market_signal_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -251,6 +251,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_nba_intel_snapshot": get_nba_intel_snapshot,
         "get_nba_matchup_predictor_snapshot": get_nba_matchup_predictor_snapshot,
         "get_nba_scoreboard_snapshot": get_nba_scoreboard_snapshot,
+        "get_new_market_signals_snapshot": get_new_market_signals_snapshot,
         "get_oracle_events_by_market_id": get_oracle_events_by_market_id,
         "get_recent_oracle_snapshot": get_recent_oracle_snapshot,
         "get_recent_trades_snapshot": get_recent_trades_snapshot,
@@ -369,6 +370,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_nba_intel_snapshot": lambda limit=12: runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit),
         "get_nba_matchup_predictor_snapshot": lambda limit=8: runtime_service.get_nba_matchup_predictor_snapshot(build_service_context(), limit=limit),
         "get_nba_scoreboard_snapshot": lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit),
+        "get_new_market_signals_snapshot": lambda limit=12: new_market_signal_service.get_new_market_signals_snapshot(build_service_context(), limit=limit),
         "get_oracle_events_by_market_id": lambda market_id: market_service.get_oracle_events_by_market_id(build_service_context(), market_id),
         "get_recent_oracle_events": get_recent_oracle_events,
         "get_recent_oracle_snapshot": lambda limit=24: market_service.get_recent_oracle_snapshot(build_service_context(), limit=limit),
@@ -743,6 +745,10 @@ def get_inflation_nowcast_snapshot() -> Dict[str, Any]:
 
 def get_jin10_panel_snapshot(limit: int = 24) -> Dict[str, Any]:
     return jin10_runtime_service.get_jin10_panel_snapshot(build_service_context(), limit=limit)
+
+
+def get_new_market_signals_snapshot(limit: int = 12) -> Dict[str, Any]:
+    return new_market_signal_service.get_new_market_signals_snapshot(build_service_context(), limit=limit)
 
 
 def get_whale_trades_snapshot(limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:

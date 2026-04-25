@@ -23,6 +23,7 @@ import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
 import { panel as inflationNowcast } from './inflation-nowcast';
 import { panel as jin10Flash } from './jin10-flash';
+import { panel as newMarketSignals } from './new-market-signals';
 import { panel as bboMonitor } from './bbo-monitor';
 import { panel as lobDepth } from './lob-depth';
 import { panel as liveApiStatus } from './live-api-status';
@@ -54,6 +55,7 @@ export const PANEL_MODULES: PanelModule[] = [
   espnMatchupPredictor,
   inflationNowcast,
   jin10Flash,
+  newMarketSignals,
   bboMonitor,
   lobDepth,
   liveApiStatus,

@@ -14,6 +14,7 @@ import type {
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
+  RuntimeNewMarketSignalsPayload,
   RuntimeSignalPayload,
   SystemHealth,
   TradeRow,
@@ -134,6 +135,10 @@ export function fetchRuntimeInflationNowcast() {
 
 export function fetchRuntimeAlpha(limit = 8) {
   return apiGet<RuntimeSignalPayload>(`/runtime/signals/alpha?limit=${limit}`);
+}
+
+export function fetchRuntimeNewMarketSignals(limit = 12) {
+  return apiGet<RuntimeNewMarketSignalsPayload>(`/runtime/markets/new-signals?limit=${limit}`);
 }
 
 export function fetchRuntimeWhales(limit = 14) {

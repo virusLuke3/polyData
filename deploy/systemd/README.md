@@ -10,6 +10,7 @@ production services on one machine.
 - `polydata-trade-sync.service`
 - `polydata-oracle-sync.service`
 - `polydata-analytics-sync.service`
+- `polydata-new-market-signal.service`
 - `polydata.target`
 - `polydata.env.example`
 
@@ -64,9 +65,10 @@ loginctl enable-linger "$USER"
 5. Inspect status and logs:
 
 ```bash
-systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync
+systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync polydata-new-market-signal
 journalctl --user-unit polydata-api -f
 journalctl --user-unit polydata-market-sync -f
+journalctl --user-unit polydata-new-market-signal -f
 ```
 
 ## Notes

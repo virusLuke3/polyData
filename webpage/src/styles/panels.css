@@ -684,6 +684,104 @@
   color: var(--wm-green);
 }
 
+.wm-new-market-signal-panel .wm-panel-body {
+  padding: 8px;
+}
+
+.wm-new-market-signal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.wm-new-market-signal-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, auto);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 70px;
+  margin: 0 0 5px;
+  padding: 8px 10px 8px 11px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid #242424;
+  border-left: 2px solid var(--wm-green);
+  background: #141414;
+  overflow: hidden;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.wm-new-market-signal-card:hover,
+.wm-new-market-signal-card.active {
+  border-color: #363c38;
+  border-left-color: var(--wm-green);
+  background: #181c19;
+}
+
+.wm-new-market-signal-card:disabled {
+  cursor: default;
+}
+
+.wm-new-market-signal-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wm-new-market-signal-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 6px;
+  overflow: hidden;
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wm-new-market-signal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: var(--wm-green);
+  box-shadow: 0 0 14px rgba(57, 255, 115, 0.42);
+}
+
+.wm-new-market-signal-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--wm-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.28;
+  letter-spacing: 0;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-new-market-signal-prob {
+  justify-self: end;
+  color: var(--wm-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.wm-new-market-signal-prob.pending {
+  color: #8d918e;
+  font-size: 11px;
+}
+
 .wm-f1-panel .wm-panel-body {
   padding: 8px;
 }

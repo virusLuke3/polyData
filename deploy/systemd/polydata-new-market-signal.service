@@ -1,0 +1,17 @@
+[Unit]
+Description=polyData new market signal watcher
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/new_market_signal_watcher.py --watch --interval 20 --limit 100'
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polydata.target
