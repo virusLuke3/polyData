@@ -41,7 +41,9 @@ DEFAULT_NAMESPACE = "runtime:new-market-signals"
 DEFAULT_INTERVAL_SECONDS = 20
 DEFAULT_BATCH_LIMIT = 100
 DEFAULT_RETENTION = 50
+DEFAULT_PENDING_RETENTION = 500
 DEFAULT_CLOB_TIMEOUT_SECONDS = 10
+PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
 
 
 def utc_now_iso() -> str:
@@ -69,6 +71,17 @@ def _redis_key(prefix: str, namespace: str, suffix: str) -> str:
     return f"{clean_prefix}{namespace}:{suffix}"
 
 
+def _clean_title(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def is_placeholder_market_title(value: Any) -> bool:
+    title = _clean_title(value)
+    if not title:
+        return True
+    return any(title.startswith(prefix) for prefix in PLACEHOLDER_TITLE_PREFIXES)
+
+
 class NewMarketSignalWatcher:
     def __init__(
         self,
@@ -93,6 +106,7 @@ class NewMarketSignalWatcher:
         self.namespace = namespace
         self.last_seen_key = _redis_key(redis_prefix, namespace, "last_seen_market_id")
         self.items_key = _redis_key(redis_prefix, namespace, "items")
+        self.pending_key = _redis_key(redis_prefix, namespace, "pending_market_ids")
         self.retention = max(1, int(retention))
         self.clob_api_base = str(clob_api_base).rstrip("/")
         self.clob_timeout_seconds = max(1, int(clob_timeout_seconds))
@@ -141,6 +155,27 @@ class NewMarketSignalWatcher:
         finally:
             conn.close()
 
+    def fetch_markets_by_ids(self, market_ids: Iterable[int]) -> List[Dict[str, Any]]:
+        ids = sorted({int(market_id) for market_id in market_ids if int(market_id or 0) > 0})
+        if not ids:
+            return []
+        placeholders = ",".join(["?"] * len(ids))
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT id, title, yes_token_id, created_at
+                FROM markets
+                WHERE id IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                ids,
+            )
+            return [dict_from_row(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def fetch_initial_yes_probability(self, yes_token_id: Any) -> tuple[Optional[str], str]:
         token_id = str(yes_token_id or "").strip()
         if not token_id:
@@ -180,8 +215,35 @@ class NewMarketSignalWatcher:
         return parsed if isinstance(parsed, list) else []
 
     def store_items(self, items: Iterable[Dict[str, Any]]) -> None:
-        normalized = list(items)[: self.retention]
+        normalized = [item for item in items if not is_placeholder_market_title(item.get("title"))][: self.retention]
         self.redis_client.set(self.items_key, json.dumps(normalized, ensure_ascii=True, default=str))
+
+    def load_pending_market_ids(self) -> List[int]:
+        raw = self.redis_client.get(self.pending_key)
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        ids: List[int] = []
+        for value in parsed:
+            try:
+                market_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if market_id > 0:
+                ids.append(market_id)
+        return ids
+
+    def store_pending_market_ids(self, market_ids: Iterable[int]) -> None:
+        normalized = sorted({int(market_id) for market_id in market_ids if int(market_id or 0) > 0})
+        self.redis_client.set(self.pending_key, json.dumps(normalized[-DEFAULT_PENDING_RETENTION:]))
+
+    def is_signal_ready(self, row: Dict[str, Any]) -> bool:
+        return not is_placeholder_market_title(row.get("title"))
 
     def run_once(self, *, limit: int = DEFAULT_BATCH_LIMIT) -> Dict[str, Any]:
         self.redis_client.ping()
@@ -191,21 +253,35 @@ class NewMarketSignalWatcher:
             self.set_last_seen_market_id(baseline)
             return {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0}
 
+        pending_ids = self.load_pending_market_ids()
+        pending_rows = self.fetch_markets_by_ids(pending_ids)
         rows = self.fetch_new_markets(last_seen, limit=limit)
-        if not rows:
-            return {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0}
+        if not rows and not pending_rows:
+            return {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0, "pending": len(pending_ids)}
 
         observed_at = utc_now_iso()
         signals: List[Dict[str, Any]] = []
         max_seen = last_seen
-        for row in rows:
+        next_pending_ids = set(pending_ids)
+        skipped = 0
+        candidate_rows = [*pending_rows, *rows]
+        seen_candidate_ids = set()
+        for row in candidate_rows:
             market_id = int(row.get("id") or 0)
+            if market_id <= 0 or market_id in seen_candidate_ids:
+                continue
+            seen_candidate_ids.add(market_id)
             max_seen = max(max_seen, market_id)
+            if not self.is_signal_ready(row):
+                next_pending_ids.add(market_id)
+                skipped += 1
+                continue
             probability, source = self.fetch_initial_yes_probability(row.get("yes_token_id"))
+            next_pending_ids.discard(market_id)
             signals.append(
                 {
                     "marketId": market_id,
-                    "title": row.get("title") or f"Market {market_id}",
+                    "title": _clean_title(row.get("title")) or f"Market {market_id}",
                     "initialYesProbability": probability,
                     "probabilitySource": source,
                     "observedAt": observed_at,
@@ -217,8 +293,9 @@ class NewMarketSignalWatcher:
         seen_ids = {int(item.get("marketId")) for item in signals if item.get("marketId") is not None}
         deduped_existing = [item for item in existing if int(item.get("marketId") or 0) not in seen_ids]
         self.store_items([*reversed(signals), *deduped_existing])
+        self.store_pending_market_ids(next_pending_ids)
         self.set_last_seen_market_id(max_seen)
-        return {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals)}
+        return {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals), "pending": len(next_pending_ids), "skipped": skipped}
 
 
 def main() -> None:

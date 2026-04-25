@@ -65,6 +65,28 @@ class NewMarketSignalServiceTestCase(unittest.TestCase):
         self.assertEqual([{"marketId": 2, "title": "Second", "initialYesProbability": "0.6"}], payload["items"])
         self.assertEqual("2026-04-25T00:00:00Z", payload["generatedAt"])
 
+    def test_snapshot_filters_placeholder_recovered_titles(self):
+        redis_client = FakeRedis()
+        redis_client.set(
+            "polydata:runtime:new-market-signals:items",
+            json.dumps(
+                [
+                    {"marketId": 2, "title": "On-chain recovered market 0xabc", "initialYesProbability": "0.5"},
+                    {"marketId": 1, "title": "Will real market happen?", "initialYesProbability": "0.4"},
+                ]
+            ),
+        )
+        ctx = {
+            "REDIS_PREFIX": "polydata:",
+            "get_redis_client": lambda: redis_client,
+            "utc_now_iso": lambda: "2026-04-25T00:00:00Z",
+            "app": FakeApp(),
+        }
+
+        payload = new_market_signal_service.get_new_market_signals_snapshot(ctx, limit=12)
+
+        self.assertEqual([{"marketId": 1, "title": "Will real market happen?", "initialYesProbability": "0.4"}], payload["items"])
+
     def test_snapshot_degrades_when_redis_unavailable(self):
         ctx = {
             "REDIS_PREFIX": "polydata:",
@@ -85,6 +107,7 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         watcher.redis_client = FakeRedis()
         watcher.last_seen_key = "polydata:runtime:new-market-signals:last_seen_market_id"
         watcher.items_key = "polydata:runtime:new-market-signals:items"
+        watcher.pending_key = "polydata:runtime:new-market-signals:pending_market_ids"
         watcher.retention = 50
         return watcher
 
@@ -115,6 +138,42 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual("11", watcher.redis_client.get(watcher.last_seen_key))
         self.assertEqual(11, items[0]["marketId"])
         self.assertEqual("0.57", items[0]["initialYesProbability"])
+
+    def test_scan_holds_placeholder_titles_in_pending_without_signal(self):
+        watcher = self.make_watcher()
+        watcher.set_last_seen_market_id(10)
+        watcher.fetch_markets_by_ids = lambda market_ids: []
+        watcher.fetch_new_markets = lambda last_seen, limit: [
+            {"id": 11, "title": "On-chain recovered market 0xabc", "yes_token_id": "yes-11", "created_at": None}
+        ]
+        watcher.fetch_initial_yes_probability = lambda yes_token_id: self.fail("placeholder should not fetch CLOB")
+
+        result = watcher.run_once(limit=100)
+
+        self.assertEqual(0, result["signals"])
+        self.assertEqual(1, result["pending"])
+        self.assertEqual("11", watcher.redis_client.get(watcher.last_seen_key))
+        self.assertEqual([11], json.loads(watcher.redis_client.get(watcher.pending_key)))
+        self.assertEqual([], json.loads(watcher.redis_client.get(watcher.items_key)))
+
+    def test_pending_placeholder_emits_after_title_becomes_ready(self):
+        watcher = self.make_watcher()
+        watcher.set_last_seen_market_id(11)
+        watcher.store_pending_market_ids([11])
+        watcher.fetch_markets_by_ids = lambda market_ids: [
+            {"id": 11, "title": "Will the title be filled?", "yes_token_id": "yes-11", "created_at": None}
+        ]
+        watcher.fetch_new_markets = lambda last_seen, limit: []
+        watcher.fetch_initial_yes_probability = lambda yes_token_id: ("0.62", "clob_book_midpoint")
+
+        result = watcher.run_once(limit=100)
+        items = json.loads(watcher.redis_client.get(watcher.items_key))
+
+        self.assertEqual(1, result["signals"])
+        self.assertEqual(0, result["pending"])
+        self.assertEqual([], json.loads(watcher.redis_client.get(watcher.pending_key)))
+        self.assertEqual("Will the title be filled?", items[0]["title"])
+        self.assertEqual("0.62", items[0]["initialYesProbability"])
 
 
 if __name__ == "__main__":
