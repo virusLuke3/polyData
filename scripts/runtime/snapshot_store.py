@@ -96,6 +96,32 @@ class SnapshotStore:
         finally:
             conn.close()
 
+    def get_latest_stale(self, namespace: str, *, exclude_cache_key: Optional[str] = None) -> Optional[Any]:
+        self._ensure_schema()
+        conn = self._connect()
+        try:
+            params: tuple[Any, ...]
+            where_clause = "namespace = ?"
+            params = (namespace,)
+            if exclude_cache_key:
+                where_clause += " AND cache_key != ?"
+                params = (namespace, exclude_cache_key)
+            row = conn.execute(
+                f"""
+                SELECT payload_json
+                FROM panel_snapshots
+                WHERE {where_clause}
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+            if row is None:
+                return None
+            return json.loads(str(row["payload_json"]))
+        finally:
+            conn.close()
+
     def set(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
         self._ensure_schema()
         now = int(time.time())

@@ -344,6 +344,9 @@ def get_mysql_connection() -> MySQLConnectionWrapper:
         charset=settings["charset"],
         autocommit=False,
         local_infile=True,
+        connect_timeout=int(os.environ.get("POLYMARKET_MYSQL_CONNECT_TIMEOUT", "10")),
+        read_timeout=int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60")),
+        write_timeout=int(os.environ.get("POLYMARKET_MYSQL_WRITE_TIMEOUT", "60")),
     )
     return MySQLConnectionWrapper(raw)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -33,6 +34,41 @@ NAME_TO_YAHOO_SYMBOL = {
     "silver": "SI=F",
     "oil": "CL=F",
 }
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def markets_runtime_prices_enabled() -> bool:
+    return _env_flag("POLYDATA_MARKETS_RUNTIME_PRICES", False)
+
+
+def markets_latest_snapshot_fallback_enabled() -> bool:
+    return _env_flag("POLYDATA_MARKETS_LATEST_SNAPSHOT_FALLBACK", True)
+
+
+def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        return None
+    trimmed_items = items[:page_size]
+    return {
+        **payload,
+        "items": trimmed_items,
+        "pagination": {
+            "page": 1,
+            "pageSize": page_size,
+            "total": len(trimmed_items),
+            "totalPages": 1,
+            "hasMore": len(items) > page_size,
+        },
+    }
 
 
 def _normalized_gamma_active_keys(ctx: dict) -> tuple[set[str], set[str]]:
@@ -663,7 +699,7 @@ def get_markets_payload(
     cache_key = json.dumps({"status": status, "query": query, "page": page, "pageSize": page_size}, sort_keys=True, ensure_ascii=True)
 
     if status == "active" and not query and page == 1:
-        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=True)
+        return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
 
     def build_payload() -> Dict[str, Any]:
         raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
@@ -721,8 +757,8 @@ def get_markets_payload(
         visible_rows = enrich_market_rows_with_runtime_prices(
             ctx,
             visible_rows,
-            max_updates=max(len(visible_rows), max(page_size, max_runtime_updates)),
-            force_refresh=True,
+            max_updates=max_runtime_updates,
+            force_refresh=False,
         )
         if status == "active":
             visible_rows = _filter_tradeable_market_rows(visible_rows)
@@ -810,8 +846,8 @@ def build_active_markets_payload(
         rows = enrich_market_rows_with_runtime_prices(
             ctx,
             rows,
-            max_updates=len(rows),
-            force_refresh=True,
+            max_updates=min(page_size, 24),
+            force_refresh=False,
         )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
@@ -831,11 +867,29 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 2,
+            "v": 3,
         },
         sort_keys=True,
         ensure_ascii=True,
     )
+    exact_payload = ctx["SNAPSHOT_STORE"].get(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key)
+    if exact_payload is not None:
+        ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, exact_payload, 60)
+        return exact_payload
+
+    if markets_latest_snapshot_fallback_enabled():
+        latest_payload = ctx["SNAPSHOT_STORE"].get_latest_stale(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, exclude_cache_key=cache_key)
+        fallback_payload = _trim_active_markets_payload(ctx, latest_payload, page_size)
+        if fallback_payload is not None:
+            ctx["app"].logger.info(
+                "markets-active latest-snapshot-fallback page_size=%s include_runtime_prices=%s",
+                page_size,
+                include_runtime_prices,
+            )
+            ctx["SNAPSHOT_STORE"].set(ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
+            ctx["set_cached_json"](ACTIVE_MARKETS_SNAPSHOT_NAMESPACE, cache_key, fallback_payload, 60)
+            return fallback_payload
+
     return ctx["get_snapshot_payload"](
         ACTIVE_MARKETS_SNAPSHOT_NAMESPACE,
         cache_key,

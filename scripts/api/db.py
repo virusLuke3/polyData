@@ -1,7 +1,38 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, Iterable, List, Optional
+
+
+MYSQL_PROTOCOL_ERROR_CODES = {1156, 1158, 1159, 1160, 1161, 2006, 2013, 2014}
+MYSQL_PROTOCOL_ERROR_MARKERS = (
+    "packet sequence number wrong",
+    "lost connection to mysql server",
+    "mysql server has gone away",
+    "commands out of sync",
+    "malformed packet",
+    "packets out of order",
+)
+
+
+def is_mysql_protocol_error(exc: BaseException) -> bool:
+    args = getattr(exc, "args", ())
+    if args and isinstance(args[0], int) and args[0] in MYSQL_PROTOCOL_ERROR_CODES:
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in MYSQL_PROTOCOL_ERROR_MARKERS)
+
+
+def exit_worker_on_mysql_protocol_error(ctx: dict, exc: BaseException, operation: str) -> None:
+    if not is_mysql_protocol_error(exc):
+        return
+    ctx["app"].logger.critical(
+        "mysql protocol/connection state is unhealthy during %s; exiting current worker for gunicorn respawn: %r",
+        operation,
+        exc,
+    )
+    os._exit(75)
 
 
 def query_all(ctx: dict, sql: str, params: Optional[Iterable[Any]] = None) -> List[Dict[str, Any]]:
@@ -11,8 +42,9 @@ def query_all(ctx: dict, sql: str, params: Optional[Iterable[Any]] = None) -> Li
     try:
         cursor.execute(sql, bound_params)
         return [ctx["dict_from_row"](row) for row in cursor.fetchall()]
-    except Exception:
+    except Exception as exc:
         ctx["app"].logger.exception("SQL query_all failed sql=%s params=%s", " ".join(sql.split()), bound_params)
+        exit_worker_on_mysql_protocol_error(ctx, exc, "query_all")
         raise
     finally:
         conn.close()
@@ -25,8 +57,9 @@ def query_one(ctx: dict, sql: str, params: Optional[Iterable[Any]] = None) -> Di
     try:
         cursor.execute(sql, bound_params)
         return ctx["dict_from_row"](cursor.fetchone())
-    except Exception:
+    except Exception as exc:
         ctx["app"].logger.exception("SQL query_one failed sql=%s params=%s", " ".join(sql.split()), bound_params)
+        exit_worker_on_mysql_protocol_error(ctx, exc, "query_one")
         raise
     finally:
         conn.close()
@@ -49,6 +82,10 @@ def table_exists(ctx: dict, table_name: str) -> bool:
             (table_name,),
         )
         return cursor.fetchone() is not None
+    except Exception as exc:
+        ctx["app"].logger.exception("SQL table_exists failed table=%s", table_name)
+        exit_worker_on_mysql_protocol_error(ctx, exc, "table_exists")
+        raise
     finally:
         conn.close()
 
@@ -95,5 +132,9 @@ def get_trades_index_names(ctx: dict, force_refresh: bool = False) -> set[str]:
             ctx["_trade_index_cache"]["names"] = index_names
             ctx["_trade_index_cache"]["loaded_at"] = time.monotonic()
             return set(index_names)
+        except Exception as exc:
+            ctx["app"].logger.exception("SQL get_trades_index_names failed table=%s", index_table)
+            exit_worker_on_mysql_protocol_error(ctx, exc, "get_trades_index_names")
+            raise
         finally:
             conn.close()

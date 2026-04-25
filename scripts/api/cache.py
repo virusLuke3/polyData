@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, Dict, Optional
+
+
+_SNAPSHOT_REFRESH_LOCK = threading.Lock()
+_SNAPSHOT_REFRESHING: set[str] = set()
 
 
 def get_redis_client(ctx: dict):
@@ -89,6 +94,36 @@ def set_cached_json(ctx: dict, namespace: str, cache_key: str, payload: Dict[str
     set_cached_payload(ctx, namespace, cache_key, payload, ttl_seconds)
 
 
+def _store_snapshot_payload(ctx: dict, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+    ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
+    set_cached_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+
+
+def _refresh_snapshot_payload_async(ctx: dict, namespace: str, cache_key: str, builder, ttl_seconds: int) -> None:
+    refresh_key = f"{namespace}:{cache_key}"
+    with _SNAPSHOT_REFRESH_LOCK:
+        if refresh_key in _SNAPSHOT_REFRESHING:
+            return
+        _SNAPSHOT_REFRESHING.add(refresh_key)
+
+    def refresh() -> None:
+        try:
+            payload = builder()
+            if isinstance(payload, dict) and isinstance(payload.get("items"), list) and not payload.get("items"):
+                ctx["app"].logger.warning("snapshot-refresh skipped empty payload namespace=%s key=%s", namespace, cache_key)
+                return
+            _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+            ctx["app"].logger.info("snapshot-refresh completed namespace=%s key=%s", namespace, cache_key)
+        except Exception:
+            ctx["app"].logger.exception("snapshot-refresh failed namespace=%s key=%s", namespace, cache_key)
+        finally:
+            with _SNAPSHOT_REFRESH_LOCK:
+                _SNAPSHOT_REFRESHING.discard(refresh_key)
+
+    thread = threading.Thread(target=refresh, name=f"snapshot-refresh:{namespace}", daemon=True)
+    thread.start()
+
+
 def get_snapshot_payload(ctx: dict, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
     redis_payload = get_cached_payload(ctx, namespace, cache_key)
     if redis_payload is not None:
@@ -102,6 +137,12 @@ def get_snapshot_payload(ctx: dict, namespace: str, cache_key: str, builder, *, 
         return sqlite_payload
 
     stale_payload = ctx["SNAPSHOT_STORE"].get_stale(namespace, cache_key)
+    if stale_payload is not None:
+        ctx["app"].logger.info("snapshot-cache stale-hit namespace=%s key=%s scheduling_refresh=true", namespace, cache_key)
+        set_cached_payload(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        _refresh_snapshot_payload_async(ctx, namespace, cache_key, builder, ttl_seconds)
+        return stale_payload
+
     try:
         payload = builder()
     except Exception:
@@ -117,8 +158,7 @@ def get_snapshot_payload(ctx: dict, namespace: str, cache_key: str, builder, *, 
             set_cached_payload(ctx, namespace, cache_key, stale_payload, ttl_seconds)
             return stale_payload
 
-    ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
-    set_cached_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+    _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
     return payload
 
 
