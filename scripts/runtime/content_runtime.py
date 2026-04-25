@@ -14,15 +14,10 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from data_sources import RSS_FEEDS, non_empty_feeds
+
 DEFAULT_CACHE_TTL_SECONDS = 900
 DEFAULT_TIMEOUT_SECONDS = 10
-
-RSS_FEEDS = [
-    {"source": "BBC World", "url": "https://feeds.bbci.co.uk/news/world/rss.xml", "category": "World"},
-    {"source": "BBC Politics", "url": "https://feeds.bbci.co.uk/news/politics/rss.xml", "category": "Politics"},
-    {"source": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "category": "Crypto"},
-    {"source": "ESPN", "url": "https://www.espn.com/espn/rss/news", "category": "Sports"},
-]
 
 
 @dataclass
@@ -42,9 +37,11 @@ class RuntimeContentProvider:
         *,
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        feeds: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         self.cache_ttl_seconds = max(60, int(cache_ttl_seconds))
         self.timeout_seconds = max(1, int(timeout_seconds))
+        self.feeds = non_empty_feeds(feeds if feeds is not None else RSS_FEEDS)
         self._lock = threading.Lock()
         self._cache: Dict[str, Any] = {"fetched_at": 0.0, "items": []}
         self._session = requests.Session()
@@ -124,7 +121,7 @@ class RuntimeContentProvider:
 
     def _fetch_all_feeds(self) -> List[RuntimeContentItem]:
         items: List[RuntimeContentItem] = []
-        for feed in RSS_FEEDS:
+        for feed in self.feeds:
             try:
                 response = self._session.get(feed["url"], timeout=self.timeout_seconds)
                 response.raise_for_status()

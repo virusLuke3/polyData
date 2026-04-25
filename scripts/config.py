@@ -9,6 +9,8 @@ RPC URL 优先从环境变量读取，支持 .env 或系统变量
 import os
 from pathlib import Path
 
+from data_sources import POLYGON_RPC_URL
+
 # 尝试加载 .env（支持 scripts、OGBC 根、链上 polymarket/chainStackNode 等）
 _base = Path(__file__).resolve().parent
 # 覆盖 workspace 内 polymarket/chainStackNode
@@ -31,9 +33,8 @@ for _p in _env_paths:
             pass
         break
 
-# 默认 Polygon RPC（公开节点，无密钥）
 # 使用 Chainstack 等带 key 的 RPC 时，请设置环境变量 NODE_URL 或 POLYMARKET_RPC_URL（或 .env），勿将 key 提交到仓库
-DEFAULT_RPC_URL = "https://polygon-rpc.com"
+DEFAULT_RPC_URL = POLYGON_RPC_URL
 
 # 环境变量名（可与 chainStackNode/.env 中的 NODE_URL 一致）
 RPC_ENV_KEY = "NODE_URL"
@@ -43,7 +44,7 @@ RPC_ENV_ALT = "POLYMARKET_RPC_URL"
 def get_rpc_url() -> str:
     """
     获取 Polygon RPC URL
-    优先级：POLYMARKET_RPC_URL > NODE_URL > 默认 Chainstack URL
+    优先级：POLYMARKET_RPC_URL > NODE_URL > .env 中配置的默认 RPC URL
     """
     url = os.environ.get(RPC_ENV_ALT) or os.environ.get(RPC_ENV_KEY)
     if url:

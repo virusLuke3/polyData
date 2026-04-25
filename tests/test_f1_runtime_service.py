@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,13 +45,13 @@ class FakeRequests:
 
     def get(self, url, params=None, timeout=0, headers=None):
         self.calls.append((url, params))
-        if "bwe-ws.com" in url:
+        if "fixture-f1-rss" in url:
             return FakeResponse(
                 text="""
                 <rss><channel>
                   <item>
-                    <title>Binance EN: Binance Futures Will Launch USDⓈ-Margined OPGUSDT Perpetual Contract&lt;br/&gt;Binance 合约将上线 OPGUSDT 永续合约&lt;br/&gt;&lt;br/&gt;————————————&lt;br/&gt;2026-04-22 14:00:00&lt;br/&gt;source: https://www.binance.com/en/support/announcement/example</title>
-                    <link>https://t.me/BWEnews/99999</link>
+                    <title>Binance EN: Binance Futures Will Launch USDⓈ-Margined OPGUSDT Perpetual Contract&lt;br/&gt;Binance 合约将上线 OPGUSDT 永续合约&lt;br/&gt;&lt;br/&gt;————————————&lt;br/&gt;2026-04-22 14:00:00&lt;br/&gt;source: fixture-binance-announcement</title>
+                    <link>fixture-bwenews-item-99999</link>
                     <pubDate>Wed, 22 Apr 2026 08:00:00 GMT</pubDate>
                   </item>
                 </channel></rss>
@@ -63,6 +64,10 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
     def make_context(self) -> dict:
         return {
             "SPORTS_RUNTIME_TTL_SECONDS": 60,
+            "SETTINGS": SimpleNamespace(
+                f1_bwenews_rss_url="fixture-f1-rss",
+                f1_bwenews_source_url="fixture-bwenews-source",
+            ),
             "utc_now_iso": lambda: "2026-04-23T00:00:00Z",
             "app": FakeApp(),
             "requests": FakeRequests(),
@@ -74,11 +79,11 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["source"], "bwenews-rss")
-        self.assertEqual(payload["sourceUrl"], "https://x.com/bwenews")
+        self.assertEqual(payload["sourceUrl"], "fixture-bwenews-source")
         self.assertIsNone(payload["focusMeeting"])
         self.assertTrue(any(item.get("kind") == "news" for item in payload["cards"]))
         self.assertEqual(payload["cards"][0]["title"], "Binance EN: Binance Futures Will Launch USDⓈ-Margined OPGUSDT Perpetual Contract")
-        self.assertEqual(payload["cards"][0]["url"], "https://t.me/BWEnews/99999")
+        self.assertEqual(payload["cards"][0]["url"], "fixture-bwenews-item-99999")
         self.assertIn("Binance 合约将上线 OPGUSDT 永续合约", payload["cards"][0]["summary"])
 
     def test_get_f1_panel_snapshot_returns_empty_when_requests_unavailable(self):

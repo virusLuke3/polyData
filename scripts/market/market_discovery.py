@@ -38,6 +38,7 @@ except ImportError:
 # 引入阶段一模块
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_db, get_connection, init_schema, DEFAULT_DB_PATH
 from config import get_rpc_url
+from data_sources import POLYMARKET_CLOB_API_BASE
 from trade.trade_decoder import CTF_EXCHANGE_ADDRESS, NEG_RISK_EXCHANGE_ADDRESS
 try:
     from .market_decoder import (
@@ -59,7 +60,7 @@ except ImportError:
 # Gamma API
 GAMMA_MARKETS_URL = f"{GAMMA_API_BASE}/markets"
 GAMMA_EVENTS_URL = f"{GAMMA_API_BASE}/events"
-CLOB_API_BASE = "https://clob.polymarket.com"
+CLOB_API_BASE = POLYMARKET_CLOB_API_BASE
 TOKEN_REGISTERED_EVENT_SIGNATURE = "TokenRegistered(uint256,uint256,bytes32)"
 SYNC_KEY_CHAIN_REGISTRY_CTF = "market_chain_registry_ctf"
 SYNC_KEY_CHAIN_REGISTRY_NEG_RISK = "market_chain_registry_neg_risk"

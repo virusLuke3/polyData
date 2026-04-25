@@ -14,13 +14,14 @@ Polymarket 市场参数解码器 (Market Decoder)
 
 示例:
     python market_decoder.py --condition-id 0xabc123... --oracle 0xOracle... --question-id 0xdef456...
-    python market_decoder.py --tx-hash 0x123... --log-index 5 --rpc-url https://polygon-rpc.com
+    python market_decoder.py --tx-hash 0x123... --log-index 5 --rpc-url "$POLYMARKET_RPC_URL"
     python market_decoder.py --gamma-slug fed-rate-jan2024 --verify
 """
 
 import json
 import sys
 import argparse
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 try:
@@ -36,6 +37,12 @@ except ImportError:
     print("Error: requests library not installed. Please install it with: pip install requests")
     sys.exit(1)
 
+_scripts_root = Path(__file__).resolve().parent.parent
+if str(_scripts_root) not in sys.path:
+    sys.path.insert(0, str(_scripts_root))
+
+from data_sources import POLYGON_RPC_URL, POLYMARKET_GAMMA_API_BASE
+
 
 # Polymarket 常量
 USDC_E_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # USDC.e on Polygon
@@ -45,7 +52,7 @@ CONDITIONAL_TOKENS_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"  # CTF
 CONDITION_PREPARATION_EVENT_SIGNATURE = "ConditionPreparation(bytes32,address,bytes32,uint256)"
 
 # Gamma API 基础 URL
-GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+GAMMA_API_BASE = POLYMARKET_GAMMA_API_BASE
 
 
 def keccak256(data: bytes) -> bytes:
@@ -311,7 +318,7 @@ def decode_condition_preparation_log(log: Dict, w3: Web3) -> Optional[Dict]:
 
 def get_oracle_from_condition_id(
     condition_id: str,
-    rpc_url: str = "https://polygon-rpc.com",
+    rpc_url: str = POLYGON_RPC_URL,
     ctf_address: Optional[str] = None
 ) -> Optional[str]:
     """
@@ -374,7 +381,7 @@ def get_oracle_from_condition_id(
 def decode_market_from_log(
     tx_hash: str,
     log_index: int,
-    rpc_url: str = "https://polygon-rpc.com",
+    rpc_url: str = POLYGON_RPC_URL,
     ctf_address: Optional[str] = None
 ) -> Optional[Dict]:
     """
@@ -692,8 +699,8 @@ def main():
     )
     parser.add_argument(
         "--rpc-url",
-        default="https://polygon-rpc.com",
-        help="Polygon RPC URL（默认: https://polygon-rpc.com）"
+        default=POLYGON_RPC_URL,
+        help="Polygon RPC URL（默认从 POLYMARKET_RPC_URL / NODE_URL 读取）"
     )
     parser.add_argument(
         "--collateral-token",

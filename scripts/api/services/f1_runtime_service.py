@@ -14,6 +14,13 @@ def get_f1_panel_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
             payload = build_f1_panel_payload(
                 requests_lib=ctx.get("requests"),
                 limit=limit,
+                feed_specs=[
+                    {
+                        "source": "BWENews",
+                        "url": ctx["SETTINGS"].f1_bwenews_rss_url,
+                        "source_url": ctx["SETTINGS"].f1_bwenews_source_url,
+                    }
+                ],
             )
             if isinstance(payload, dict) and "items" not in payload:
                 payload["items"] = payload.get("cards") or []
@@ -23,7 +30,7 @@ def get_f1_panel_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
             return {
                 "generatedAt": ctx["utc_now_iso"](),
                 "source": "bwenews-rss",
-                "sourceUrl": "https://x.com/bwenews",
+                "sourceUrl": ctx["SETTINGS"].f1_bwenews_source_url,
                 "cards": [],
                 "items": [],
                 "focusMeeting": None,

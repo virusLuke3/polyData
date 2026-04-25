@@ -9,8 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from .http_client import http_json_get
 
-GAMMA_EVENTS_BASE_URL = "https://gamma-api.polymarket.com/events"
-
 
 def parse_interval_minutes(interval: str) -> int:
     text = str(interval or "5m").strip().lower()
@@ -317,7 +315,7 @@ def get_gamma_active_market_filter(ctx: dict, *, ttl_seconds: int = 60, max_page
     for page in range(max(1, int(max_pages))):
         payload = http_json_get(
             ctx,
-            GAMMA_EVENTS_BASE_URL,
+            f"{ctx['SETTINGS'].gamma_api_base.rstrip('/')}/events",
             params={
                 "active": "true",
                 "closed": "false",

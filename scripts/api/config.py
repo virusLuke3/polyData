@@ -10,6 +10,22 @@ from functools import lru_cache
 from pathlib import Path
 
 from db import DEFAULT_DB_PATH
+from data_sources import (
+    CLEVELAND_FED_NOWCAST_URL,
+    COINGECKO_BASE_URL,
+    ESPN_CORE_NBA_BASE_URL,
+    ESPN_NBA_BASE_URL,
+    F1_BWENEWS_RSS_URL,
+    F1_BWENEWS_SOURCE_URL,
+    JIN10_FLASH_API_URL,
+    JIN10_FLASH_DETAIL_BASE_URL,
+    JIN10_LIVE_URL,
+    NBA_LINEUPS_BASE_URL,
+    NBA_OFFICIAL_BASE_URL,
+    POLYMARKET_CLOB_API_BASE,
+    POLYMARKET_GAMMA_API_BASE,
+    YAHOO_CHART_BASE_URL,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +95,7 @@ class ApiSettings:
     redis_prefix: str
     snapshot_sqlite_path: str
     snapshot_prewarm_enabled: bool
+    gamma_api_base: str
     clob_api_base: str
     clob_timeout_seconds: int
     clob_price_cache_ttl_seconds: int
@@ -88,10 +105,16 @@ class ApiSettings:
     yahoo_chart_base_url: str
     coingecko_base_url: str
     espn_nba_base_url: str
+    espn_core_nba_base_url: str
     nba_lineups_base_url: str
+    nba_official_base_url: str
     cleveland_fed_nowcast_url: str
     f1_panel_path: str
+    f1_bwenews_rss_url: str
+    f1_bwenews_source_url: str
     jin10_flash_api_url: str
+    jin10_flash_detail_base_url: str
+    jin10_live_url: str
     jin10_flash_channel: str
     jin10_flash_app_id: str
     jin10_flash_version: str
@@ -116,25 +139,29 @@ def load_api_settings() -> ApiSettings:
         redis_prefix=_get_str("POLYDATA_REDIS_PREFIX", "polydata:"),
         snapshot_sqlite_path=_get_str("POLYDATA_SNAPSHOT_SQLITE_PATH", snapshot_default),
         snapshot_prewarm_enabled=_get_bool("POLYDATA_SNAPSHOT_PREWARM", True),
-        clob_api_base=_get_str("POLYDATA_CLOB_API_BASE", "https://clob.polymarket.com"),
+        gamma_api_base=_get_str("POLYDATA_GAMMA_API_BASE", POLYMARKET_GAMMA_API_BASE),
+        clob_api_base=_get_str("POLYDATA_CLOB_API_BASE", POLYMARKET_CLOB_API_BASE),
         clob_timeout_seconds=_get_int("POLYDATA_CLOB_TIMEOUT_SECONDS", 12),
         clob_price_cache_ttl_seconds=_get_int("POLYDATA_CLOB_PRICE_CACHE_TTL_SECONDS", 45),
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
-        yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"),
-        coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3"),
-        espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"),
-        nba_lineups_base_url=_get_str("POLYDATA_NBA_LINEUPS_BASE_URL", "https://stats.nba.com/js/data/leaders"),
-        cleveland_fed_nowcast_url=_get_str(
-            "POLYDATA_CLEVELAND_FED_NOWCAST_URL",
-            "https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting",
-        ),
+        yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", YAHOO_CHART_BASE_URL),
+        coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", COINGECKO_BASE_URL),
+        espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", ESPN_NBA_BASE_URL),
+        espn_core_nba_base_url=_get_str("POLYDATA_ESPN_CORE_NBA_BASE_URL", ESPN_CORE_NBA_BASE_URL),
+        nba_lineups_base_url=_get_str("POLYDATA_NBA_LINEUPS_BASE_URL", NBA_LINEUPS_BASE_URL),
+        nba_official_base_url=_get_str("POLYDATA_NBA_OFFICIAL_BASE_URL", NBA_OFFICIAL_BASE_URL),
+        cleveland_fed_nowcast_url=_get_str("POLYDATA_CLEVELAND_FED_NOWCAST_URL", CLEVELAND_FED_NOWCAST_URL),
         f1_panel_path=_get_str(
             "POLYDATA_F1_PANEL_PATH",
             str((PROJECT_ROOT / "data" / "runtime" / "f1" / "panel.json").resolve()),
         ),
-        jin10_flash_api_url=_get_str("POLYDATA_JIN10_FLASH_API_URL", "https://flash-api.jin10.com/get_flash_list"),
+        f1_bwenews_rss_url=_get_str("POLYDATA_F1_BWENEWS_RSS_URL", F1_BWENEWS_RSS_URL),
+        f1_bwenews_source_url=_get_str("POLYDATA_F1_BWENEWS_SOURCE_URL", F1_BWENEWS_SOURCE_URL),
+        jin10_flash_api_url=_get_str("POLYDATA_JIN10_FLASH_API_URL", JIN10_FLASH_API_URL),
+        jin10_flash_detail_base_url=_get_str("POLYDATA_JIN10_FLASH_DETAIL_BASE_URL", JIN10_FLASH_DETAIL_BASE_URL),
+        jin10_live_url=_get_str("POLYDATA_JIN10_LIVE_URL", JIN10_LIVE_URL),
         jin10_flash_channel=_get_str("POLYDATA_JIN10_FLASH_CHANNEL", "-8200"),
         jin10_flash_app_id=_get_str("POLYDATA_JIN10_APP_ID", "SO1EJGmNgCtmpcPF"),
         jin10_flash_version=_get_str("POLYDATA_JIN10_VERSION", "1.0.0"),

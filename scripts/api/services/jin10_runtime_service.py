@@ -25,12 +25,14 @@ def get_jin10_panel_snapshot(ctx: dict, limit: int = 24) -> Dict[str, Any]:
             channel=ctx["SETTINGS"].jin10_flash_channel,
             app_id=ctx["SETTINGS"].jin10_flash_app_id,
             version=ctx["SETTINGS"].jin10_flash_version,
+            detail_base_url=ctx["SETTINGS"].jin10_flash_detail_base_url,
+            live_url=ctx["SETTINGS"].jin10_live_url,
         )
         if not isinstance(payload, dict):
             return {
                 "generatedAt": ctx["utc_now_iso"](),
                 "source": "jin10-flash",
-                "sourceUrl": "https://www.jin10.com/live/",
+                "sourceUrl": ctx["SETTINGS"].jin10_live_url,
                 "status": "invalid",
                 "items": [],
             }
@@ -38,7 +40,7 @@ def get_jin10_panel_snapshot(ctx: dict, limit: int = 24) -> Dict[str, Any]:
             **payload,
             "generatedAt": str(payload.get("generatedAt") or ctx["utc_now_iso"]()),
             "source": str(payload.get("source") or "jin10-flash"),
-            "sourceUrl": str(payload.get("sourceUrl") or "https://www.jin10.com/live/"),
+            "sourceUrl": str(payload.get("sourceUrl") or ctx["SETTINGS"].jin10_live_url),
             "status": str(payload.get("status") or "ok"),
             "items": [item for item in (payload.get("items") or []) if isinstance(item, dict)][:limit],
         }

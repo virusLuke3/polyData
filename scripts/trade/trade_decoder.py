@@ -9,12 +9,13 @@ Polymarket 交易日志解码器 (Trade Decoder)
     python trade_decoder.py <tx_hash> [--rpc-url <url>] [--output <file.json>]
 
 示例:
-    python trade_decoder.py 0xfa0746b1...9198 --rpc-url https://polygon-rpc.com --output trade.json
+    python trade_decoder.py 0xfa0746b1...9198 --rpc-url "$POLYMARKET_RPC_URL" --output trade.json
 """
 
 import json
 import sys
 import argparse
+from pathlib import Path
 from typing import Any, List, Dict, Optional
 from decimal import Decimal, ROUND_DOWN
 
@@ -24,6 +25,12 @@ try:
 except ImportError:
     print("Error: web3 library not installed. Please install it with: pip install web3")
     sys.exit(1)
+
+_scripts_root = Path(__file__).resolve().parent.parent
+if str(_scripts_root) not in sys.path:
+    sys.path.insert(0, str(_scripts_root))
+
+from data_sources import POLYGON_RPC_URL
 
 
 # Polymarket 交易所合约地址
@@ -156,7 +163,7 @@ def decode_order_filled_log(
         return None
 
 
-def decode_transaction(tx_hash: str, rpc_url: str = "https://polygon-rpc.com") -> List[Dict]:
+def decode_transaction(tx_hash: str, rpc_url: str = POLYGON_RPC_URL) -> List[Dict]:
     """
     解码交易中的所有 OrderFilled 事件
     
@@ -217,7 +224,7 @@ def main():
         epilog="""
 示例:
   python trade_decoder.py 0xfa0746b1...9198
-  python trade_decoder.py 0xfa0746b1...9198 --rpc-url https://polygon-rpc.com --output trade.json
+  python trade_decoder.py 0xfa0746b1...9198 --rpc-url "$POLYMARKET_RPC_URL" --output trade.json
         """
     )
     
@@ -228,8 +235,8 @@ def main():
     
     parser.add_argument(
         "--rpc-url",
-        default="https://polygon-rpc.com",
-        help="Polygon RPC URL (默认: https://polygon-rpc.com)"
+        default=POLYGON_RPC_URL,
+        help="Polygon RPC URL (默认从 POLYMARKET_RPC_URL / NODE_URL 读取)"
     )
     
     parser.add_argument(

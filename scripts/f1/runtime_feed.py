@@ -12,15 +12,22 @@ from html import unescape
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from data_sources import F1_BWENEWS_RSS_URL, F1_BWENEWS_SOURCE_URL
+
 
 DEFAULT_PANEL_PATH = (Path(__file__).resolve().parents[2] / "data" / "runtime" / "f1" / "panel.json").resolve()
-DEFAULT_NEWS_FEEDS = (
-    {
-        "source": "BWENews",
-        "url": "https://rss-public.bwe-ws.com",
-        "source_url": "https://x.com/bwenews",
-    },
-)
+
+
+def default_news_feeds() -> List[Dict[str, str]]:
+    if not F1_BWENEWS_RSS_URL:
+        return []
+    return [
+        {
+            "source": "BWENews",
+            "url": F1_BWENEWS_RSS_URL,
+            "source_url": F1_BWENEWS_SOURCE_URL,
+        },
+    ]
 
 
 def utc_now() -> datetime:
@@ -162,11 +169,11 @@ def _split_bwenews_title_parts(title: str, description: str) -> tuple[str, Optio
     return headline[:280], summary[:480] if summary else None, source_url
 
 
-def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Iterable[Dict[str, str]] = DEFAULT_NEWS_FEEDS, limit: int = 4) -> List[Dict[str, Any]]:
+def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Optional[Iterable[Dict[str, str]]] = None, limit: int = 4) -> List[Dict[str, Any]]:
     if requests_lib is None:
         return []
     items: List[Dict[str, Any]] = []
-    for feed in feed_specs:
+    for feed in feed_specs if feed_specs is not None else default_news_feeds():
         try:
             response = _requests_get(
                 requests_lib,
@@ -220,15 +227,24 @@ def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Iterable[Dic
     return items[:limit]
 
 
-def build_f1_panel_payload(*, requests_lib, year: Optional[int] = None, now: Optional[datetime] = None, limit: int = 10) -> Dict[str, Any]:
+def build_f1_panel_payload(
+    *,
+    requests_lib,
+    year: Optional[int] = None,
+    now: Optional[datetime] = None,
+    limit: int = 10,
+    feed_specs: Optional[Iterable[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
     current_time = now or utc_now()
-    cards = fetch_f1_news_items(requests_lib, now=current_time, limit=max(1, int(limit or 10)))
+    feeds = list(feed_specs) if feed_specs is not None else default_news_feeds()
+    cards = fetch_f1_news_items(requests_lib, now=current_time, feed_specs=feeds, limit=max(1, int(limit or 10)))
+    source_url = str((feeds[0] if feeds else {}).get("source_url") or "")
 
     return {
         "generatedAt": current_time.isoformat().replace("+00:00", "Z"),
         "season": int(year or current_time.year),
         "source": "bwenews-rss",
-        "sourceUrl": "https://x.com/bwenews",
+        "sourceUrl": source_url,
         "status": "ok" if cards else "empty",
         "focusMeeting": None,
         "cards": cards[: max(1, int(limit or 10))],

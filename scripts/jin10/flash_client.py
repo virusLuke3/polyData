@@ -8,11 +8,14 @@ from typing import Any, Dict, List, Optional
 import requests
 from zoneinfo import ZoneInfo
 
+from data_sources import JIN10_FLASH_API_URL, JIN10_FLASH_DETAIL_BASE_URL, JIN10_LIVE_URL
 
-DEFAULT_FLASH_API_URL = os.environ.get("POLYDATA_JIN10_FLASH_API_URL", "https://flash-api.jin10.com/get_flash_list").strip()
+DEFAULT_FLASH_API_URL = os.environ.get("POLYDATA_JIN10_FLASH_API_URL", JIN10_FLASH_API_URL).strip()
 DEFAULT_FLASH_CHANNEL = os.environ.get("POLYDATA_JIN10_FLASH_CHANNEL", "-8200").strip()
 DEFAULT_FLASH_APP_ID = os.environ.get("POLYDATA_JIN10_APP_ID", "SO1EJGmNgCtmpcPF").strip()
 DEFAULT_FLASH_VERSION = os.environ.get("POLYDATA_JIN10_VERSION", "1.0.0").strip()
+DEFAULT_FLASH_DETAIL_BASE_URL = os.environ.get("POLYDATA_JIN10_FLASH_DETAIL_BASE_URL", JIN10_FLASH_DETAIL_BASE_URL).strip()
+DEFAULT_LIVE_URL = os.environ.get("POLYDATA_JIN10_LIVE_URL", JIN10_LIVE_URL).strip()
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 12
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -42,7 +45,12 @@ def parse_timestamp(value: Any) -> Optional[str]:
     return parsed.isoformat()
 
 
-def normalize_item(item: Any) -> Optional[Dict[str, Any]]:
+def normalize_item(
+    item: Any,
+    *,
+    detail_base_url: str = DEFAULT_FLASH_DETAIL_BASE_URL,
+    live_url: str = DEFAULT_LIVE_URL,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(item, dict):
         return None
     if bool((item.get("extras") or {}).get("ad")):
@@ -70,7 +78,7 @@ def normalize_item(item: Any) -> Optional[Dict[str, Any]]:
         "headline": headline,
         "summary": summary,
         "source": clean_text((data or {}).get("source")) or "Jin10",
-        "url": f"https://flash.jin10.com/detail/{item.get('id')}" if item.get("id") else "https://www.jin10.com/live/",
+        "url": f"{detail_base_url.rstrip('/')}/{item.get('id')}" if item.get("id") and detail_base_url else live_url,
         "important": bool(item.get("important")),
         "locked": bool((data or {}).get("lock")),
         "vipLevel": (data or {}).get("vip_level"),
@@ -127,6 +135,8 @@ def fetch_jin10_panel_payload(
     channel: str = DEFAULT_FLASH_CHANNEL,
     app_id: str = DEFAULT_FLASH_APP_ID,
     version: str = DEFAULT_FLASH_VERSION,
+    detail_base_url: str = DEFAULT_FLASH_DETAIL_BASE_URL,
+    live_url: str = DEFAULT_LIVE_URL,
     timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
     headers = {
@@ -155,7 +165,7 @@ def fetch_jin10_panel_payload(
         if not rows:
             break
         for row in rows or []:
-            normalized = normalize_item(row)
+            normalized = normalize_item(row, detail_base_url=detail_base_url, live_url=live_url)
             if normalized is None:
                 continue
             key = _item_key(normalized)
@@ -175,7 +185,7 @@ def fetch_jin10_panel_payload(
     return {
         "generatedAt": iso_now(),
         "source": "jin10-flash",
-        "sourceUrl": "https://www.jin10.com/live/",
+        "sourceUrl": live_url,
         "status": "ok",
         "items": items,
     }

@@ -16,12 +16,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 
+from scripts.data_sources import POLYMARKET_CLOB_API_BASE, POLYMARKET_GAMMA_API_BASE
+
 UTC = timezone.utc
 DEFAULT_OUTPUT_DIR = Path("runtime_outputs/tradeV2")
 DEFAULT_TIMEOUT = 30
 DEFAULT_RETRIES = 4
-GAMMA_API_BASE = "https://gamma-api.polymarket.com"
-CLOB_API_BASE = "https://clob.polymarket.com"
+GAMMA_API_BASE = POLYMARKET_GAMMA_API_BASE
+CLOB_API_BASE = POLYMARKET_CLOB_API_BASE
 
 
 def _safe_json_dumps(payload: Any) -> str:

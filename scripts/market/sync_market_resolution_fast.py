@@ -67,12 +67,13 @@ from db import (
     init_schema,
 )
 from db.db import create_index_if_not_exists, get_table_columns, table_exists
+from data_sources import POLYMARKET_ACTIVITY_API_URL, POLYMARKET_GAMMA_API_BASE
 
 
-GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+GAMMA_API_BASE = POLYMARKET_GAMMA_API_BASE
 GAMMA_MARKETS_URL = f"{GAMMA_API_BASE}/markets"
 GAMMA_EVENTS_URL = f"{GAMMA_API_BASE}/events"
-ACTIVITY_API_URL = "https://data-api.polymarket.com/activity"
+ACTIVITY_API_URL = POLYMARKET_ACTIVITY_API_URL
 
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_MAX_PAGES: Optional[int] = None

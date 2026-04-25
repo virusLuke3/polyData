@@ -190,8 +190,8 @@ def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, A
             try:
                 predictor = ctx["http_json_get"](
                     (
-                        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba"
-                        f"/events/{event_id}/competitions/{competition_id}/predictor"
+                        ctx["SETTINGS"].espn_core_nba_base_url.rstrip("/")
+                        + f"/events/{event_id}/competitions/{competition_id}/predictor"
                     ),
                     params={"lang": "en", "region": "us"},
                     timeout=8,
@@ -316,8 +316,8 @@ def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
                 ),
                 "Accept": "application/json, text/plain, */*",
                 "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.nba.com/",
-                "Origin": "https://www.nba.com",
+                "Referer": f"{ctx['SETTINGS'].nba_official_base_url.rstrip('/')}/",
+                "Origin": ctx["SETTINGS"].nba_official_base_url.rstrip("/"),
                 "x-nba-stats-origin": "stats",
                 "x-nba-stats-token": "true",
             }

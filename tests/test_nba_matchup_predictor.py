@@ -98,7 +98,10 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
             return predictors[event_id]
 
         return {
-            "SETTINGS": SimpleNamespace(espn_nba_base_url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba"),
+            "SETTINGS": SimpleNamespace(
+                espn_nba_base_url="fixture-espn-nba",
+                espn_core_nba_base_url="fixture-espn-core-nba",
+            ),
             "SPORTS_RUNTIME_TTL_SECONDS": 60,
             "app": FakeApp(),
             "_safe_float": lambda value: None if value in (None, "") else float(value),

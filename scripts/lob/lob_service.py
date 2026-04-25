@@ -40,10 +40,11 @@ if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_connection, init_schema
+from data_sources import POLYMARKET_CLOB_WS_URL
 
 UTC = timezone.utc
 DEFAULT_STREAM_NAME = "polymarket_lob"
-DEFAULT_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+DEFAULT_WS_URL = POLYMARKET_CLOB_WS_URL
 DEFAULT_SYNC_STATE_KEY = "lob_market_sync"
 DEFAULT_HEARTBEAT_SECONDS = 10.0
 DEFAULT_SUBSCRIPTION_SYNC_SECONDS = 60.0

@@ -12,7 +12,9 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-CLOB_API_BASE = "https://clob.polymarket.com"
+from data_sources import POLYMARKET_CLOB_API_BASE
+
+CLOB_API_BASE = POLYMARKET_CLOB_API_BASE
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_CACHE_TTL_SECONDS = 3
 DEFAULT_DEPTH_LIMIT = 5
@@ -74,10 +76,12 @@ class LOBRuntimeManager:
         cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
         depth_limit: int = DEFAULT_DEPTH_LIMIT,
+        api_base: str = CLOB_API_BASE,
     ) -> None:
         self.cache_ttl_seconds = max(1, int(cache_ttl_seconds))
         self.timeout_seconds = max(1, int(timeout_seconds))
         self.depth_limit = max(1, int(depth_limit))
+        self.api_base = str(api_base or "").rstrip("/")
         self._cache: Dict[int, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._session = requests.Session()
@@ -133,7 +137,7 @@ class LOBRuntimeManager:
 
     def _fetch_book_snapshot(self, token_id: str) -> TokenBookSnapshot:
         response = self._session.get(
-            f"{CLOB_API_BASE}/book",
+            f"{self.api_base}/book",
             params={"token_id": token_id},
             timeout=self.timeout_seconds,
         )
@@ -152,4 +156,3 @@ class LOBRuntimeManager:
             asks=asks,
             updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         )
-

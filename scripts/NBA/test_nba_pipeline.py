@@ -351,7 +351,7 @@ class NBAPipelineTestCase(unittest.TestCase):
             data_root=self.data_root,
             db_path=self.db_path,
             stream_name="nba_test",
-            ws_url="wss://example.invalid/ws",
+            ws_url="fixture-nba-lob-ws",
             heartbeat_seconds=2.0,
             catalog_sync_seconds=5.0,
             stale_after_seconds=30.0,

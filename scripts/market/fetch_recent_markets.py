@@ -25,6 +25,7 @@ import json
 import sys
 import argparse
 import csv
+from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
@@ -35,8 +36,15 @@ except ImportError:
     sys.exit(1)
 
 
+_scripts_root = Path(__file__).resolve().parent.parent
+if str(_scripts_root) not in sys.path:
+    sys.path.insert(0, str(_scripts_root))
+
+from data_sources import POLYMARKET_GAMMA_API_BASE
+
+
 # Gamma API 基础 URL
-GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+GAMMA_API_BASE = POLYMARKET_GAMMA_API_BASE
 
 
 def fetch_markets_batch(
