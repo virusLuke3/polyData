@@ -137,7 +137,7 @@ export const chainPanelRenderers: PanelRenderMap = {
   },
   'suspicious-flow': {
     render: (ctx) => (
-      <Panel title="SUSPICIOUS FLOW" badge="WATCH" status="live" count={ctx.suspiciousTrades?.items.length || 0}>
+      <Panel title="FLOW WATCH" badge="CHAIN" status="live" count={ctx.suspiciousTrades?.items.length || 0} className="wm-market-panel wm-flow-watch-panel">
         {tradeSignalList(ctx.suspiciousTrades?.items || [], 'No suspicious flow loaded.')}
       </Panel>
     ),

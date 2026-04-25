@@ -2927,6 +2927,103 @@
   font-size: 15px;
 }
 
+.wm-flow-watch-panel .wm-panel-body {
+  padding: 8px;
+}
+
+.wm-flow-watch-panel .wm-signal-list {
+  gap: 5px;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-card {
+  grid-template-columns: 2px minmax(0, 1fr);
+  min-height: 95px;
+  border-color: #242424;
+  background-color: #141414;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-content {
+  padding: 8px 9px 7px 10px;
+  gap: 6px;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-head {
+  gap: 7px;
+}
+
+.wm-flow-watch-panel .wm-trade-chip-row {
+  gap: 7px;
+}
+
+.wm-flow-watch-panel .wm-chip {
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.wm-flow-watch-panel .wm-trade-outcome {
+  color: #9b9f9c;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.wm-flow-watch-panel .wm-signal-severity {
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 9px;
+  letter-spacing: 0.9px;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-body {
+  gap: 5px;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-notional {
+  font-size: 17px;
+  letter-spacing: -0.25px;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-market {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #e2e4e3;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.28;
+  letter-spacing: -0.1px;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-meta {
+  gap: 7px;
+  color: #8d918e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.55px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wm-flow-watch-panel .wm-trade-signal-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #929793;
+  font-size: 11px;
+  line-height: 1.32;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 @media (max-width: 980px) {
   .wm-tape-row {
     grid-template-columns: 48px minmax(0, 1fr) 74px 80px;

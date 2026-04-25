@@ -4,9 +4,9 @@ import { runtimePanelFromRenderer } from '../helpers';
 
 export const panel = runtimePanelFromRenderer(chainPanelRenderers, {
   id: 'suspicious-flow',
-  title: 'Suspicious Flow',
+  title: 'Flow Watch',
   eyebrow: 'chain',
-  description: 'Pre-oracle or unusual trade flow.',
+  description: 'Oracle-adjacent and large live trade flow.',
   defaultEnabled: true,
 }, {
   tier: 'slow',
