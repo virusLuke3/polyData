@@ -43,6 +43,8 @@ database/*.db-shm
 data/*.sqlite3
 data/*.sqlite3-wal
 data/*.sqlite3-shm
+data/*.lock
+data/*.marker
 
 runtime_logs/
 
