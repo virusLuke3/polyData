@@ -2,7 +2,7 @@ import { Panel } from '@/components/Panel';
 import type { PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { formatCompact, formatPercent } from './shared/formatters';
-import { emptyState, levelTotal, orderfilledList, tradeList, tradeSignalList } from './shared/renderers';
+import { emptyState, levelTotal, orderfilledList, tradeList, tradeSignalList, whaleTrackerList } from './shared/renderers';
 import { focusedTrades, globalMarkets } from './shared/selectors';
 
 function maxLevelSize(levels: Array<{ size?: string | number | null }>) {
@@ -131,7 +131,7 @@ export const chainPanelRenderers: PanelRenderMap = {
   'whale-tracker': {
     render: (ctx) => (
       <Panel title="WHALE TRACKER" badge="CHAIN" status="live" count={ctx.whaleTrades?.items.length || 0}>
-        {tradeSignalList(ctx.whaleTrades?.items || [], 'No whale trades loaded.')}
+        {whaleTrackerList(ctx.whaleTrades?.items || [], 'No whale trades loaded.')}
       </Panel>
     ),
   },
