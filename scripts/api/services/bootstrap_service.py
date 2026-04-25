@@ -575,7 +575,7 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         "defaultWorkspace": {
             "name": "Hackathon Demo",
             "panels": [
-                "active-markets","global-orderfilled","oracle-feed","market-summary","featured-market","world-brief","price-implications","price-chart","sample-chain-trades","oracle-timeline","related-news","related-video","report-feed","research-feed","alpha-signal","whale-tracker","suspicious-flow","commodities-watch","crypto-watch","nba-scoreboard","nba-intel","inflation-nowcast","jin10-flash","bbo-monitor","lob-depth","live-api-status","system-health",
+                "active-markets","global-orderfilled","oracle-feed","market-summary","featured-market","world-brief","price-implications","price-chart","sample-chain-trades","oracle-timeline","related-news","related-video","report-feed","research-feed","alpha-signal","whale-tracker","suspicious-flow","commodities-watch","crypto-watch","nba-scoreboard","nba-intel","espn-matchup-predictor","inflation-nowcast","jin10-flash","bbo-monitor","lob-depth","live-api-status","system-health",
                 "f1-trackside",
             ],
         },

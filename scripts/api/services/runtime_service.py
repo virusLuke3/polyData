@@ -145,6 +145,135 @@ def get_nba_scoreboard_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
     return ctx["get_snapshot_payload"]("snapshot:sports:nba", cache_key, _builder, ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"])
 
 
+def _runtime_float(ctx: dict, value: Any) -> Optional[float]:
+    safe_float = ctx.get("_safe_float")
+    if callable(safe_float):
+        return safe_float(value)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _espn_stat_value(ctx: dict, stats: List[Dict[str, Any]], name: str) -> Optional[float]:
+    for stat in stats:
+        if stat.get("name") == name:
+            return _runtime_float(ctx, stat.get("value"))
+    return None
+
+
+def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+    def _builder() -> Dict[str, Any]:
+        scoreboard = ctx["http_json_get"](
+            f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
+            params={"limit": limit},
+            timeout=12,
+        ) or {}
+        events = scoreboard.get("events") or []
+        items_by_event_id: Dict[str, Dict[str, Any]] = {}
+
+        def _load_event(event: Dict[str, Any]) -> tuple[str, Optional[Dict[str, Any]]]:
+            event_id = str(event.get("id") or "").strip()
+            if not event_id:
+                return "", None
+            competitions = event.get("competitions") or []
+            competition = competitions[0] if competitions else {}
+            competition_id = str(competition.get("id") or event_id).strip()
+            competitors = competition.get("competitors") or []
+            away = next((item for item in competitors if item.get("homeAway") == "away"), None)
+            home = next((item for item in competitors if item.get("homeAway") == "home"), None)
+            status = (((competition.get("status") or {}).get("type")) or {})
+            try:
+                predictor = ctx["http_json_get"](
+                    (
+                        "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba"
+                        f"/events/{event_id}/competitions/{competition_id}/predictor"
+                    ),
+                    params={"lang": "en", "region": "us"},
+                    timeout=8,
+                    headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+                ) or {}
+            except Exception:
+                ctx["app"].logger.exception("nba matchup predictor fetch failed event_id=%s", event_id)
+                return event_id, None
+
+            away_stats = ((predictor.get("awayTeam") or {}).get("statistics") or [])
+            home_stats = ((predictor.get("homeTeam") or {}).get("statistics") or [])
+            away_projection = _espn_stat_value(ctx, away_stats, "gameProjection")
+            home_projection = _espn_stat_value(ctx, home_stats, "gameProjection")
+            if away_projection is None and home_projection is not None:
+                away_projection = max(0.0, min(100.0, 100.0 - home_projection))
+            if home_projection is None and away_projection is not None:
+                home_projection = max(0.0, min(100.0, 100.0 - away_projection))
+
+            away_expected = _espn_stat_value(ctx, away_stats, "teamExpectedPts")
+            home_expected = _espn_stat_value(ctx, home_stats, "teamExpectedPts")
+            if away_expected is None:
+                away_expected = _espn_stat_value(ctx, home_stats, "oppExpectedPts")
+            if home_expected is None:
+                home_expected = _espn_stat_value(ctx, away_stats, "oppExpectedPts")
+
+            projected_margin = _espn_stat_value(ctx, away_stats, "teamPredPtDiff")
+            if projected_margin is None:
+                home_margin = _espn_stat_value(ctx, home_stats, "teamPredPtDiff")
+                projected_margin = -home_margin if home_margin is not None else None
+
+            matchup_quality = _espn_stat_value(ctx, away_stats, "matchupQuality")
+            if matchup_quality is None:
+                matchup_quality = _espn_stat_value(ctx, home_stats, "matchupQuality")
+
+            if away_projection is None and home_projection is None and matchup_quality is None:
+                return event_id, None
+
+            return event_id, {
+                "eventId": event_id,
+                "name": event.get("name") or predictor.get("name"),
+                "shortName": event.get("shortName") or predictor.get("shortName"),
+                "tipoff": event.get("date"),
+                "state": status.get("state"),
+                "status": status.get("description") or status.get("detail"),
+                "awayTeam": ((away or {}).get("team") or {}).get("displayName"),
+                "homeTeam": ((home or {}).get("team") or {}).get("displayName"),
+                "awayWinProbability": away_projection,
+                "homeWinProbability": home_projection,
+                "matchupQuality": matchup_quality,
+                "projectedMargin": projected_margin,
+                "awayExpectedPoints": away_expected,
+                "homeExpectedPoints": home_expected,
+                "lastModified": predictor.get("lastModified"),
+            }
+
+        max_workers = min(6, max(1, len(events[:limit])))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_load_event, event) for event in events[:limit]]
+            for future in as_completed(futures):
+                event_id, item = future.result()
+                if event_id and item is not None:
+                    items_by_event_id[event_id] = item
+
+        ordered_items = [
+            items_by_event_id[str(event.get("id"))]
+            for event in events[:limit]
+            if str(event.get("id")) in items_by_event_id
+        ]
+        return {
+            "items": ordered_items,
+            "generatedAt": ctx["utc_now_iso"](),
+            "source": "ESPN Matchup Predictor",
+        }
+
+    return ctx["get_snapshot_payload"](
+        "snapshot:sports:nba-matchup-predictor",
+        cache_key,
+        _builder,
+        ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"],
+    )
+
+
 def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
 

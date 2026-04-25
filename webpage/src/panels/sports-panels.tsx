@@ -4,6 +4,28 @@ import type { PanelRenderMap } from './types';
 import { formatDate } from './shared/formatters';
 import { emptyState } from './shared/renderers';
 
+function formatProbability(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function clampPercent(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 0;
+  return Math.min(100, Math.max(0, Number(value)));
+}
+
+function formatNumber(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return Number(value).toFixed(digits);
+}
+
+function formatMargin(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  const numeric = Number(value);
+  const sign = numeric > 0 ? '+' : '';
+  return `${sign}${numeric.toFixed(1)}`;
+}
+
 function nbaIntelPanel(ctx: PanelRenderContext) {
   const intel = ctx.nbaIntel;
   if (!intel || (!intel.items.length && !intel.lineups.length)) {
@@ -60,6 +82,66 @@ function nbaIntelPanel(ctx: PanelRenderContext) {
 }
 
 
+function nbaMatchupPredictorPanel(ctx: PanelRenderContext) {
+  const items = ctx.nbaMatchupPredictor?.items || [];
+  if (!items.length) return emptyState('No ESPN Matchup Predictor data loaded.');
+  return (
+    <div className="wm-matchup-predictor-list">
+      {items.map((game, index) => {
+        const awayWidth = clampPercent(game.awayWinProbability);
+        const homeWidth = clampPercent(game.homeWinProbability);
+        return (
+          <article className="wm-score-card wm-matchup-card" key={`${game.eventId || game.shortName}-${index}`}>
+            <div className="wm-score-card-head">
+              <strong>{game.shortName || `${game.awayTeam || 'Away'} @ ${game.homeTeam || 'Home'}`}</strong>
+              <span>{game.state || game.status || 'pre'}</span>
+            </div>
+            <div className="wm-score-card-meta">
+              <span>{formatDate(game.tipoff || null)}</span>
+              <span>{game.status || 'ESPN BPI'}</span>
+            </div>
+            <div className="wm-matchup-prob-stack">
+              <div className="wm-matchup-prob-row">
+                <div className="wm-matchup-prob-label">
+                  <span>{game.awayTeam || 'Away'}</span>
+                  <strong>{formatProbability(game.awayWinProbability)}</strong>
+                </div>
+                <div className="wm-matchup-prob-track">
+                  <div className="wm-matchup-prob-fill away" style={{ width: `${awayWidth}%` }} />
+                </div>
+              </div>
+              <div className="wm-matchup-prob-row">
+                <div className="wm-matchup-prob-label">
+                  <span>{game.homeTeam || 'Home'}</span>
+                  <strong>{formatProbability(game.homeWinProbability)}</strong>
+                </div>
+                <div className="wm-matchup-prob-track">
+                  <div className="wm-matchup-prob-fill home" style={{ width: `${homeWidth}%` }} />
+                </div>
+              </div>
+            </div>
+            <div className="wm-matchup-metrics">
+              <div>
+                <span>QUALITY</span>
+                <strong>{formatNumber(game.matchupQuality, 1)}</strong>
+              </div>
+              <div>
+                <span>AWAY MARGIN</span>
+                <strong>{formatMargin(game.projectedMargin)}</strong>
+              </div>
+              <div>
+                <span>EXPECTED</span>
+                <strong>{formatNumber(game.awayExpectedPoints, 1)} - {formatNumber(game.homeExpectedPoints, 1)}</strong>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+
 function nbaGames(items: NonNullable<PanelRenderContext['nba']>['items']) {
   if (!items.length) return emptyState('No NBA games loaded.');
   return (
@@ -104,6 +186,14 @@ export const sportsPanelRenderers: PanelRenderMap = {
     render: (ctx) => (
       <Panel title="NBA INTEL" badge="ESPN" status="live" count={ctx.nbaIntel?.items.length || 0}>
         {nbaIntelPanel(ctx)}
+      </Panel>
+    ),
+  },
+  'espn-matchup-predictor': {
+    size: 'wide',
+    render: (ctx) => (
+      <Panel title="ESPN MATCHUP PREDICTOR" badge="BPI" status="live" count={ctx.nbaMatchupPredictor?.items.length || 0} className="wm-market-panel wm-matchup-predictor-panel">
+        {nbaMatchupPredictorPanel(ctx)}
       </Panel>
     ),
   },

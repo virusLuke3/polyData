@@ -25,6 +25,7 @@ export const PANEL_LIBRARY: PanelDefinition[] = [
   { id: 'f1-trackside', title: 'BWE News', eyebrow: 'news', description: 'BWENews runtime RSS flashes with cached auto-refresh.' },
   { id: 'nba-scoreboard', title: 'NBA Scoreboard', eyebrow: 'sports', description: 'Upcoming and live NBA games.' },
   { id: 'nba-intel', title: 'NBA Intel', eyebrow: 'sports', description: 'ESPN news, starting lineups, and pregame rumors.' },
+  { id: 'espn-matchup-predictor', title: 'ESPN Matchup Predictor', eyebrow: 'sports', description: 'ESPN BPI win probability, matchup quality, projected margin, and expected score.', size: 'wide' },
   { id: 'inflation-nowcast', title: 'Inflation Nowcast', eyebrow: 'macro', description: 'Cleveland Fed CPI/PCE nowcasting panel.' },
   { id: 'alpha-signal', title: 'Alpha Signal', eyebrow: 'signal', description: 'Cross-source heuristic signal stack.' },
   { id: 'whale-tracker', title: 'Whale Tracker', eyebrow: 'chain', description: 'Largest recent on-chain trades.' },

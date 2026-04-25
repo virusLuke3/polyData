@@ -249,6 +249,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_market_price_summary": get_market_price_summary,
         "get_markets_payload_cached": get_markets_payload_cached,
         "get_nba_intel_snapshot": get_nba_intel_snapshot,
+        "get_nba_matchup_predictor_snapshot": get_nba_matchup_predictor_snapshot,
         "get_nba_scoreboard_snapshot": get_nba_scoreboard_snapshot,
         "get_oracle_events_by_market_id": get_oracle_events_by_market_id,
         "get_recent_oracle_snapshot": get_recent_oracle_snapshot,
@@ -366,6 +367,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_inflation_nowcast_snapshot": lambda: runtime_service.get_inflation_nowcast_snapshot(build_service_context()),
         "get_jin10_panel_snapshot": lambda limit=24: jin10_runtime_service.get_jin10_panel_snapshot(build_service_context(), limit=limit),
         "get_nba_intel_snapshot": lambda limit=12: runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit),
+        "get_nba_matchup_predictor_snapshot": lambda limit=8: runtime_service.get_nba_matchup_predictor_snapshot(build_service_context(), limit=limit),
         "get_nba_scoreboard_snapshot": lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit),
         "get_oracle_events_by_market_id": lambda market_id: market_service.get_oracle_events_by_market_id(build_service_context(), market_id),
         "get_recent_oracle_events": get_recent_oracle_events,
@@ -729,6 +731,10 @@ def get_nba_scoreboard_snapshot(limit: int = 10) -> Dict[str, Any]:
 
 def get_nba_intel_snapshot(limit: int = 12) -> Dict[str, Any]:
     return runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit)
+
+
+def get_nba_matchup_predictor_snapshot(limit: int = 8) -> Dict[str, Any]:
+    return runtime_service.get_nba_matchup_predictor_snapshot(build_service_context(), limit=limit)
 
 
 def get_inflation_nowcast_snapshot() -> Dict[str, Any]:

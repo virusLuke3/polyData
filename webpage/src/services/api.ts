@@ -11,6 +11,7 @@ import type {
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
   RuntimeJin10Payload,
+  RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeSignalPayload,
@@ -121,6 +122,10 @@ export function fetchRuntimeNba(limit = 10) {
 
 export function fetchRuntimeNbaIntel(limit = 12) {
   return apiGet<RuntimeNbaIntelPayload>(`/runtime/sports/nba-intel?limit=${limit}`);
+}
+
+export function fetchRuntimeNbaMatchupPredictor(limit = 8) {
+  return apiGet<RuntimeNbaMatchupPredictorPayload>(`/runtime/sports/nba-matchup-predictor?limit=${limit}`);
 }
 
 export function fetchRuntimeInflationNowcast() {

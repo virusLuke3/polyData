@@ -348,6 +348,30 @@ export type RuntimeNbaIntelPayload = {
   generatedAt?: string;
 };
 
+export type RuntimeNbaMatchupPredictorItem = {
+  eventId?: string;
+  name?: string | null;
+  shortName?: string | null;
+  tipoff?: string | null;
+  state?: string | null;
+  status?: string | null;
+  awayTeam?: string | null;
+  homeTeam?: string | null;
+  awayWinProbability?: number | null;
+  homeWinProbability?: number | null;
+  matchupQuality?: number | null;
+  projectedMargin?: number | null;
+  awayExpectedPoints?: number | null;
+  homeExpectedPoints?: number | null;
+  lastModified?: string | null;
+};
+
+export type RuntimeNbaMatchupPredictorPayload = {
+  items: RuntimeNbaMatchupPredictorItem[];
+  generatedAt?: string;
+  source?: string;
+};
+
 export type RuntimeInflationNowcastRow = {
   [key: string]: string | undefined;
 };
@@ -456,6 +480,7 @@ export type PanelRenderContext = {
   jin10?: RuntimeJin10Payload | null;
   nba?: RuntimeNbaPayload | null;
   nbaIntel?: RuntimeNbaIntelPayload | null;
+  nbaMatchupPredictor?: RuntimeNbaMatchupPredictorPayload | null;
   inflationNowcast?: RuntimeInflationNowcastPayload | null;
   alphaSignals?: RuntimeSignalPayload | null;
   whaleTrades?: RuntimeSignalPayload | null;

@@ -213,6 +213,8 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "get_recent_oracle_snapshot": lambda limit=12: [{"marketId": 1, "eventStatus": "propose"}],
             "get_latest_content_snapshot": lambda limit=8: {"items": [{"id": 7, "title": "Latest article"}]},
             "get_market_group_snapshot": lambda symbols, kind="commodities": {"kind": kind, "items": []},
+            "get_gamma_active_market_filter": lambda: {},
+            "enrich_market_rows_with_runtime_prices": lambda rows, max_updates=18, force_refresh=False: rows,
             "build_system_health_payload": lambda: {"apiStatus": "ok", "redis": True},
             "table_exists": lambda table_name: latest_content_from_db if table_name in {"content_items", "content_links"} else True,
             "parse_json_list": parse_json_list,

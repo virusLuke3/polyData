@@ -16,6 +16,7 @@ import {
   fetchRuntimeJin10,
   fetchRuntimeNba,
   fetchRuntimeNbaIntel,
+  fetchRuntimeNbaMatchupPredictor,
   fetchRuntimeInflationNowcast,
   fetchRuntimeSuspicious,
   fetchRuntimeWhales,
@@ -34,6 +35,7 @@ import type {
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
   RuntimeJin10Payload,
+  RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeSignalPayload,
@@ -183,6 +185,7 @@ export function App() {
   const [jin10, setJin10] = useState<RuntimeJin10Payload | null>(null);
   const [nba, setNba] = useState<RuntimeNbaPayload | null>(null);
   const [nbaIntel, setNbaIntel] = useState<RuntimeNbaIntelPayload | null>(null);
+  const [nbaMatchupPredictor, setNbaMatchupPredictor] = useState<RuntimeNbaMatchupPredictorPayload | null>(null);
   const [inflationNowcast, setInflationNowcast] = useState<RuntimeInflationNowcastPayload | null>(null);
   const [alphaSignals, setAlphaSignals] = useState<RuntimeSignalPayload | null>(null);
   const [whaleTrades, setWhaleTrades] = useState<RuntimeSignalPayload | null>(null);
@@ -259,6 +262,7 @@ export function App() {
       fetchRuntimeCrypto(),
       fetchRuntimeNba(10),
       fetchRuntimeNbaIntel(12),
+      fetchRuntimeNbaMatchupPredictor(8),
       fetchRuntimeInflationNowcast(),
       fetchRuntimeAlpha(8),
       fetchRuntimeWhales(14),
@@ -268,10 +272,11 @@ export function App() {
     if (settled[0].status === 'fulfilled') setCrypto(settled[0].value);
     if (settled[1].status === 'fulfilled') setNba(settled[1].value);
     if (settled[2].status === 'fulfilled') setNbaIntel(settled[2].value);
-    if (settled[3].status === 'fulfilled') setInflationNowcast(settled[3].value);
-    if (settled[4].status === 'fulfilled') setAlphaSignals(settled[4].value);
-    if (settled[5].status === 'fulfilled') setWhaleTrades(settled[5].value);
-    if (settled[6].status === 'fulfilled') setSuspiciousTrades(settled[6].value);
+    if (settled[3].status === 'fulfilled') setNbaMatchupPredictor(settled[3].value);
+    if (settled[4].status === 'fulfilled') setInflationNowcast(settled[4].value);
+    if (settled[5].status === 'fulfilled') setAlphaSignals(settled[5].value);
+    if (settled[6].status === 'fulfilled') setWhaleTrades(settled[6].value);
+    if (settled[7].status === 'fulfilled') setSuspiciousTrades(settled[7].value);
   }
 
   function scheduleSlowRuntimePanels() {
@@ -588,6 +593,7 @@ export function App() {
     jin10,
     nba,
     nbaIntel,
+    nbaMatchupPredictor,
     inflationNowcast,
     alphaSignals,
     whaleTrades,
