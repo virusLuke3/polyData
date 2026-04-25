@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from flask import Flask
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from api.routes.runtime_panels import create_runtime_panels_blueprint
+from api.runtime_panels import RUNTIME_PANEL_MODULES, get_default_panel_ids
+
+
+def test_runtime_panel_modules_have_unique_ids_and_routes():
+    panel_ids = [panel.panel_id for panel in RUNTIME_PANEL_MODULES]
+    routes = [panel.route for panel in RUNTIME_PANEL_MODULES]
+
+    assert len(panel_ids) == len(set(panel_ids))
+    assert len(routes) == len(set(routes))
+    assert all(route.startswith("/runtime/") for route in routes)
+
+
+def test_runtime_panel_blueprint_registers_all_routes():
+    app = Flask(__name__)
+    helpers = {
+        "COMMODITY_SYMBOLS": [],
+        "CRYPTO_SYMBOLS": [],
+        "get_market_group_snapshot": lambda symbols, kind: {"kind": kind, "items": symbols},
+        "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
+        "get_jin10_panel_snapshot": lambda limit=24: {"limit": limit},
+        "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
+        "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
+        "get_nba_matchup_predictor_snapshot": lambda limit=8: {"limit": limit},
+        "get_inflation_nowcast_snapshot": lambda: {"items": []},
+        "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
+        "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
+        "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
+    }
+
+    app.register_blueprint(create_runtime_panels_blueprint(helpers))
+    registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
+
+    for panel in RUNTIME_PANEL_MODULES:
+        assert panel.route in registered_routes
+
+
+def test_default_workspace_panel_ids_include_runtime_and_static_panels():
+    panel_ids = get_default_panel_ids()
+
+    assert "active-markets" in panel_ids
+    assert "espn-matchup-predictor" in panel_ids
+    assert "f1-trackside" in panel_ids
+    assert len(panel_ids) == len(set(panel_ids))

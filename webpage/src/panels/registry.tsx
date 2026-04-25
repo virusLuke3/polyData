@@ -1,44 +1,32 @@
-import { PANEL_LIBRARY } from './definitions';
-import type { PanelRenderMap, RegistryEntry } from './types';
-import { briefPanelRenderers } from './brief-panels';
-import { chainPanelRenderers } from './chain-panels';
-import { contentPanelRenderers } from './content-panels';
-import { f1PanelRenderers } from './f1-panels';
-import { jin10PanelRenderers } from './jin10-panels';
-import { macroPanelRenderers } from './macro-panels';
-import { marketPanelRenderers } from './market-panels';
-import { oraclePanelRenderers } from './oracle-panels';
-import { signalPanelRenderers } from './signal-panels';
-import { sportsPanelRenderers } from './sports-panels';
-import { systemPanelRenderers } from './system-panels';
+import { PANEL_MODULES } from './modules';
+import type { PanelModule, RegistryEntry } from './types';
 
-export { PANEL_LIBRARY } from './definitions';
-export type { RegistryEntry } from './types';
+export type { PanelModule, RegistryEntry } from './types';
+export { PANEL_MODULES } from './modules';
 
-const PANEL_RENDERERS: PanelRenderMap = {
-  ...briefPanelRenderers,
-  ...marketPanelRenderers,
-  ...chainPanelRenderers,
-  ...oraclePanelRenderers,
-  ...contentPanelRenderers,
-  ...f1PanelRenderers,
-  ...jin10PanelRenderers,
-  ...systemPanelRenderers,
-  ...macroPanelRenderers,
-  ...sportsPanelRenderers,
-  ...signalPanelRenderers,
-};
+export const PANEL_LIBRARY = PANEL_MODULES.map(({ render, fetchData, refresh, defaultEnabled, ...definition }) => definition);
 
-function buildPanelRegistry(renderers: PanelRenderMap): Record<string, RegistryEntry> {
-  return Object.fromEntries(
-    PANEL_LIBRARY.map((definition) => {
-      const entry = renderers[definition.id];
-      if (!entry) {
-        throw new Error(`Missing panel renderer for ${definition.id}`);
-      }
-      return [definition.id, { ...definition, ...entry }];
-    }),
-  );
+function assertUniquePanelIds(panels: PanelModule[]) {
+  const seen = new Set<string>();
+  for (const panel of panels) {
+    if (seen.has(panel.id)) {
+      throw new Error(`Duplicate panel module id: ${panel.id}`);
+    }
+    seen.add(panel.id);
+    if (panel.fetchData && !panel.refresh?.tier) {
+      throw new Error(`Runtime panel ${panel.id} must declare refresh.tier`);
+    }
+  }
 }
 
-export const PANEL_REGISTRY = buildPanelRegistry(PANEL_RENDERERS);
+assertUniquePanelIds(PANEL_MODULES);
+
+export const DEFAULT_PANEL_IDS = PANEL_MODULES
+  .filter((panel) => panel.defaultEnabled !== false)
+  .map((panel) => panel.id);
+
+export const RUNTIME_PANEL_MODULES = PANEL_MODULES.filter((panel) => typeof panel.fetchData === 'function');
+
+export const PANEL_REGISTRY: Record<string, RegistryEntry> = Object.fromEntries(
+  PANEL_MODULES.map((panel) => [panel.id, panel]),
+);

@@ -47,7 +47,14 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict[str, Any]]:
-    threshold = ctx["iso_days_before"](ctx["utc_now_iso"](), lookback_days) or ctx["utc_date_days_ago"](lookback_days)
+    iso_days_before = ctx.get("iso_days_before")
+    if callable(iso_days_before):
+        threshold = iso_days_before(ctx["utc_now_iso"](), lookback_days) or ctx["utc_date_days_ago"](lookback_days)
+    else:
+        utc_date_days_ago = ctx.get("utc_date_days_ago")
+        if not callable(utc_date_days_ago):
+            return []
+        threshold = utc_date_days_ago(lookback_days)
     threshold_dt = ctx["parse_iso_datetime"](threshold)
     recent_trades = ctx["get_recent_trades"](limit=max(160, limit * 24))
     rows: List[Dict[str, Any]] = []
@@ -521,8 +528,9 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             contributors=["fast-fallback", "whale"],
         )
 
-    if len(signals) < limit:
-        for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:4]:
+    get_active_markets_snapshot = ctx.get("get_active_markets_snapshot")
+    if len(signals) < limit and callable(get_active_markets_snapshot):
+        for market in get_active_markets_snapshot(page_size=8).get("items", [])[:4]:
             if len(signals) >= limit:
                 break
             price = ctx["_safe_decimal"](market.get("latestPrice"))

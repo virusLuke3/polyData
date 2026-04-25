@@ -474,6 +474,7 @@ export type PanelRenderContext = {
   globalTrades: TradeRow[];
   globalOracle: OracleEvent[];
   latestContent: ContentItem[];
+  runtimeData: Record<string, unknown>;
   commodities?: RuntimeMarketGroup | null;
   crypto?: RuntimeMarketGroup | null;
   f1?: RuntimeF1Payload | null;

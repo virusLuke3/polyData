@@ -2,24 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { WorldFlatMap } from '@/components/WorldFlatMap';
 import { WorldGlobe } from '@/components/WorldGlobe';
-import { PANEL_LIBRARY, PANEL_REGISTRY } from '@/panels/registry';
+import { PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
+import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
 import {
   fetchAllActiveMarkets,
   fetchBootstrap,
   fetchLatestContent,
   fetchRecentOracle,
   fetchRecentTrades,
-  fetchRuntimeAlpha,
-  fetchRuntimeCommodities,
-  fetchRuntimeCrypto,
-  fetchRuntimeF1,
-  fetchRuntimeJin10,
-  fetchRuntimeNba,
-  fetchRuntimeNbaIntel,
-  fetchRuntimeNbaMatchupPredictor,
-  fetchRuntimeInflationNowcast,
-  fetchRuntimeSuspicious,
-  fetchRuntimeWhales,
   fetchSystemHealth,
   fetchWorkspaceBundle,
 } from '@/services/api';
@@ -31,18 +21,19 @@ import type {
   MarketSummary,
   OracleEvent,
   PanelRenderContext,
-  RuntimeMarketGroup,
-  RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
+  RuntimeInflationNowcastPayload,
   RuntimeJin10Payload,
+  RuntimeMarketGroup,
+  RuntimeNbaIntelPayload,
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
-  RuntimeNbaIntelPayload,
   RuntimeSignalPayload,
   SystemHealth,
   TradeRow,
   WorkspaceBundle,
 } from '@/types';
+import type { PanelRuntimeData } from '@/panels/types';
 
 type LayerToggle = {
   id: string;
@@ -62,6 +53,8 @@ const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const CRYPTO_REFRESH_INTERVAL_MS = 5000;
+const FAST_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'fast');
+const SLOW_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'slow');
 
 const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'markets', label: 'Polymarket Markets', icon: '◎', enabled: true, hint: 'ACTIVE' },
@@ -179,17 +172,7 @@ export function App() {
   const [globalTrades, setGlobalTrades] = useState<TradeRow[]>([]);
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
-  const [commodities, setCommodities] = useState<RuntimeMarketGroup | null>(null);
-  const [crypto, setCrypto] = useState<RuntimeMarketGroup | null>(null);
-  const [f1, setF1] = useState<RuntimeF1Payload | null>(null);
-  const [jin10, setJin10] = useState<RuntimeJin10Payload | null>(null);
-  const [nba, setNba] = useState<RuntimeNbaPayload | null>(null);
-  const [nbaIntel, setNbaIntel] = useState<RuntimeNbaIntelPayload | null>(null);
-  const [nbaMatchupPredictor, setNbaMatchupPredictor] = useState<RuntimeNbaMatchupPredictorPayload | null>(null);
-  const [inflationNowcast, setInflationNowcast] = useState<RuntimeInflationNowcastPayload | null>(null);
-  const [alphaSignals, setAlphaSignals] = useState<RuntimeSignalPayload | null>(null);
-  const [whaleTrades, setWhaleTrades] = useState<RuntimeSignalPayload | null>(null);
-  const [suspiciousTrades, setSuspiciousTrades] = useState<RuntimeSignalPayload | null>(null);
+  const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>({});
   const [marketQuery, setMarketQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
@@ -225,9 +208,7 @@ export function App() {
       fetchRecentOracle(16),
       fetchLatestContent(12),
       fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
-      fetchRuntimeCommodities(),
-      fetchRuntimeF1(),
-      fetchRuntimeJin10(24),
+      fetchPanelRuntimeData(FAST_RUNTIME_PANELS),
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
@@ -246,11 +227,12 @@ export function App() {
     if (settled[4].status === 'fulfilled') setMarkets(settled[4].value.items || []);
     else if (fallbackMarkets.length) setMarkets(fallbackMarkets);
 
-    if (settled[5].status === 'fulfilled') setCommodities(settled[5].value);
-    else if (bootstrapPayload?.commoditiesPreview) setCommodities(bootstrapPayload.commoditiesPreview);
-
-    if (settled[6].status === 'fulfilled') setF1(settled[6].value);
-    if (settled[7].status === 'fulfilled') setJin10(settled[7].value);
+    const fastRuntimeResult = settled[5];
+    if (fastRuntimeResult.status === 'fulfilled') {
+      setRuntimeData((current) => mergeRuntimeData(current, fastRuntimeResult.value));
+    } else if (bootstrapPayload?.commoditiesPreview) {
+      setRuntimeData((current) => mergeRuntimeData(current, { 'commodities-watch': bootstrapPayload.commoditiesPreview }));
+    }
 
     return {
       marketsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
@@ -258,25 +240,8 @@ export function App() {
   }
 
   async function refreshSlowRuntimePanels() {
-    const settled = await Promise.allSettled([
-      fetchRuntimeCrypto(),
-      fetchRuntimeNba(10),
-      fetchRuntimeNbaIntel(12),
-      fetchRuntimeNbaMatchupPredictor(8),
-      fetchRuntimeInflationNowcast(),
-      fetchRuntimeAlpha(8),
-      fetchRuntimeWhales(14),
-      fetchRuntimeSuspicious(12),
-    ]);
-
-    if (settled[0].status === 'fulfilled') setCrypto(settled[0].value);
-    if (settled[1].status === 'fulfilled') setNba(settled[1].value);
-    if (settled[2].status === 'fulfilled') setNbaIntel(settled[2].value);
-    if (settled[3].status === 'fulfilled') setNbaMatchupPredictor(settled[3].value);
-    if (settled[4].status === 'fulfilled') setInflationNowcast(settled[4].value);
-    if (settled[5].status === 'fulfilled') setAlphaSignals(settled[5].value);
-    if (settled[6].status === 'fulfilled') setWhaleTrades(settled[6].value);
-    if (settled[7].status === 'fulfilled') setSuspiciousTrades(settled[7].value);
+    const patch = await fetchPanelRuntimeData(SLOW_RUNTIME_PANELS);
+    setRuntimeData((current) => mergeRuntimeData(current, patch));
   }
 
   function scheduleSlowRuntimePanels() {
@@ -366,7 +331,7 @@ export function App() {
         setGlobalTrades(bootstrapPayload.globalTradesPreview || []);
         setGlobalOracle(bootstrapPayload.globalOraclePreview || []);
         setLatestContent(bootstrapPayload.latestContentPreview || []);
-        setCommodities(bootstrapPayload.commoditiesPreview || null);
+        setRuntimeData((current) => mergeRuntimeData(current, bootstrapPayload.commoditiesPreview ? { 'commodities-watch': bootstrapPayload.commoditiesPreview } : {}));
         setSelectedMarketId(liveFeatured || bootstrapPayload.featuredMarket?.id || null);
         setActivePanelIds((current) => (
           current.length
@@ -432,8 +397,11 @@ export function App() {
 
     async function refreshCryptoPanel() {
       try {
-        const payload = await fetchRuntimeCrypto();
-        if (!cancelled) setCrypto(payload);
+        const cryptoPanel = PANEL_REGISTRY['crypto-watch'];
+        const payload = await cryptoPanel?.fetchData?.();
+        if (!cancelled && payload !== undefined) {
+          setRuntimeData((current) => mergeRuntimeData(current, { 'crypto-watch': payload }));
+        }
       } catch {
         // Keep the latest visible quote board rather than flashing empty on transient market-data errors.
       }
@@ -576,6 +544,8 @@ export function App() {
     { label: 'INTEL', value: currentLatestContent.length || 0 },
   ];
 
+  const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
+
   const panelContext: PanelRenderContext = {
     bootstrap,
     markets: displayMarkets,
@@ -587,17 +557,18 @@ export function App() {
     globalTrades: currentGlobalTrades,
     globalOracle: currentGlobalOracle,
     latestContent: currentLatestContent,
-    commodities,
-    crypto,
-    f1,
-    jin10,
-    nba,
-    nbaIntel,
-    nbaMatchupPredictor,
-    inflationNowcast,
-    alphaSignals,
-    whaleTrades,
-    suspiciousTrades,
+    runtimeData,
+    commodities: runtimeValue<RuntimeMarketGroup>('commodities-watch'),
+    crypto: runtimeValue<RuntimeMarketGroup>('crypto-watch'),
+    f1: runtimeValue<RuntimeF1Payload>('f1-trackside'),
+    jin10: runtimeValue<RuntimeJin10Payload>('jin10-flash'),
+    nba: runtimeValue<RuntimeNbaPayload>('nba-scoreboard'),
+    nbaIntel: runtimeValue<RuntimeNbaIntelPayload>('nba-intel'),
+    nbaMatchupPredictor: runtimeValue<RuntimeNbaMatchupPredictorPayload>('espn-matchup-predictor'),
+    inflationNowcast: runtimeValue<RuntimeInflationNowcastPayload>('inflation-nowcast'),
+    alphaSignals: runtimeValue<RuntimeSignalPayload>('alpha-signal'),
+    whaleTrades: runtimeValue<RuntimeSignalPayload>('whale-tracker'),
+    suspiciousTrades: runtimeValue<RuntimeSignalPayload>('suspicious-flow'),
   };
 
   const commandResults = useMemo(() => {

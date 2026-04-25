@@ -72,7 +72,10 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
 
 
 def _normalized_gamma_active_keys(ctx: dict) -> tuple[set[str], set[str]]:
-    payload = ctx["get_gamma_active_market_filter"]() or {}
+    get_filter = ctx.get("get_gamma_active_market_filter")
+    if not callable(get_filter):
+        return set(), set()
+    payload = get_filter() or {}
     condition_ids = {
         str(value or "").strip().lower()
         for value in (payload.get("conditionIds") or [])
@@ -730,6 +733,8 @@ def get_markets_payload(
         if status == "active":
             candidate_rows = _filter_candidate_rows_to_gamma_active(ctx, candidate_rows)
         working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
+        if not working_candidates and candidate_rows:
+            working_candidates = candidate_rows[: max(page_size * 3, page_size + 1)]
         visible_market_ids = [int(row["id"]) for row in working_candidates if row.get("id") is not None]
         detail_rows = _get_market_detail_rows_by_ids(ctx, visible_market_ids)
         visible_rows: List[Dict[str, Any]] = []
@@ -758,7 +763,6 @@ def get_markets_payload(
             ctx,
             visible_rows,
             max_updates=max_runtime_updates,
-            force_refresh=False,
         )
         if status == "active":
             visible_rows = _filter_tradeable_market_rows(visible_rows)

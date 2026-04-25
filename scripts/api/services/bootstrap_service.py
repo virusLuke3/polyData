@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from api.runtime_panels import get_default_panel_ids
+
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
 BOOTSTRAP_CACHE_KEY = "workspace-default-v3"
@@ -574,10 +576,7 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         "generatedAt": ctx["utc_now_iso"](),
         "defaultWorkspace": {
             "name": "Hackathon Demo",
-            "panels": [
-                "active-markets","global-orderfilled","oracle-feed","market-summary","featured-market","world-brief","price-implications","price-chart","sample-chain-trades","oracle-timeline","related-news","related-video","report-feed","research-feed","alpha-signal","whale-tracker","suspicious-flow","commodities-watch","crypto-watch","nba-scoreboard","nba-intel","espn-matchup-predictor","inflation-nowcast","jin10-flash","bbo-monitor","lob-depth","live-api-status","system-health",
-                "f1-trackside",
-            ],
+            "panels": get_default_panel_ids(),
         },
         "featuredMarket": featured_market,
         "activeMarketsPreview": active_markets_preview,
