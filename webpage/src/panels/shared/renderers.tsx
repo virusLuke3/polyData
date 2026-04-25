@@ -360,17 +360,25 @@ function signalAction(item: RuntimeTradeSignal) {
 function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', fontFamily: 'monospace', padding: '12px' }}>
+    <div style={{ fontFamily: 'monospace', width: '100%' }}>
       {items.map((item, index) => {
         const isCluster = (item.addresses?.length || 0) > 1 || String(item.sourceLabel || '').toLowerCase().includes('cluster');
         const icon = isCluster ? '👥' : '🐳';
         const sourceName = item.sourceLabel ? item.sourceLabel.toUpperCase() : (isCluster ? 'CLUSTER' : 'WHALE');
         const bias = signalBias(item);
         const isBull = bias === 'bullish';
-        const color = isBull ? '#39ff73' : '#ff6464';
-        const triangle = isBull ? '▲' : '▼';
-        const action = signalAction(item);
         
+        // Exact PolyWorld colors
+        const dirColor = isBull ? '#22c55e' : '#ef4444';
+        const dirArrow = isBull ? '▲' : '▼';
+        
+        // Assume all signals are 'STR' for now as in the original mock if not provided
+        const sColor = '#ff4444';
+        const sBg = 'rgba(255,68,68,0.12)';
+        const strengthLabel = 'STR';
+        
+        const action = signalAction(item);
+
         let timeStr = formatRelative(item.timestamp || null);
         timeStr = timeStr.replace(' minutes ago', 'm').replace(' minutes', 'm').replace(' hours ago', 'h').replace(' hours', 'h').replace(' seconds ago', 's').replace(' seconds', 's');
         if (timeStr.includes('just now')) timeStr = '1m';
@@ -382,61 +390,125 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
         const prob = formatPercent(metrics?.currentProbability || item.price || 0);
 
         return (
-          <article key={`${item.title || item.marketTitle || 'signal'}-${index}`} style={{ display: 'flex', flexDirection: 'column', paddingBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '15px' }}>{icon}</span>
-                <span style={{ color: '#aaa', letterSpacing: '0.05em' }}>{sourceName}</span>
-                <span style={{ color: color, fontWeight: 'bold' }}>{triangle} {bias}</span>
-              </div>
-              <div style={{ color: '#888' }}>{timeStr}</div>
+          <div 
+            key={`${item.title || item.marketTitle || 'signal'}-${index}`}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+              padding: '6px',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              cursor: 'pointer',
+              background: 'rgba(255,68,68,0.03)'
+            }}
+            onClick={() => item.marketId && onMarketSelect?.(item.marketId)}
+          >
+            {/* Left Column: Icon & Strength Badge */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: '28px', paddingTop: '2px' }}>
+              <span style={{ fontSize: '13px', lineHeight: 1 }}>{icon}</span>
+              <span style={{
+                fontSize: '8px',
+                fontWeight: 'bold',
+                borderRadius: '2px',
+                padding: '0 2px',
+                marginTop: '2px',
+                lineHeight: '14px',
+                background: sBg,
+                color: sColor
+              }}>
+                {strengthLabel}
+              </span>
             </div>
-            
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <div style={{ color: '#ff6464', fontSize: '11px', fontWeight: 'bold', background: 'rgba(255,100,100,0.1)', padding: '2px 4px', borderRadius: '4px', height: 'fit-content' }}>STR</div>
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-                <p style={{ color: '#eee', fontSize: '14px', lineHeight: '1.4', margin: '0 0 12px 0', fontFamily: 'sans-serif' }}>
-                  {item.headline || item.summary || item.title || 'Signal activity detected'}
-                </p>
-                
-                <div style={{ background: 'rgba(57,255,115,0.05)', border: `1px solid rgba(57,255,115,0.2)`, borderRadius: '4px', padding: '8px 12px', marginBottom: '12px', cursor: 'pointer' }} onClick={() => item.marketId && onMarketSelect?.(item.marketId)}>
-                  <div style={{ display: 'flex', gap: '8px', color: '#39ff73', fontSize: '13px', fontWeight: 'bold' }}>
-                    <span>{triangle}</span>
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.marketTitle || item.title || 'Market signal'}</span>
-                  </div>
+
+            {/* Right Column */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              
+              {/* Row 1: Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255,255,255,0.5)' }}>
+                  {sourceName}
+                </span>
+                <span style={{ fontSize: '10px', fontWeight: 'bold', color: dirColor }}>
+                  {dirArrow} {bias.toUpperCase()}
+                </span>
+                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto', flexShrink: 0 }}>
+                  {timeStr}
+                </span>
+              </div>
+
+              {/* Row 2: Summary */}
+              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.2, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}>
+                {item.headline || item.summary || item.title || 'Signal activity detected'}
+              </div>
+
+              {/* Row 3: Market/Outcome Box */}
+              {(item.marketTitle || (action.outcome && action.outcome !== 'Yes' && action.outcome !== 'No')) && (
+                <div style={{
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  marginTop: '2px',
+                  padding: '2px 4px',
+                  display: 'inline-block',
+                  borderRadius: '2px',
+                  width: 'fit-content',
+                  background: isBull ? 'rgba(34,197,94,0.1)' : 'rgba(255,68,68,0.1)',
+                  color: dirColor,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100%'
+                }}>
+                  {dirArrow} {item.marketTitle || 'Market'} {action.outcome && action.outcome !== 'Yes' && action.outcome !== 'No' ? ` · ${action.outcome}` : ''}
                 </div>
+              )}
+
+              {/* Row 4: Metrics & Action */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                {Number(volume) > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>${formatCompact(volume)}</span>
+                    <span style={{ marginTop: '-2px' }}>vol</span>
+                  </div>
+                )}
+                {Number(count) > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>{count}</span>
+                    <span style={{ marginTop: '-2px' }}>trades</span>
+                  </div>
+                )}
+                {Number(wallets) > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>{wallets}</span>
+                    <span style={{ marginTop: '-2px' }}>wallet(s)</span>
+                  </div>
+                )}
                 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#aaa', fontFamily: 'monospace' }}>
-                  <div style={{ display: 'flex', gap: '16px' }}>
-                     <div style={{ display: 'flex', gap: '4px' }}>
-                       <span style={{ color: '#eee' }}>${formatCompact(volume)}</span>
-                       <span>vol</span>
-                     </div>
-                     <div style={{ display: 'flex', gap: '4px' }}>
-                       <span style={{ color: '#eee' }}>{count}</span>
-                       <span>trades</span>
-                     </div>
-                     <div style={{ display: 'flex', gap: '4px' }}>
-                       <span style={{ color: '#eee' }}>{wallets}</span>
-                       <span>wallet(s)</span>
-                     </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <span style={{ color: '#eee' }}>@{prob}</span>
-                    <button style={{ background: 'rgba(57,255,115,0.1)', color: '#39ff73', border: '1px solid rgba(57,255,115,0.3)', padding: '6px 12px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 'bold' }}>
-                      {action.side} {action.outcome}
-                    </button>
-                  </div>
-                </div>
+                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', alignSelf: 'center', margin: 'auto 0' }}>
+                  @{prob}
+                </span>
+
+                <button style={{
+                  marginLeft: 'auto',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  padding: '4px 6px',
+                  borderRadius: '2px',
+                  cursor: 'pointer',
+                  border: 'none',
+                  whiteSpace: 'nowrap',
+                  background: isBull ? 'rgba(34,197,94,0.15)' : 'rgba(255,68,68,0.15)',
+                  color: dirColor
+                }}>
+                  {action.side === 'buy' ? 'Buy' : 'Sell'} {action.outcome || (isBull ? 'YES' : 'NO')}
+                </button>
               </div>
             </div>
-          </article>
+          </div>
         );
       })}
     </div>
   );
 }
-
 
 function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
