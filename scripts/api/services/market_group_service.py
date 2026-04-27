@@ -452,6 +452,14 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         key=lambda outcome: float(outcome.get("yesPrice") or 0),
         reverse=True,
     )
+    last_activity_at = None
+    last_activity_ts = 0.0
+    for outcome in outcomes:
+        candidate = outcome.get("lastTradeAt")
+        candidate_ts = _parse_timestamp(candidate)
+        if candidate_ts > last_activity_ts:
+            last_activity_ts = candidate_ts
+            last_activity_at = candidate
     default_outcome = next((outcome for outcome in top_outcomes if outcome.get("marketId") is not None), None)
     if default_outcome is None:
         default_outcome = next((outcome for outcome in outcomes if outcome.get("marketId") is not None), None)
@@ -467,6 +475,7 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         "endDate": event.get("endDate") or event.get("end_date"),
         "volume24h": _float_value(event.get("volume24hr") or event.get("volume_24hr") or event.get("volume24h")),
         "outcomeCount": len(outcomes),
+        "lastActivityAt": last_activity_at,
         "defaultOutcomeKey": default_outcome.get("outcomeKey") if default_outcome else None,
         "defaultMarketId": default_outcome.get("marketId") if default_outcome else None,
         "outcomes": outcomes,
@@ -495,6 +504,50 @@ def _matches_query(group: Dict[str, Any], query: str) -> bool:
         ]
     ).lower()
     return query.lower() in haystack
+
+
+def _event_identity(event: Dict[str, Any]) -> str:
+    return str(event.get("id") or event.get("slug") or "").strip()
+
+
+def _merge_unique_events(*event_lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for events in event_lists:
+        for event in events:
+            identity = _event_identity(event)
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(event)
+    return merged
+
+
+def _group_created_ts(group: Dict[str, Any]) -> float:
+    return _parse_timestamp(group.get("createdAt"))
+
+
+def _group_last_activity_ts(group: Dict[str, Any]) -> float:
+    return _parse_timestamp(group.get("lastActivityAt")) or _group_created_ts(group)
+
+
+def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int, int, float, float, float]:
+    created_ts = _group_created_ts(group)
+    last_activity_ts = _group_last_activity_ts(group)
+    volume = _float_value(group.get("volume24h")) or 0.0
+    multi_penalty = 0 if int(group.get("outcomeCount") or 0) > 2 else 1
+    recent_threshold = now_ts - (14 * 86400)
+    active_threshold = now_ts - (3 * 86400)
+    if created_ts >= recent_threshold:
+        bucket = 0
+        recency = created_ts
+    elif last_activity_ts >= active_threshold:
+        bucket = 1
+        recency = last_activity_ts
+    else:
+        bucket = 2
+        recency = max(created_ts, last_activity_ts)
+    return (bucket, multi_penalty, -recency, -volume, -created_ts)
 
 
 def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status: str = "degraded") -> Dict[str, Any]:
@@ -530,14 +583,30 @@ def get_market_groups_payload(
     cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 2}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
-        try:
-            fetch_target = max(100, min(1000, (page * page_size * 3)))
-            gamma_order = "startDate" if sort == "new" else "volume24hr"
-            events = _fetch_gamma_events(ctx, target_events=fetch_target, order=gamma_order)
-        except Exception:
-            ctx["app"].logger.exception("market-group list gamma fetch failed sort=%s page=%s page_size=%s", sort, page, page_size)
-            return _empty_market_groups_payload(ctx, page=page, page_size=page_size)
+        fetch_target = max(100, min(1000, (page * page_size * 3)))
+        if sort == "active":
+            recent_events: List[Dict[str, Any]] = []
+            volume_events: List[Dict[str, Any]] = []
+            try:
+                recent_events = _fetch_gamma_events(ctx, target_events=fetch_target, order="startDate")
+            except Exception:
+                ctx["app"].logger.exception("market-group list recent gamma fetch failed page=%s page_size=%s", page, page_size)
+            try:
+                volume_events = _fetch_gamma_events(ctx, target_events=fetch_target, order="volume24hr")
+            except Exception:
+                ctx["app"].logger.exception("market-group list volume gamma fetch failed page=%s page_size=%s", page, page_size)
+            events = _merge_unique_events(recent_events, volume_events)
+            if not events:
+                return _empty_market_groups_payload(ctx, page=page, page_size=page_size)
+        else:
+            try:
+                gamma_order = "startDate" if sort == "new" else "volume24hr"
+                events = _fetch_gamma_events(ctx, target_events=fetch_target, order=gamma_order)
+            except Exception:
+                ctx["app"].logger.exception("market-group list gamma fetch failed sort=%s page=%s page_size=%s", sort, page, page_size)
+                return _empty_market_groups_payload(ctx, page=page, page_size=page_size)
         now_iso = ctx["utc_now_iso"]()
+        now_ts = _parse_timestamp(now_iso)
         candidate_events = [
             event
             for event in events
@@ -583,6 +652,8 @@ def get_market_groups_payload(
             for group in [_normalize_group(ctx, event, lookups)]
             if group is not None and _matches_query(group, query)
         ]
+        if sort == "active":
+            groups.sort(key=lambda group: _active_group_sort_key(group, now_ts=now_ts))
 
         visible = groups[offset: offset + page_size]
         has_more = len(groups) > offset + page_size or len(candidate_events) > len(lookup_events)

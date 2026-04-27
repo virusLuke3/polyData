@@ -187,6 +187,41 @@ class MarketGroupServiceTestCase(unittest.TestCase):
 
         self.assertEqual(["event:new", "event:old"], [item["groupId"] for item in payload["items"]])
 
+    def test_active_sort_prefers_recent_groups_before_old_volume_groups(self):
+        ctx = self.make_ctx(
+            [
+                {
+                    "id": "old-volume",
+                    "title": "2026 NBA Champion",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2025-06-01T00:00:00Z",
+                    "volume24hr": 900000,
+                    "markets": [
+                        {"id": "m-old-1", "groupItemTitle": "Thunder", "clobTokenIds": ["old-1"], "outcomePrices": ["0.34", "0.66"]},
+                        {"id": "m-old-2", "groupItemTitle": "Wolves", "clobTokenIds": ["old-2"], "outcomePrices": ["0.18", "0.82"]},
+                        {"id": "m-old-3", "groupItemTitle": "Celtics", "clobTokenIds": ["old-3"], "outcomePrices": ["0.12", "0.88"]},
+                    ],
+                },
+                {
+                    "id": "fresh-binary",
+                    "title": "Spread: Pistons (-3.5)",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2026-04-27T08:00:00Z",
+                    "volume24hr": 4000,
+                    "markets": [
+                        {"id": "m-fresh-1", "groupItemTitle": "YES", "clobTokenIds": ["fresh-1"], "outcomePrices": ["0.48", "0.52"]},
+                        {"id": "m-fresh-2", "groupItemTitle": "NO", "clobTokenIds": ["fresh-2"], "outcomePrices": ["0.52", "0.48"]},
+                    ],
+                },
+            ]
+        )
+
+        payload = market_group_service.get_market_groups_payload(ctx, page_size=20, sort="active")
+
+        self.assertEqual(["event:fresh-binary", "event:old-volume"], [item["groupId"] for item in payload["items"]])
+
     def test_detail_payload_returns_multi_outcome_group(self):
         ctx = self.make_ctx(
             [

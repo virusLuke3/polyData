@@ -1072,6 +1072,52 @@ body {
   color: var(--wm-text-dim);
 }
 
+.wm-focus-event-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 10px 0;
+}
+
+.wm-focus-event-legend-item {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid #252525;
+  background: #141414;
+  color: #d7d7d7;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.wm-focus-event-legend-item.active {
+  border-color: #315f45;
+  background: #151a16;
+  color: #f3f3f3;
+}
+
+.wm-focus-event-legend-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 999px;
+}
+
+.wm-focus-event-legend-label {
+  max-width: 156px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-focus-event-legend-item strong {
+  color: #f1f1f1;
+}
+
 .wm-focus-chart-wrap {
   min-height: 0;
 }

@@ -275,6 +275,42 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
   );
 }
 
+function eventChartLegend(
+  detail: MarketGroupDetail | null,
+  chart: MarketGroupChartPayload | null,
+  selectedOutcomeKey: string | null,
+  onSelect: (outcome: MarketGroupOutcome) => void,
+) {
+  const outcomes = detail?.outcomes || [];
+  const seriesColorMap = new Map((chart?.series || []).map((entry) => [entry.outcomeKey || '', entry.color || '#7cb6ff']));
+  const visible = outcomes.slice(0, 6);
+  if (!visible.length) return null;
+  return (
+    <div className="wm-focus-event-legend" aria-label="event outcomes legend">
+      {visible.map((outcome) => {
+        const key = outcome.outcomeKey || '';
+        const active = key === selectedOutcomeKey;
+        return (
+          <button
+            key={key || outcome.label || outcome.marketId || outcome.gammaMarketId}
+            type="button"
+            className={`wm-focus-event-legend-item${active ? ' active' : ''}`}
+            onClick={() => onSelect(outcome)}
+          >
+            <span
+              className="wm-focus-event-legend-dot"
+              style={{ background: seriesColorMap.get(key) || '#7cb6ff' }}
+              aria-hidden="true"
+            />
+            <span className="wm-focus-event-legend-label">{outcome.label || 'Outcome'}</span>
+            <strong>{formatPercent(outcome.yesPrice)}</strong>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderDetailChart(chart: ChartPayload | null) {
   const points = chart?.points || [];
   if (!points.length) return emptyState('No market history loaded yet.');
@@ -449,6 +485,12 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
               ))}
               <i>UTC</i>
             </div>
+            {detail ? eventChartLegend(detail, eventChart, ctx.selectedMarketGroupOutcomeKey, (outcome) => {
+              ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
+              if (outcome.marketId != null) {
+                ctx.setSelectedMarketId(Number(outcome.marketId));
+              }
+            }) : null}
             <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
               <div className="wm-focus-chart-wrap">
                 {detail ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey) : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
