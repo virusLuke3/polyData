@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { MarketListItem } from '@/types';
 import type { PanelRenderMap } from './types';
@@ -8,6 +8,7 @@ import { globalMarkets } from './shared/selectors';
 
 type ImpactLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
 type ScoredMarket = MarketListItem & { impactScore: number; impactLevel: ImpactLevel };
+const MARKET_SORT_STORAGE_KEY = 'wm:marketSort:v2';
 
 function numericValue(value: string | number | null | undefined) {
   const numeric = Number(value);
@@ -36,6 +37,26 @@ function impactLevel(score: number): ImpactLevel {
   return 'info';
 }
 
+function parseTimestamp(value: string | null | undefined) {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function marketTradeabilityScore(latestPrice: string | number | null | undefined) {
+  const probability = numericValue(latestPrice);
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return 0;
+  const distanceFromMid = Math.abs(probability - 0.5);
+  if (distanceFromMid <= 0.2) return 15;
+  if (distanceFromMid <= 0.32) return 10;
+  if (distanceFromMid <= 0.4) return 5;
+  return 0;
+}
+
+function marketActivityTimestamp(market: MarketListItem) {
+  return Math.max(parseTimestamp(market.lastTradeAt), parseTimestamp(market.createdAt));
+}
+
 function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
   if (!markets.length) return [];
   const now = Date.now();
@@ -61,10 +82,11 @@ function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
         0,
         Math.min(
           100,
-          volumeRanks[index]! * 45 +
-          changeRanks[index]! * 30 +
+          volumeRanks[index]! * 35 +
+          changeRanks[index]! * 25 +
           tradesRanks[index]! * 15 +
-          recencyScore,
+          recencyScore +
+          marketTradeabilityScore(market.latestPrice),
         ),
       ),
     );
@@ -83,9 +105,9 @@ function marketTopic(market: MarketListItem) {
 }
 
 function marketTiming(market: MarketListItem) {
-  if (market.endDate) return formatRelative(market.endDate);
+  if (market.createdAt) return formatRelative(market.createdAt);
   if (market.lastTradeAt) return `${formatRelative(market.lastTradeAt)} trade`;
-  if (market.createdAt) return `${formatRelative(market.createdAt)} old`;
+  if (market.endDate) return `closes ${formatRelative(market.endDate)}`;
   return '--';
 }
 
@@ -158,6 +180,29 @@ function ActiveMarketsPanel({
   const [search, setSearch] = useState('');
   const [sortOrder, setSortOrder] = useState<ActiveMarketSort>('impact');
 
+  useEffect(() => {
+    try {
+      const legacy = localStorage.getItem('pw:marketSort');
+      const current = localStorage.getItem(MARKET_SORT_STORAGE_KEY);
+      if (!current && legacy && ['volume', 'impact', 'change', 'new'].includes(legacy)) {
+        localStorage.setItem(MARKET_SORT_STORAGE_KEY, legacy);
+      }
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(MARKET_SORT_STORAGE_KEY);
+      if (saved && ['volume', 'impact', 'change', 'new'].includes(saved)) {
+        setSortOrder(saved as ActiveMarketSort);
+      }
+    } catch {
+      return;
+    }
+  }, []);
+
   const visibleMarkets = useMemo(() => {
     const query = search.trim().toLowerCase();
     const filtered = query
@@ -182,7 +227,7 @@ function ActiveMarketsPanel({
         (a, b) =>
           Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
           Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
-          new Date(b.lastTradeAt || 0).getTime() - new Date(a.lastTradeAt || 0).getTime()
+          marketActivityTimestamp(b) - marketActivityTimestamp(a)
       );
     }
     if (sortOrder === 'change') {
@@ -200,8 +245,10 @@ function ActiveMarketsPanel({
     return scored.sort(
       (a, b) =>
         b.impactScore - a.impactScore ||
+        marketTradeabilityScore(b.latestPrice) - marketTradeabilityScore(a.latestPrice) ||
         Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
-        Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0))
+        Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0)) ||
+        marketActivityTimestamp(b) - marketActivityTimestamp(a)
     );
   }, [markets, search, sortOrder]);
 
