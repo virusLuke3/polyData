@@ -13,12 +13,12 @@ from urllib.parse import unquote
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v4"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
-    COALESCE(m.tags, '') NOT LIKE '%"hide-from-new"%'
-    AND COALESCE(m.tags, '') NOT LIKE '%"recurring"%'
-    AND COALESCE(m.tags, '') NOT LIKE '%"onchain-registry"%'
-    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-5m%'
-    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-15m%'
-    AND LOWER(COALESCE(m.title, '')) NOT LIKE '% up or down - %'
+    INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
+    AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
+    AND INSTR(LOWER(COALESCE(m.tags, '')), 'onchain-registry') = 0
+    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-5m') = 0
+    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-15m') = 0
+    AND INSTR(LOWER(COALESCE(m.title, '')), ' up or down - ') = 0
 """
 PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
 PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")

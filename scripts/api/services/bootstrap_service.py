@@ -11,12 +11,12 @@ from api.runtime_panels import get_default_panel_ids
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
 BOOTSTRAP_CACHE_KEY = "workspace-default-v5"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
-    COALESCE(m.tags, '') NOT LIKE '%"hide-from-new"%'
-    AND COALESCE(m.tags, '') NOT LIKE '%"recurring"%'
-    AND COALESCE(m.tags, '') NOT LIKE '%"onchain-registry"%'
-    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-5m%'
-    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-15m%'
-    AND LOWER(COALESCE(m.title, '')) NOT LIKE '% up or down - %'
+    INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
+    AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
+    AND INSTR(LOWER(COALESCE(m.tags, '')), 'onchain-registry') = 0
+    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-5m') = 0
+    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-15m') = 0
+    AND INSTR(LOWER(COALESCE(m.title, '')), ' up or down - ') = 0
 """
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
 _PREWARM_LAST_RUN_LOCK = threading.Lock()
