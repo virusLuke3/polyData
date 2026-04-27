@@ -105,6 +105,19 @@ def _filter_candidate_rows_to_gamma_active(ctx: dict, rows: List[Dict[str, Any]]
     return filtered
 
 
+def _prefer_gamma_active_candidate_rows(ctx: dict, rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    """Prefer Gamma-confirmed markets, then fill from DB-active rows like PolyWorld."""
+    gamma_rows = _filter_candidate_rows_to_gamma_active(ctx, rows)
+    if len(gamma_rows) >= target_count:
+        return gamma_rows
+    if not gamma_rows:
+        return rows
+
+    seen_ids = {int(row["id"]) for row in gamma_rows if row.get("id") is not None}
+    fallback_rows = [row for row in rows if row.get("id") is None or int(row["id"]) not in seen_ids]
+    return [*gamma_rows, *fallback_rows]
+
+
 def _decimal_from_any(value: Any) -> Optional[Decimal]:
     if value in (None, ""):
         return None
@@ -136,6 +149,19 @@ def _filter_tradeable_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, 
             continue
         filtered.append(row)
     return filtered
+
+
+def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    """Prefer liquid/recent markets, then fill from active rows instead of collapsing the panel."""
+    tradeable_rows = _filter_tradeable_market_rows(rows)
+    if len(tradeable_rows) >= target_count:
+        return tradeable_rows
+    if not tradeable_rows:
+        return rows
+
+    seen_ids = {int(row["id"]) for row in tradeable_rows if row.get("id") is not None}
+    fallback_rows = [row for row in rows if row.get("id") is None or int(row["id"]) not in seen_ids]
+    return [*tradeable_rows, *fallback_rows]
 
 
 def _parse_numeric_target(value: str, suffix: str | None = None) -> Optional[float]:
@@ -731,7 +757,7 @@ def get_markets_payload(
             [*params, raw_limit],
         )
         if status == "active":
-            candidate_rows = _filter_candidate_rows_to_gamma_active(ctx, candidate_rows)
+            candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, offset + page_size + 1)
         working_candidates = candidate_rows[offset: offset + max(page_size * 3, page_size + 1)]
         if not working_candidates and candidate_rows:
             working_candidates = candidate_rows[: max(page_size * 3, page_size + 1)]
@@ -765,7 +791,7 @@ def get_markets_payload(
             max_updates=max_runtime_updates,
         )
         if status == "active":
-            visible_rows = _filter_tradeable_market_rows(visible_rows)
+            visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
         has_more = len(visible_rows) > page_size
         visible_rows = visible_rows[:page_size]
         return {
@@ -815,7 +841,7 @@ def build_active_markets_payload(
         """,
         (now_iso, raw_limit),
     )
-    candidate_rows = _filter_candidate_rows_to_gamma_active(ctx, candidate_rows)
+    candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, page_size * 3)
     candidate_stats_map = {
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
@@ -855,7 +881,7 @@ def build_active_markets_payload(
         )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
-    rows = _filter_tradeable_market_rows(rows)
+    rows = _prefer_tradeable_market_rows(rows, page_size)
     rows = rows[:page_size]
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
@@ -871,7 +897,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 3,
+            "v": 4,
         },
         sort_keys=True,
         ensure_ascii=True,
