@@ -142,12 +142,15 @@ class MarketFastPathTestCase(unittest.TestCase):
         self.assertEqual(payload["items"][0]["id"], 11)
         self.assertEqual(payload["items"][0]["latestPrice"], "0.51")
         self.assertEqual(str(payload["items"][0]["change24h"]), "0.02")
-        self.assertEqual(len(sql_calls), 2)
+        self.assertEqual(len(sql_calls), 3)
         self.assertNotIn("m.title", sql_calls[0])
         self.assertIn("market_status_snapshot", sql_calls[0])
         self.assertIn("market_list_serving", sql_calls[0])
         self.assertNotIn("oracle_events", sql_calls[0])
-        self.assertIn("m.title", sql_calls[1])
+        self.assertNotIn("m.title", sql_calls[1])
+        self.assertIn("market_status_snapshot", sql_calls[1])
+        self.assertIn("market_list_serving", sql_calls[1])
+        self.assertIn("m.title", sql_calls[2])
 
     def test_build_active_markets_payload_fills_from_db_active_when_strict_filters_are_sparse(self):
         candidate_rows = [
@@ -227,6 +230,97 @@ class MarketFastPathTestCase(unittest.TestCase):
             "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
             "format_trade_decimal": lambda value: value,
             "get_gamma_active_market_filter": lambda: {"conditionIds": ["condition-11"], "slugs": []},
+        }
+
+        with patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=AssertionError("runtime enrichment should be skipped")), \
+             patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
+            payload = market_service.build_active_markets_payload(ctx, page_size=2, include_runtime_prices=False)
+
+        self.assertEqual([item["id"] for item in payload["items"]], [11, 12])
+
+    def test_build_active_markets_payload_blends_recent_candidates_into_snapshot_pool(self):
+        volume_rows = [
+            {
+                "id": 11,
+                "slug": "market-11",
+                "condition_id": "condition-11",
+                "end_date": "2026-12-31T00:00:00Z",
+                "created_at": "2026-04-20T00:00:00Z",
+                "has_settle": 0,
+                "has_propose": 0,
+                "trade_count_24h": 12,
+                "volume_24h": "4400",
+                "last_trade_at": "2026-04-21T00:00:00Z",
+                "latest_trade_at": "2026-04-21T00:00:00Z",
+                "price_24h_ago": "0.49",
+            },
+        ]
+        recent_rows = [
+            {
+                "id": 12,
+                "slug": "market-12",
+                "condition_id": "condition-12",
+                "end_date": "2026-12-31T00:00:00Z",
+                "created_at": "2026-04-21T23:00:00Z",
+                "has_settle": 0,
+                "has_propose": 0,
+                "trade_count_24h": 0,
+                "volume_24h": "0",
+                "last_trade_at": None,
+                "latest_trade_at": None,
+                "price_24h_ago": None,
+            },
+        ]
+        detail_map = {
+            11: {
+                "id": 11,
+                "slug": "market-11",
+                "title": "Volume market",
+                "condition_id": "condition-11",
+                "question_id": "question-11",
+                "yes_token_id": "yes-11",
+                "no_token_id": "no-11",
+                "category": "Politics",
+                "tags": json.dumps(["macro"]),
+                "clob_token_ids": None,
+                "end_date": "2026-12-31T00:00:00Z",
+                "created_at": "2026-04-20T00:00:00Z",
+                "latest_price": "0.51",
+                "latest_trade_at": "2026-04-21T00:00:00Z",
+            },
+            12: {
+                "id": 12,
+                "slug": "market-12",
+                "title": "Newest market",
+                "condition_id": "condition-12",
+                "question_id": "question-12",
+                "yes_token_id": "yes-12",
+                "no_token_id": "no-12",
+                "category": "Politics",
+                "tags": json.dumps(["macro"]),
+                "clob_token_ids": None,
+                "end_date": "2026-12-31T00:00:00Z",
+                "created_at": "2026-04-21T23:00:00Z",
+                "latest_price": "0.44",
+                "latest_trade_at": None,
+            },
+        }
+
+        def fake_query_all(sql, params=()):
+            normalized_sql = " ".join(sql.split())
+            if "ORDER BY m.created_at DESC" in normalized_sql:
+                return recent_rows
+            if "WHERE m.id IN" in normalized_sql:
+                return [detail_map[11], detail_map[12]]
+            return volume_rows
+
+        ctx = {
+            "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
+            "utc_date_days_ago": lambda days: "2026-04-20",
+            "query_all": fake_query_all,
+            "parse_json_list": lambda raw: json.loads(raw) if isinstance(raw, str) and raw else [],
+            "format_trade_decimal": lambda value: value,
+            "get_gamma_active_market_filter": lambda: {"conditionIds": [], "slugs": []},
         }
 
         with patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=AssertionError("runtime enrichment should be skipped")), \

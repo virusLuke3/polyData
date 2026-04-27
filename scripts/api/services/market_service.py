@@ -118,6 +118,37 @@ def _prefer_gamma_active_candidate_rows(ctx: dict, rows: List[Dict[str, Any]], t
     return [*gamma_rows, *fallback_rows]
 
 
+def _blend_recent_candidate_rows(volume_rows: List[Dict[str, Any]], recent_rows: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    if not recent_rows:
+        return volume_rows
+    target_count = max(1, int(target_count))
+    head_count = max(1, target_count // 3)
+    recent_count = max(1, target_count // 3)
+
+    blended: List[Dict[str, Any]] = []
+    seen_ids: set[int] = set()
+
+    def append_rows(rows: List[Dict[str, Any]], limit: Optional[int] = None) -> None:
+        added = 0
+        for row in rows:
+            market_id = row.get("id")
+            if market_id is not None:
+                numeric_id = int(market_id)
+                if numeric_id in seen_ids:
+                    continue
+                seen_ids.add(numeric_id)
+            blended.append(row)
+            added += 1
+            if limit is not None and added >= limit:
+                break
+
+    append_rows(volume_rows, head_count)
+    append_rows(recent_rows, recent_count)
+    append_rows(volume_rows)
+    append_rows(recent_rows)
+    return blended
+
+
 def _decimal_from_any(value: Any) -> Optional[Decimal]:
     if value in (None, ""):
         return None
@@ -660,6 +691,29 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _active_market_candidate_select_sql(stats_alias: str) -> str:
+    return f"""
+            SELECT
+                m.id,
+                m.slug,
+                m.condition_id,
+                m.end_date,
+                m.created_at,
+                COALESCE(mss.has_settle, 0) AS has_settle,
+                COALESCE(mss.has_propose, 0) AS has_propose,
+                {stats_alias}.trade_count_24h,
+                {stats_alias}.volume_24h,
+                {stats_alias}.last_trade_at,
+                {stats_alias}.latest_trade_at,
+                {stats_alias}.price_24h_ago
+            FROM markets m
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            LEFT JOIN market_list_serving {stats_alias} ON {stats_alias}.market_id = m.id
+            WHERE COALESCE(mss.has_settle, 0) = 0
+              AND (COALESCE(mss.has_propose, 0) = 1 OR m.end_date IS NULL OR m.end_date >= ?)
+        """
+
+
 def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int, Dict[str, Any]]:
     if not market_ids:
         return {}
@@ -817,30 +871,23 @@ def build_active_markets_payload(
 ) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
     raw_limit = max(page_size * 3, 180)
-    candidate_rows = ctx["query_all"](
-        """
-        SELECT
-            m.id,
-            m.slug,
-            m.condition_id,
-            m.end_date,
-            m.created_at,
-            COALESCE(mss.has_settle, 0) AS has_settle,
-            COALESCE(mss.has_propose, 0) AS has_propose,
-            stats_24h.trade_count_24h,
-            stats_24h.volume_24h,
-            stats_24h.last_trade_at,
-            stats_24h.latest_trade_at,
-            stats_24h.price_24h_ago
-        FROM markets m
-        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
-        LEFT JOIN market_list_serving stats_24h ON stats_24h.market_id = m.id
-        WHERE COALESCE(mss.has_settle, 0) = 0 AND (COALESCE(mss.has_propose, 0) = 1 OR m.end_date IS NULL OR m.end_date >= ?)
+    volume_candidate_rows = ctx["query_all"](
+        f"""
+        {_active_market_candidate_select_sql("stats_24h")}
         ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
         LIMIT ?
         """,
         (now_iso, raw_limit),
     )
+    recent_candidate_rows = ctx["query_all"](
+        f"""
+        {_active_market_candidate_select_sql("stats_24h")}
+        ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
+        LIMIT ?
+        """,
+        (now_iso, min(raw_limit, max(page_size * 2, 80))),
+    )
+    candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size * 3)
     candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, page_size * 3)
     candidate_stats_map = {
         int(row["id"]): {
@@ -897,7 +944,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 4,
+            "v": 5,
         },
         sort_keys=True,
         ensure_ascii=True,
