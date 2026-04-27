@@ -887,8 +887,7 @@ def build_active_markets_payload(
         """,
         (now_iso, min(raw_limit, max(page_size * 2, 80))),
     )
-    candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size * 3)
-    candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, page_size * 3)
+    candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
     candidate_stats_map = {
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
@@ -928,7 +927,6 @@ def build_active_markets_payload(
         )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
-    rows = _prefer_tradeable_market_rows(rows, page_size)
     rows = rows[:page_size]
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
@@ -944,7 +942,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 5,
+            "v": 6,
         },
         sort_keys=True,
         ensure_ascii=True,
