@@ -26,9 +26,9 @@ const RAW_BASE = import.meta.env.DEV
   : (import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api');
 const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
 
-async function apiGet<T>(path: string): Promise<T> {
+async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 12000);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { Accept: 'application/json' },
     signal: controller.signal,
@@ -37,6 +37,10 @@ async function apiGet<T>(path: string): Promise<T> {
     throw new Error(`API ${response.status} for ${path}`);
   }
   return response.json() as Promise<T>;
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  return apiGetWithTimeout<T>(path, 12000);
 }
 
 export function fetchBootstrap() {
@@ -150,22 +154,33 @@ export function fetchRuntimeSuspicious(limit = 12) {
 }
 
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
+  const marketPromise = apiGetWithTimeout<MarketSummary>(`/markets/${marketId}`, 3500);
+  const pricePromise = apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, 3500);
+  const chartPromise = apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, 3500);
+  const tradesPromise = apiGetWithTimeout<TradeRow[]>(`/markets/${marketId}/trades?limit=24`, 2200);
+  const oraclePromise = apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, 2200);
+  const contentPromise = apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=6`, 2200);
+  const lobPromise = apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, 2200);
+
   const [
     marketResult,
-    tradesResult,
-    oracleResult,
     priceResult,
     chartResult,
+  ] = await Promise.allSettled([
+    marketPromise,
+    pricePromise,
+    chartPromise,
+  ]);
+  const [
+    tradesResult,
+    oracleResult,
     contentResult,
     lobResult,
   ] = await Promise.allSettled([
-    apiGet<MarketSummary>(`/markets/${marketId}`),
-    apiGet<TradeRow[]>(`/markets/${marketId}/trades?limit=24`),
-    apiGet<OraclePayload>(`/markets/${marketId}/oracle`),
-    apiGet<PriceSummary>(`/markets/${marketId}/price`),
-    apiGet<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`),
-    apiGet<ContentPayload>(`/content/market/${marketId}?limit=6`),
-    apiGet<LobPayload>(`/runtime/lob/${marketId}`),
+    tradesPromise,
+    oraclePromise,
+    contentPromise,
+    lobPromise,
   ]);
 
   if (marketResult.status !== 'fulfilled') {

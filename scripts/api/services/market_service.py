@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v5"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v6"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
     AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
@@ -28,6 +28,14 @@ def _default_active_market_activity_sql(stats_alias: str) -> str:
         OR COALESCE({stats_alias}.volume_24h, 0) > 0
         OR {stats_alias}.last_trade_at IS NOT NULL
         OR {stats_alias}.latest_trade_at IS NOT NULL
+    )
+    """
+
+def _default_active_market_price_sql(stats_alias: str) -> str:
+    return f"""
+    (
+        {stats_alias}.latest_price IS NULL
+        OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= 0.10 AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= 0.90)
     )
     """
 
@@ -219,6 +227,104 @@ def _prefer_tradeable_market_rows(rows: List[Dict[str, Any]], target_count: int)
     seen_ids = {int(row["id"]) for row in tradeable_rows if row.get("id") is not None}
     fallback_rows = [row for row in rows if row.get("id") is None or int(row["id"]) not in seen_ids]
     return [*tradeable_rows, *fallback_rows]
+
+
+def _balanced_probability_score(value: Any) -> float:
+    price = _decimal_from_any(value)
+    if price is None:
+        return 0.0
+    distance = abs(float(price) - 0.5)
+    return max(0.0, 1.0 - distance / 0.5)
+
+
+def _market_family_key(row: Dict[str, Any]) -> str:
+    question_id = str(row.get("question_id") or "").strip().lower()
+    if question_id:
+        return f"question:{question_id}"
+    title = re.sub(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d+(?:\.\d+)?\b", " ", str(row.get("title") or "").lower())
+    words = re.findall(r"[a-z][a-z0-9]+", title)
+    prefix = " ".join(words[:5]) if words else str(row.get("slug") or row.get("condition_id") or row.get("id"))
+    category = str(row.get("category") or "").strip().lower()
+    return f"{category}:{prefix}"
+
+
+def _rank_default_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+
+    def parse_time(value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        text = str(value).replace(" ", "T")
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def score(row: Dict[str, Any]) -> float:
+        created = parse_time(row.get("created_at"))
+        last_trade = parse_time(row.get("last_trade_at") or row.get("latest_trade_at"))
+        age_hours = (now - created).total_seconds() / 3600 if created else 9999
+        trade_age_hours = (now - last_trade).total_seconds() / 3600 if last_trade else 9999
+        recency = max(0.0, 1.0 - min(age_hours, 24 * 14) / (24 * 14))
+        trade_recency = max(0.0, 1.0 - min(trade_age_hours, 24 * 3) / (24 * 3))
+        volume = min(1.0, float(_decimal_from_any(row.get("volume_24h")) or 0) / 50000.0)
+        trades = min(1.0, int(row.get("trade_count_24h") or 0) / 250.0)
+        balance = _balanced_probability_score(row.get("latest_price"))
+        return recency * 35 + trade_recency * 25 + balance * 25 + volume * 10 + trades * 5
+
+    return sorted(rows, key=score, reverse=True)
+
+
+def _diversify_market_rows(rows: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
+    ranked = _rank_default_market_rows(rows)
+    selected: List[Dict[str, Any]] = []
+    seen_families: set[str] = set()
+    for row in ranked:
+        family = _market_family_key(row)
+        if family in seen_families:
+            continue
+        selected.append(row)
+        seen_families.add(family)
+        if len(selected) >= page_size:
+            return selected
+    seen_ids = {int(row["id"]) for row in selected if row.get("id") is not None}
+    for row in ranked:
+        market_id = row.get("id")
+        if market_id is not None and int(market_id) in seen_ids:
+            continue
+        selected.append(row)
+        if len(selected) >= page_size:
+            break
+    return selected
+
+
+def _coalesce_native_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    passthrough: List[Dict[str, Any]] = []
+    for row in rows:
+        question_id = str(row.get("question_id") or "").strip().lower()
+        if not question_id:
+            passthrough.append(row)
+            continue
+        grouped.setdefault(question_id, []).append(row)
+
+    coalesced: List[Dict[str, Any]] = []
+    for group_rows in grouped.values():
+        if len(group_rows) == 1:
+            coalesced.append(group_rows[0])
+            continue
+        ranked = _rank_default_market_rows(group_rows)
+        representative = dict(ranked[0])
+        representative["native_outcome_count"] = len(group_rows)
+        representative["volume_24h"] = sum((_decimal_from_any(row.get("volume_24h")) or Decimal("0")) for row in group_rows)
+        representative["trade_count_24h"] = sum(int(row.get("trade_count_24h") or 0) for row in group_rows)
+        coalesced.append(representative)
+    return [*coalesced, *passthrough]
 
 
 def _parse_numeric_target(value: str, suffix: str | None = None) -> Optional[float]:
@@ -469,13 +575,13 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
         """,
         (market_id,),
     )
-    latest_price = summary_row.get("latest_price")
+    latest_price = summary_row.get("latest_yes_price") or summary_row.get("latest_price")
     latest_yes_price = summary_row.get("latest_yes_price")
     latest_no_price = summary_row.get("latest_no_price")
     updated_at = summary_row.get("latest_trade_at")
     clob_snapshot = ctx["get_market_clob_price_snapshot"](market)
     if clob_snapshot:
-        latest_price = clob_snapshot.get("latestPrice") or latest_price
+        latest_price = clob_snapshot.get("latestYesPrice") or clob_snapshot.get("latestPrice") or latest_price
         latest_yes_price = clob_snapshot.get("latestYesPrice") or latest_yes_price
         latest_no_price = clob_snapshot.get("latestNoPrice") or latest_no_price
         updated_at = clob_snapshot.get("updatedAt") or updated_at
@@ -532,7 +638,7 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
 
     return {
         "marketId": market_id,
-        "latestPrice": ctx["format_trade_decimal"](latest_price),
+        "latestPrice": ctx["format_trade_decimal"](latest_yes_price or latest_price),
         "latestYesPrice": ctx["format_trade_decimal"](latest_yes_price),
         "latestNoPrice": ctx["format_trade_decimal"](latest_no_price),
         "change1h": clob_snapshot.get("change1h") if clob_snapshot else _change(latest_price, recent_stats.get("price_1h_ago")),
@@ -568,6 +674,15 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
         if range_name == "7d":
             limit = 700
         points = ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
+    if not points:
+        price = get_market_price_summary(ctx, market_id)
+        latest = price.get("latestYesPrice") or price.get("latestPrice")
+        timestamp = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if latest not in (None, ""):
+            points = [
+                {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+                {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            ]
     return {"marketId": market_id, "range": range_name, "interval": interval, "kind": "probability", "points": points}
 
 
@@ -667,6 +782,9 @@ def enrich_market_rows_with_24h_change(ctx: dict, rows: List[Dict[str, Any]]) ->
 
 
 def _market_outcome_count(ctx: dict, row: Dict[str, Any]) -> int:
+    native_count = int(row.get("native_outcome_count") or 0)
+    if native_count > 1:
+        return native_count
     token_ids = ctx["parse_json_list"](row.get("clob_token_ids"))
     if token_ids:
         return len(token_ids)
@@ -729,6 +847,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
                 COALESCE(mss.has_propose, 0) AS has_propose,
                 {stats_alias}.trade_count_24h,
                 {stats_alias}.volume_24h,
+                {stats_alias}.latest_price,
                 {stats_alias}.last_trade_at,
                 {stats_alias}.latest_trade_at,
                 {stats_alias}.price_24h_ago
@@ -740,6 +859,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
               AND (m.end_date IS NULL OR m.end_date >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
               AND {_default_active_market_activity_sql(stats_alias)}
+              AND {_default_active_market_price_sql(stats_alias)}
         """
 
 
@@ -802,6 +922,7 @@ def get_markets_payload(
         if not query:
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
             filters.append(_default_active_market_activity_sql("mls"))
+            filters.append(_default_active_market_price_sql("mls"))
     elif status == "closed":
         filters.append("(COALESCE(mss.has_settle, 0) = 1 OR (COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
         params.append(now_iso)
@@ -832,6 +953,7 @@ def get_markets_payload(
                 COALESCE(mss.has_propose, 0) AS has_propose,
                 mls.trade_count_24h,
                 mls.volume_24h,
+                mls.latest_price,
                 mls.last_trade_at,
                 mls.latest_trade_at,
                 mls.price_24h_ago
@@ -889,6 +1011,9 @@ def get_markets_payload(
         )
         if status == "active":
             visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
+            if not query:
+                visible_rows = _coalesce_native_market_rows(visible_rows)
+                visible_rows = _diversify_market_rows(visible_rows, page_size + 1)
         has_more = len(visible_rows) > page_size
         visible_rows = visible_rows[:page_size]
         return {
@@ -970,6 +1095,8 @@ def build_active_markets_payload(
         )
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
+    rows = _coalesce_native_market_rows(rows)
+    rows = _diversify_market_rows(rows, page_size)
     rows = rows[:page_size]
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
@@ -985,7 +1112,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 9,
+            "v": 10,
         },
         sort_keys=True,
         ensure_ascii=True,

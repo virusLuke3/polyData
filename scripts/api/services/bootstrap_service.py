@@ -9,7 +9,7 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v6"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v7"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
     AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
@@ -24,6 +24,12 @@ DEFAULT_ACTIVE_MARKET_ACTIVITY_SQL = """
         OR COALESCE(stats_24h.volume_24h, 0) > 0
         OR stats_24h.last_trade_at IS NOT NULL
         OR mlp.latest_trade_at IS NOT NULL
+    )
+"""
+DEFAULT_ACTIVE_MARKET_PRICE_SQL = """
+    (
+        mlp.latest_yes_price IS NULL
+        OR (CAST(mlp.latest_yes_price AS DECIMAL(18, 10)) >= 0.10 AND CAST(mlp.latest_yes_price AS DECIMAL(18, 10)) <= 0.90)
     )
 """
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
@@ -284,6 +290,7 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         WHERE (m.end_date IS NULL OR m.end_date >= ?)
           AND """ + DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL + """
           AND """ + DEFAULT_ACTIVE_MARKET_ACTIVITY_SQL + """
+          AND """ + DEFAULT_ACTIVE_MARKET_PRICE_SQL + """
         ORDER BY
             CASE
                 WHEN m.created_at >= ? THEN 0
@@ -540,7 +547,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v6",
+        "active-markets-preview-v7",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )
@@ -673,7 +680,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v6",
+            "active-markets-preview-v7",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),

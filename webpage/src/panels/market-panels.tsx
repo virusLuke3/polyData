@@ -104,7 +104,9 @@ function isDefaultSuppressedMarket(market: MarketListItem) {
   const slug = String(market.slug || '').toLowerCase();
   const title = String(market.title || '').toLowerCase();
   const endAt = parseTimestamp(market.endDate);
+  const price = numericValue(market.latestPrice);
   if (endAt && endAt < Date.now()) return true;
+  if (price > 0 && (price < 0.1 || price > 0.9)) return true;
   if (tags.some((tag) => tag === 'hide-from-new' || tag === 'recurring' || tag === 'onchain-registry')) return true;
   if (slug.includes('updown-5m') || slug.includes('updown-15m')) return true;
   return title.includes(' up or down - ');

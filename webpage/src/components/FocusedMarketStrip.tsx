@@ -304,6 +304,7 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
   const spreadValue = activeBook?.spread;
   const outcomes = outcomeCards(price);
   const shouldShowOutcomeRail = Number(marketStats?.outcomeCount || 2) > 2;
+  const displayedYesPrice = price?.latestYesPrice ?? price?.latestPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
 
   return (
     <section className="wm-focus-strip">
@@ -322,7 +323,7 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
               </div>
             </div>
             <div className="wm-focus-price-hero">
-              <strong>{formatPercent(price?.latestPrice || focusedMarket?.latestPrice)}</strong>
+              <strong>{formatPercent(displayedYesPrice)}</strong>
               <span className={signedClass(price?.change24h)}>{formatSignedPercent(price?.change24h)}</span>
             </div>
           </div>

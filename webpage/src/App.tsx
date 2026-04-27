@@ -163,6 +163,56 @@ function scheduleIdleTask(task: () => void) {
   return () => window.clearTimeout(handle);
 }
 
+function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
+  const latest = market.latestPrice ?? null;
+  const numericLatest = Number(latest);
+  const latestNo = Number.isFinite(numericLatest) ? String(1 - numericLatest) : null;
+  const timestamp = market.lastTradeAt || market.createdAt || new Date().toISOString();
+  return {
+    market: {
+      id: market.id,
+      slug: market.slug,
+      title: market.title,
+      conditionId: market.conditionId,
+      questionId: market.questionId,
+      status: market.status,
+      latestPrice: latest,
+      latestYesPrice: latest,
+      latestNoPrice: latestNo,
+      endDate: market.endDate,
+      createdAt: market.createdAt,
+      category: market.category,
+      tags: market.tags,
+    },
+    trades: [],
+    oracle: null,
+    price: {
+      marketId: market.id,
+      latestPrice: latest == null ? null : String(latest),
+      latestYesPrice: latest == null ? null : String(latest),
+      latestNoPrice: latestNo,
+      change24h: market.change24h == null ? null : String(market.change24h),
+      volume24h: market.volume24h == null ? null : String(market.volume24h),
+      tradeCount24h: Number(market.tradeCount24h || 0),
+      updatedAt: timestamp,
+    },
+    chart: latest == null
+      ? null
+      : {
+          marketId: market.id,
+          range: 'snapshot',
+          interval: 'snapshot',
+          kind: 'probability',
+          points: [
+            { timestamp, yesPrice: latest, noPrice: latestNo },
+            { timestamp: new Date().toISOString(), yesPrice: latest, noPrice: latestNo },
+          ],
+        },
+    content: null,
+    lob: null,
+  };
+}
+
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
@@ -199,6 +249,7 @@ export function App() {
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
   const slowRefreshInFlightRef = useRef(false);
   const bundleRequestSeqRef = useRef(0);
+  const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
 
   async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
@@ -444,12 +495,21 @@ export function App() {
     const currentMarketId = selectedMarketId;
     const requestSeq = ++bundleRequestSeqRef.current;
     let cancelled = false;
-    setBundle(null);
+    const cachedBundle = bundleCacheRef.current.get(currentMarketId);
+    const listMarket = markets.find((market) => market.id === currentMarketId)
+      || bootstrapRef.current?.activeMarketsPreview?.find((market) => market.id === currentMarketId)
+      || null;
+    if (cachedBundle) {
+      setBundle(cachedBundle);
+    } else if (listMarket) {
+      setBundle(optimisticBundleFromMarket(listMarket));
+    }
 
     async function loadBundle() {
       setBundleLoading(true);
       try {
         const payload = await fetchWorkspaceBundle(currentMarketId);
+        bundleCacheRef.current.set(currentMarketId, payload);
         if (!cancelled && bundleRequestSeqRef.current === requestSeq) setBundle(payload);
       } catch (loadError) {
         if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
