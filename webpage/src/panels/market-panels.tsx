@@ -138,6 +138,7 @@ function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
 function activeMarketGroupsList(
   groups: MarketGroupItem[],
   selectedMarketId: number | null,
+  selectedMarketGroupId: string | null,
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void,
 ) {
   if (!groups.length) return emptyState('No active market groups yet.');
@@ -145,7 +146,8 @@ function activeMarketGroupsList(
     <div className="wm-poly-market-list">
       {groups.map((group) => {
         const defaultMarketId = defaultGroupMarketId(group);
-        const selected = defaultMarketId != null && selectedMarketId === defaultMarketId;
+        const groupEventId = group.eventId != null ? String(group.eventId) : null;
+        const selected = (groupEventId != null && selectedMarketGroupId === groupEventId) || (defaultMarketId != null && selectedMarketId === defaultMarketId);
         return (
           <button
             key={group.groupId}
@@ -154,7 +156,6 @@ function activeMarketGroupsList(
             onClick={() => {
               focusMarketGroup(group, group.defaultOutcomeKey || null, defaultMarketId);
             }}
-            disabled={defaultMarketId == null}
             aria-pressed={selected}
             title={group.title}
             style={{ borderLeftColor: groupAccent(group) }}
@@ -182,7 +183,7 @@ function activeMarketGroupsList(
   );
 }
 
-function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
+function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number | null) => void) {
   if (!markets.length) return emptyState('No active markets yet.');
   return (
     <div className="wm-poly-market-list">
@@ -227,6 +228,7 @@ function ActiveMarketsPanel({
   marketGroupSort,
   setMarketGroupSort,
   selectedMarketId,
+  selectedMarketGroupId,
   setSelectedMarketId,
   focusMarketGroup,
 }: {
@@ -235,7 +237,8 @@ function ActiveMarketsPanel({
   marketGroupSort: MarketGroupSort;
   setMarketGroupSort: (sort: MarketGroupSort) => void;
   selectedMarketId: number | null;
-  setSelectedMarketId: (marketId: number) => void;
+  selectedMarketGroupId: string | null;
+  setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
 }) {
   const [search, setSearch] = useState('');
@@ -324,7 +327,7 @@ function ActiveMarketsPanel({
       }
     >
       {hasGroups
-        ? activeMarketGroupsList(visibleGroups, selectedMarketId, focusMarketGroup)
+        ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup)
         : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}
     </Panel>
   );
@@ -340,6 +343,7 @@ export const marketPanelRenderers: PanelRenderMap = {
         marketGroupSort={ctx.marketGroupSort}
         setMarketGroupSort={ctx.setMarketGroupSort}
         selectedMarketId={ctx.selectedMarketId}
+        selectedMarketGroupId={ctx.selectedMarketGroupId}
         setSelectedMarketId={ctx.setSelectedMarketId}
         focusMarketGroup={ctx.focusMarketGroup}
       />

@@ -533,21 +533,33 @@ def _group_last_activity_ts(group: Dict[str, Any]) -> float:
     return _parse_timestamp(group.get("lastActivityAt")) or _group_created_ts(group)
 
 
+def _group_has_ready_signal(group: Dict[str, Any]) -> bool:
+    if (_float_value(group.get("volume24h")) or 0.0) > 0:
+        return True
+    if _parse_timestamp(group.get("lastActivityAt")) > 0:
+        return True
+    return any((outcome or {}).get("marketId") is not None for outcome in (group.get("outcomes") or []))
+
+
 def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int, int, float, float, float]:
     created_ts = _group_created_ts(group)
     last_activity_ts = _group_last_activity_ts(group)
     volume = _float_value(group.get("volume24h")) or 0.0
+    ready_signal = _group_has_ready_signal(group)
     multi_penalty = 0 if int(group.get("outcomeCount") or 0) > 2 else 1
     recent_threshold = now_ts - (14 * 86400)
     active_threshold = now_ts - (3 * 86400)
-    if created_ts >= recent_threshold:
+    if created_ts >= recent_threshold and ready_signal:
         bucket = 0
         recency = created_ts
-    elif last_activity_ts >= active_threshold:
+    elif last_activity_ts >= active_threshold and ready_signal:
         bucket = 1
         recency = last_activity_ts
-    else:
+    elif created_ts >= recent_threshold:
         bucket = 2
+        recency = created_ts
+    else:
+        bucket = 3
         recency = max(created_ts, last_activity_ts)
     return (bucket, multi_penalty, -recency, -volume, -created_ts)
 
@@ -769,11 +781,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
                 if yes_price is None or not timestamp:
                     continue
                 normalized_points.append({"timestamp": timestamp, "price": yes_price})
-            if not normalized_points:
-                current_price = _float_value(outcome.get("yesPrice"))
-                if current_price is not None:
-                    normalized_points = [{"timestamp": ctx["utc_now_iso"](), "price": current_price}]
-            if not normalized_points:
+            if len(normalized_points) < 2:
                 continue
             series.append(
                 {
@@ -793,6 +801,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
             "range": normalized_range,
             "interval": interval,
             "series": series,
+            "historyStatus": "ok" if series else "pending",
             "generatedAt": ctx["utc_now_iso"](),
         }
 

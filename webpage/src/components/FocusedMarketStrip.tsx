@@ -155,6 +155,49 @@ function buildLinePath(
     .join(' ');
 }
 
+function buildTimedLinePath(
+  points: Array<{ timestamp: string; price: number }>,
+  {
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    min,
+    max,
+  }: {
+    width: number;
+    height: number;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+    min: number;
+    max: number;
+  },
+) {
+  if (points.length < 2) return '';
+  const stamped = points
+    .map((point) => ({ ...point, ts: new Date(point.timestamp).getTime() }))
+    .filter((point) => Number.isFinite(point.ts) && Number.isFinite(point.price))
+    .sort((leftPoint, rightPoint) => leftPoint.ts - rightPoint.ts);
+  if (stamped.length < 2) return '';
+  const minTs = stamped[0]?.ts ?? 0;
+  const maxTs = stamped[stamped.length - 1]?.ts ?? minTs;
+  const tsSpan = Math.max(maxTs - minTs, 1);
+  const valueSpan = max - min || 1;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  return stamped
+    .map((point, index) => {
+      const x = left + ((point.ts - minTs) / tsSpan) * plotWidth;
+      const y = top + (1 - (point.price - min) / valueSpan) * plotHeight;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
 function buildAreaPath(
   path: string,
   { width, height, left, right, bottom }: { width: number; height: number; left: number; right: number; bottom: number },
@@ -215,8 +258,8 @@ type EventOutcomeCard = MarketGroupOutcome & {
 };
 
 function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedOutcomeKey: string | null) {
-  const series = (chart?.series || []).filter((entry) => (entry.points || []).length > 0);
-  if (!series.length) return emptyState('No event probability history loaded yet.');
+  const series = (chart?.series || []).filter((entry) => (entry.points || []).length > 1);
+  if (!series.length) return emptyState('Fresh market: waiting for event price history to print.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
   const allValues = series.flatMap((entry) => (entry.points || []).map((point) => Number(point.price)).filter((value) => Number.isFinite(value)));
   if (!allValues.length) return emptyState('No event probability history loaded yet.');
@@ -257,9 +300,12 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           return <line key={index} x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />;
         })}
         {series.map((entry) => {
-          const clean = (entry.points || []).map((point) => Number(point.price)).filter((value) => Number.isFinite(value));
+          const clean = (entry.points || [])
+            .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
+            .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp));
           if (clean.length < 2) return null;
-          const path = buildLinePath(clean, { width, height, left, right, top, bottom, min, max });
+          const path = buildTimedLinePath(clean, { width, height, left, right, top, bottom, min, max });
+          if (!path) return null;
           const isSelected = entry.outcomeKey === selectedOutcomeKey;
           return (
             <path
@@ -489,6 +535,8 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
               ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
               if (outcome.marketId != null) {
                 ctx.setSelectedMarketId(Number(outcome.marketId));
+              } else {
+                ctx.setSelectedMarketId(null);
               }
             }) : null}
             <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
@@ -507,6 +555,8 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
                             ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
                             if (outcome.marketId != null) {
                               ctx.setSelectedMarketId(Number(outcome.marketId));
+                            } else {
+                              ctx.setSelectedMarketId(null);
                             }
                           }}
                         >

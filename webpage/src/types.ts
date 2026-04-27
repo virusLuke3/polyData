@@ -125,6 +125,7 @@ export type MarketGroupChartPayload = {
   defaultOutcomeKey?: string | null;
   range: string;
   interval?: string | null;
+  historyStatus?: string | null;
   generatedAt?: string;
   series: MarketGroupChartSeries[];
 };
@@ -564,7 +565,7 @@ export type PanelRenderContext = {
   marketGroupSort: MarketGroupSort;
   setMarketGroupSort: (sort: MarketGroupSort) => void;
   selectedMarketId: number | null;
-  setSelectedMarketId: (marketId: number) => void;
+  setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
   selectedMarketGroupId: string | null;
   selectedMarketGroupOutcomeKey: string | null;

@@ -284,6 +284,8 @@ export function App() {
     setSelectedMarketGroupOutcomeKey(outcomeKey || group.defaultOutcomeKey || null);
     if (marketId != null) {
       setSelectedMarketId(Number(marketId));
+    } else {
+      setSelectedMarketId(null);
     }
   };
 
@@ -406,14 +408,17 @@ export function App() {
   }, [marketGroupSort]);
 
   useEffect(() => {
-    const matchedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
-    if (!matchedGroup) {
-      if (selectedMarketId == null) {
+    if (selectedMarketId == null) {
+      if (!selectedMarketGroupId) {
         setSelectedMarketGroupId(null);
         setSelectedMarketGroupOutcomeKey(null);
         setSelectedMarketGroupDetail(null);
         setSelectedMarketGroupChart(null);
       }
+      return;
+    }
+    const matchedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
+    if (!matchedGroup) {
       return;
     }
     const nextEventId = matchedGroup.eventId != null ? String(matchedGroup.eventId) : null;
@@ -427,7 +432,7 @@ export function App() {
     if (nextOutcomeKey && nextOutcomeKey !== selectedMarketGroupOutcomeKey) {
       setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
     }
-  }, [marketGroups, selectedMarketId]);
+  }, [marketGroups, selectedMarketGroupId, selectedMarketGroupOutcomeKey, selectedMarketId]);
 
   useEffect(() => () => {
     slowRefreshCancelRef.current?.();
@@ -468,10 +473,14 @@ export function App() {
           .then(({ marketsPayload, marketGroupsPayload }) => {
             if (cancelled) return;
             if (!liveFeatured && !bootstrapPayload.featuredMarket?.id) {
-              const groupedMarketId = marketGroupsPayload?.items?.find((group) => group.defaultMarketId)?.defaultMarketId || null;
+              const firstGroup = marketGroupsPayload?.items?.[0] || null;
+              if (firstGroup) {
+                focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
+                return;
+              }
               const marketItems = marketsPayload?.items || bootstrapPayload.activeMarketsPreview || [];
               const firstLiveMarket = marketItems.find((market) => isLiveStatus(market.status));
-              setSelectedMarketId(groupedMarketId || firstLiveMarket?.id || marketItems?.[0]?.id || null);
+              setSelectedMarketId(firstLiveMarket?.id || marketItems?.[0]?.id || null);
             }
           })
           .catch((loadError) => {

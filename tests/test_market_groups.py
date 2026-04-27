@@ -222,6 +222,38 @@ class MarketGroupServiceTestCase(unittest.TestCase):
 
         self.assertEqual(["event:fresh-binary", "event:old-volume"], [item["groupId"] for item in payload["items"]])
 
+    def test_active_sort_demotes_fresh_groups_without_any_ready_signal(self):
+        ctx = self.make_ctx(
+            [
+                {
+                    "id": "fresh-empty",
+                    "title": "LoL: G2 Esports vs Natus Vincere (BO3) - LEC Regular Season",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2026-04-27T08:59:37Z",
+                    "markets": [
+                        {"id": "m-fresh-a", "groupItemTitle": "Match Winner", "clobTokenIds": ["fresh-a"], "outcomePrices": ["0.50", "0.50"]},
+                        {"id": "m-fresh-b", "groupItemTitle": "Map 1 Winner", "clobTokenIds": ["fresh-b"], "outcomePrices": ["0.50", "0.50"]},
+                    ],
+                },
+                {
+                    "id": "ready-soon",
+                    "title": "Spread: Pistons (-3.5)",
+                    "active": True,
+                    "closed": False,
+                    "createdAt": "2026-04-27T03:00:00Z",
+                    "markets": [
+                        {"id": "m-ready-1", "groupItemTitle": "YES", "conditionId": "cond-1", "clobTokenIds": ["yes-1"], "outcomePrices": ["0.48", "0.52"]},
+                        {"id": "m-ready-2", "groupItemTitle": "NO", "clobTokenIds": ["ready-2"], "outcomePrices": ["0.52", "0.48"]},
+                    ],
+                },
+            ]
+        )
+
+        payload = market_group_service.get_market_groups_payload(ctx, page_size=20, sort="active")
+
+        self.assertEqual(["event:ready-soon", "event:fresh-empty"], [item["groupId"] for item in payload["items"]])
+
     def test_detail_payload_returns_multi_outcome_group(self):
         ctx = self.make_ctx(
             [
@@ -339,6 +371,37 @@ class MarketGroupServiceTestCase(unittest.TestCase):
         self.assertEqual(2, len(payload["series"]))
         self.assertEqual("JD Vance", payload["series"][0]["label"])
         self.assertEqual(2, len(payload["series"][0]["points"]))
+
+    def test_chart_payload_skips_single_point_snapshot_series(self):
+        ctx = self.make_ctx(
+            [
+                {
+                    "id": "event-1",
+                    "title": "LoL: G2 Esports vs Natus Vincere (BO3) - LEC Regular Season",
+                    "slug": "lol-g2-vs-navi",
+                    "active": True,
+                    "closed": False,
+                    "markets": [
+                        {
+                            "id": "gamma-1",
+                            "groupItemTitle": "Match Winner",
+                            "conditionId": "cond-1",
+                            "clobTokenIds": ["yes-1", "no-1"],
+                            "outcomePrices": ["0.50", "0.50"],
+                        }
+                    ],
+                }
+            ]
+        )
+        ctx["get_market_clob_price_series"] = lambda market, range_name="1d", interval="15m": [
+            {"timestamp": "2026-04-27T00:00:00Z", "yesPrice": "0.50", "noPrice": "0.50"}
+        ]
+
+        payload = market_group_service.get_market_group_chart_payload(ctx, "event-1", range_name="1d")
+
+        self.assertIsNotNone(payload)
+        self.assertEqual([], payload["series"])
+        self.assertEqual("pending", payload["historyStatus"])
 
     def test_groups_payload_degrades_when_gamma_fetch_fails(self):
         ctx = self.make_ctx([])
