@@ -9,6 +9,17 @@ import { globalMarkets } from './shared/selectors';
 type ImpactLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
 type ScoredMarket = MarketListItem & { impactScore: number; impactLevel: ImpactLevel };
 const MARKET_SORT_STORAGE_KEY = 'wm:marketSort:v3';
+const GENERIC_MARKET_TAGS = new Set([
+  'all',
+  'featured',
+  'hide-from-new',
+  'recurring',
+  'onchain-registry',
+  'up-or-down',
+  'crypto-prices',
+  '5m',
+  '15m',
+]);
 
 function numericValue(value: string | number | null | undefined) {
   const numeric = Number(value);
@@ -88,6 +99,17 @@ function terminalMarketPenalty(market: MarketListItem, ageHours: number) {
   return 0;
 }
 
+function isDefaultSuppressedMarket(market: MarketListItem) {
+  const tags = (market.tags || []).map((item) => String(item || '').trim().toLowerCase());
+  const slug = String(market.slug || '').toLowerCase();
+  const title = String(market.title || '').toLowerCase();
+  const endAt = parseTimestamp(market.endDate);
+  if (endAt && endAt < Date.now()) return true;
+  if (tags.some((tag) => tag === 'hide-from-new' || tag === 'recurring' || tag === 'onchain-registry')) return true;
+  if (slug.includes('updown-5m') || slug.includes('updown-15m')) return true;
+  return title.includes(' up or down - ');
+}
+
 function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
   if (!markets.length) return [];
   const now = Date.now();
@@ -128,8 +150,18 @@ function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
 }
 
 function marketTopic(market: MarketListItem) {
-  const tag = market.tags?.find((item) => String(item || '').trim());
-  return String(tag || market.category || market.status || 'market').toLowerCase();
+  const tags = (market.tags || []).map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+  const category = String(market.category || '').trim().toLowerCase();
+  const title = `${market.title || ''} ${market.slug || ''}`.toLowerCase();
+  if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
+  if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
+  if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
+  if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
+  if (category.includes('tech') || tags.some((tag) => ['ai', 'tech'].includes(tag))) return 'tech';
+  const semanticTag = tags.find((tag) => !GENERIC_MARKET_TAGS.has(tag));
+  if (semanticTag) return semanticTag;
+  if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('xrp') || title.includes('dogecoin')) return 'crypto';
+  return category || String(market.status || 'market').toLowerCase();
 }
 
 function marketTiming(market: MarketListItem) {
@@ -244,7 +276,8 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : [...markets];
-    const scored = scoreMarkets(filtered);
+    const defaultFiltered = query ? filtered : filtered.filter((market) => !isDefaultSuppressedMarket(market));
+    const scored = scoreMarkets(defaultFiltered);
 
     if (sortOrder === 'volume') {
       return scored.sort(

@@ -9,7 +9,15 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v4"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v5"
+DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
+    COALESCE(m.tags, '') NOT LIKE '%"hide-from-new"%'
+    AND COALESCE(m.tags, '') NOT LIKE '%"recurring"%'
+    AND COALESCE(m.tags, '') NOT LIKE '%"onchain-registry"%'
+    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-5m%'
+    AND LOWER(COALESCE(m.slug, '')) NOT LIKE '%updown-15m%'
+    AND LOWER(COALESCE(m.title, '')) NOT LIKE '% up or down - %'
+"""
 SNAPSHOT_PREWARM_INTERVAL_SECONDS = 15
 _PREWARM_LAST_RUN_LOCK = threading.Lock()
 _PREWARM_LAST_RUN: Dict[str, float] = {}
@@ -265,7 +273,8 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
             WHERE trade_date >= ?
             GROUP BY market_id
         ) stats_24h ON stats_24h.market_id = m.id
-        WHERE m.end_date IS NULL OR m.end_date >= ?
+        WHERE (m.end_date IS NULL OR m.end_date >= ?)
+          AND """ + DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL + """
         ORDER BY
             CASE
                 WHEN m.created_at >= ? THEN 0
@@ -330,10 +339,10 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         if market_id is None:
             continue
         flags = status_map.get(int(market_id), {})
-        if flags.get("has_settle"):
+        if flags.get("has_settle") or flags.get("has_propose"):
             continue
         normalized = dict(row)
-        normalized["status"] = "Proposed" if flags.get("has_propose") else "Active"
+        normalized["status"] = "Active"
         rows.append(normalized)
         if len(rows) >= max(page_size * 3, page_size):
             break
@@ -522,7 +531,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v4",
+        "active-markets-preview-v5",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )
@@ -655,7 +664,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v4",
+            "active-markets-preview-v5",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),
