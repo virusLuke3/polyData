@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { MarketListItem } from '@/types';
+import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem } from '@/types';
 import type { PanelRenderMap } from './types';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, formatSignedPercent, shortHash, signedClass } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
 import { globalMarkets } from './shared/selectors';
 
-type ImpactLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
-type ScoredMarket = MarketListItem & { impactScore: number; impactLevel: ImpactLevel };
-const MARKET_SORT_STORAGE_KEY = 'wm:marketSort:v3';
 const GENERIC_MARKET_TAGS = new Set([
   'all',
   'featured',
@@ -26,77 +23,10 @@ function numericValue(value: string | number | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function percentileRanks(values: number[]) {
-  const sorted = [...values].sort((left, right) => left - right);
-  return values.map((value) => {
-    let low = 0;
-    let high = sorted.length;
-    while (low < high) {
-      const mid = (low + high) >>> 1;
-      if ((sorted[mid] ?? 0) < value) low = mid + 1;
-      else high = mid;
-    }
-    return sorted.length > 1 ? low / (sorted.length - 1) : 0.5;
-  });
-}
-
-function impactLevel(score: number): ImpactLevel {
-  if (score >= 80) return 'critical';
-  if (score >= 60) return 'high';
-  if (score >= 35) return 'medium';
-  if (score >= 15) return 'low';
-  return 'info';
-}
-
 function parseTimestamp(value: string | null | undefined) {
   if (!value) return 0;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function marketTradeabilityScore(latestPrice: string | number | null | undefined) {
-  const probability = numericValue(latestPrice);
-  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return 0;
-  const distanceFromMid = Math.abs(probability - 0.5);
-  if (distanceFromMid <= 0.2) return 10;
-  if (distanceFromMid <= 0.32) return 7;
-  if (distanceFromMid <= 0.4) return 4;
-  return 0;
-}
-
-function marketActivityTimestamp(market: MarketListItem) {
-  return Math.max(parseTimestamp(market.lastTradeAt), parseTimestamp(market.createdAt));
-}
-
-function marketAgeHours(market: MarketListItem, now: number) {
-  const createdAt = parseTimestamp(market.createdAt);
-  if (!createdAt) return Number.POSITIVE_INFINITY;
-  return Math.max(0, (now - createdAt) / (1000 * 60 * 60));
-}
-
-function marketRecencyScore(ageHours: number) {
-  if (ageHours < 6) return 45;
-  if (ageHours < 24) return 42;
-  if (ageHours < 72) return 35;
-  if (ageHours < 24 * 7) return 28;
-  if (ageHours < 24 * 14) return 20;
-  if (ageHours < 24 * 30) return 10;
-  return 0;
-}
-
-function oldMarketPenalty(ageHours: number) {
-  if (ageHours > 24 * 180) return 45;
-  if (ageHours > 24 * 90) return 30;
-  if (ageHours > 24 * 30) return 15;
-  return 0;
-}
-
-function terminalMarketPenalty(market: MarketListItem, ageHours: number) {
-  const probability = numericValue(market.latestPrice);
-  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return ageHours > 24 * 7 ? 12 : 4;
-  if (probability <= 0.02 || probability >= 0.98) return ageHours > 24 * 7 ? 18 : 6;
-  if (probability <= 0.05 || probability >= 0.95) return ageHours > 24 * 30 ? 10 : 3;
-  return 0;
 }
 
 function isDefaultSuppressedMarket(market: MarketListItem) {
@@ -110,45 +40,6 @@ function isDefaultSuppressedMarket(market: MarketListItem) {
   if (tags.some((tag) => tag === 'hide-from-new' || tag === 'recurring' || tag === 'onchain-registry')) return true;
   if (slug.includes('updown-5m') || slug.includes('updown-15m')) return true;
   return title.includes(' up or down - ');
-}
-
-function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
-  if (!markets.length) return [];
-  const now = Date.now();
-  const volumeValues = markets.map((market) => Math.log1p(Math.max(0, numericValue(market.volume24h))));
-  const changeValues = markets.map((market) => Math.abs(numericValue(market.change24h)));
-  const tradesValues = markets.map((market) => Math.log1p(Math.max(0, numericValue(market.tradeCount24h))));
-
-  const volumeRanks = percentileRanks(volumeValues);
-  const changeRanks = percentileRanks(changeValues);
-  const tradesRanks = percentileRanks(tradesValues);
-
-  return markets.map((market, index) => {
-    const ageHours = marketAgeHours(market, now);
-    const recencyScore = marketRecencyScore(ageHours);
-
-    const score = Math.round(
-      Math.max(
-        0,
-        Math.min(
-          100,
-          recencyScore +
-          tradesRanks[index]! * 20 +
-          volumeRanks[index]! * 15 +
-          changeRanks[index]! * 10 +
-          marketTradeabilityScore(market.latestPrice) -
-          oldMarketPenalty(ageHours) -
-          terminalMarketPenalty(market, ageHours),
-        ),
-      ),
-    );
-
-    return {
-      ...market,
-      impactScore: score,
-      impactLevel: impactLevel(score),
-    };
-  });
 }
 
 function marketTopic(market: MarketListItem) {
@@ -166,6 +57,21 @@ function marketTopic(market: MarketListItem) {
   return category || String(market.status || 'market').toLowerCase();
 }
 
+function groupTopic(group: MarketGroupItem) {
+  const tags = (group.tags || []).map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+  const category = String(group.category || '').trim().toLowerCase();
+  const title = `${group.title || ''} ${group.slug || ''}`.toLowerCase();
+  if (category === 'crypto' || tags.includes('crypto') || tags.includes('crypto-prices')) return 'crypto';
+  if (category === 'sports' || tags.includes('sports') || tags.includes('soccer') || tags.includes('games')) return 'sports';
+  if (category.includes('politic') || tags.some((tag) => tag.includes('election') || tag.includes('politic'))) return 'politics';
+  if (category.includes('economic') || category.includes('finance') || tags.some((tag) => ['fed', 'macro', 'economy', 'finance'].includes(tag))) return 'macro';
+  if (category.includes('tech') || tags.some((tag) => ['ai', 'tech'].includes(tag))) return 'tech';
+  const semanticTag = tags.find((tag) => !GENERIC_MARKET_TAGS.has(tag));
+  if (semanticTag) return semanticTag;
+  if (title.includes('bitcoin') || title.includes('ethereum') || title.includes('solana') || title.includes('xrp') || title.includes('dogecoin')) return 'crypto';
+  return category || 'market';
+}
+
 function marketTiming(market: MarketListItem) {
   if (market.createdAt) return formatRelative(market.createdAt);
   if (market.lastTradeAt) return `${formatRelative(market.lastTradeAt)} trade`;
@@ -173,10 +79,22 @@ function marketTiming(market: MarketListItem) {
   return '--';
 }
 
+function groupTiming(group: MarketGroupItem) {
+  if (group.createdAt) return formatRelative(group.createdAt);
+  if (group.endDate) return `closes ${formatRelative(group.endDate)}`;
+  return '--';
+}
+
 function marketOutcomeLabel(market: MarketListItem) {
   const count = Number(market.outcomeCount || 0);
   if (count > 0) return `${count} outcomes`;
   return 'binary';
+}
+
+function groupOutcomeLabel(group: MarketGroupItem) {
+  const count = Number(group.outcomeCount || group.outcomes?.length || 0);
+  if (count > 0) return `${count} outcomes`;
+  return 'event';
 }
 
 function marketAccent(market: MarketListItem) {
@@ -189,7 +107,82 @@ function marketAccent(market: MarketListItem) {
   return '#22c55e';
 }
 
-function activeMarketsList(markets: ScoredMarket[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
+function groupAccent(group: MarketGroupItem) {
+  const topic = groupTopic(group);
+  if (topic.includes('crypto')) return '#f59e0b';
+  if (topic.includes('sport')) return '#22c55e';
+  if (topic.includes('politic') || topic.includes('election')) return '#60a5fa';
+  if (topic.includes('finance') || topic.includes('fed') || topic.includes('macro')) return '#eab308';
+  if (topic.includes('tech') || topic.includes('ai')) return '#a78bfa';
+  return '#22c55e';
+}
+
+function defaultGroupMarketId(group: MarketGroupItem) {
+  if (group.defaultMarketId) return group.defaultMarketId;
+  const topWithMarket = (group.topOutcomes || []).find((outcome) => outcome.marketId);
+  if (topWithMarket?.marketId) return Number(topWithMarket.marketId);
+  const firstWithMarket = (group.outcomes || []).find((outcome) => outcome.marketId);
+  return firstWithMarket?.marketId ? Number(firstWithMarket.marketId) : null;
+}
+
+function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
+  const visible = outcomes.slice(0, 3);
+  if (!visible.length) return <span className="wm-poly-market-outcome">Pending outcomes</span>;
+  return visible.map((outcome) => (
+    <span className="wm-poly-market-outcome" key={`${outcome.marketId || outcome.gammaMarketId || outcome.label}`}>
+      {outcome.label || 'Outcome'} <b>{formatPercent(outcome.yesPrice)}</b>
+    </span>
+  ));
+}
+
+function activeMarketGroupsList(
+  groups: MarketGroupItem[],
+  selectedMarketId: number | null,
+  focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void,
+) {
+  if (!groups.length) return emptyState('No active market groups yet.');
+  return (
+    <div className="wm-poly-market-list">
+      {groups.map((group) => {
+        const defaultMarketId = defaultGroupMarketId(group);
+        const selected = defaultMarketId != null && selectedMarketId === defaultMarketId;
+        return (
+          <button
+            key={group.groupId}
+            type="button"
+            className={`wm-poly-market-card ${selected ? 'active' : ''}`}
+            onClick={() => {
+              focusMarketGroup(group, group.defaultOutcomeKey || null, defaultMarketId);
+            }}
+            disabled={defaultMarketId == null}
+            aria-pressed={selected}
+            title={group.title}
+            style={{ borderLeftColor: groupAccent(group) }}
+          >
+            <div className="wm-poly-market-card-main">
+              <div className="wm-poly-market-meta">
+                <span className="wm-poly-market-dot" />
+                <span>{groupTopic(group)}</span>
+                <span>·</span>
+                <span>{groupTiming(group)}</span>
+                <span>·</span>
+                <span>{groupOutcomeLabel(group)}</span>
+              </div>
+              <strong className="wm-poly-market-title">{group.title}</strong>
+              <div className="wm-poly-market-bottom">
+                {groupOutcomePills(group.topOutcomes || group.outcomes || [])}
+                <span className="wm-poly-market-volume">vol {formatCurrencyCompact(group.volume24h)} 24h</span>
+              </div>
+            </div>
+            <span className="wm-poly-market-star" aria-hidden="true">☆</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function activeMarketsList(markets: MarketListItem[], selectedMarketId: number | null, setSelectedMarketId: (marketId: number) => void) {
   if (!markets.length) return emptyState('No active markets yet.');
   return (
     <div className="wm-poly-market-list">
@@ -228,38 +221,50 @@ function activeMarketsList(markets: ScoredMarket[], selectedMarketId: number | n
   );
 }
 
-type ActiveMarketSort = 'impact' | 'volume' | 'change' | 'new';
-
 function ActiveMarketsPanel({
   markets,
+  marketGroups,
+  marketGroupSort,
+  setMarketGroupSort,
   selectedMarketId,
   setSelectedMarketId,
+  focusMarketGroup,
 }: {
   markets: MarketListItem[];
+  marketGroups: MarketGroupItem[];
+  marketGroupSort: MarketGroupSort;
+  setMarketGroupSort: (sort: MarketGroupSort) => void;
   selectedMarketId: number | null;
   setSelectedMarketId: (marketId: number) => void;
+  focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
 }) {
   const [search, setSearch] = useState('');
-  const [sortOrder, setSortOrder] = useState<ActiveMarketSort>('impact');
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(MARKET_SORT_STORAGE_KEY);
-      if (saved && ['volume', 'impact', 'change', 'new'].includes(saved)) {
-        setSortOrder(saved as ActiveMarketSort);
-      }
-    } catch {
-      return;
+  const visibleGroups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const filtered = query
+      ? marketGroups.filter((group) => {
+          const haystack = [
+            group.title,
+            group.slug,
+            group.category,
+            ...(group.tags || []),
+            ...(group.outcomes || []).map((outcome) => outcome.label || outcome.title || ''),
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(query);
+        })
+      : [...marketGroups];
+    if (marketGroupSort === 'new') {
+      return filtered.sort((a, b) => parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt));
     }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(MARKET_SORT_STORAGE_KEY, sortOrder);
-    } catch {
-      return;
+    if (marketGroupSort === 'volume') {
+      return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
     }
-  }, [sortOrder]);
+    return filtered;
+  }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -277,47 +282,19 @@ function ActiveMarketsPanel({
             .toLowerCase();
           return haystack.includes(query);
         })
-      : [...markets];
-    const defaultFiltered = query ? filtered : filtered.filter((market) => !isDefaultSuppressedMarket(market));
-    const scored = scoreMarkets(defaultFiltered);
+      : markets.filter((market) => !isDefaultSuppressedMarket(market));
+    return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
+  }, [markets, search]);
 
-    if (sortOrder === 'volume') {
-      return scored.sort(
-        (a, b) =>
-          Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
-          Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
-          marketActivityTimestamp(b) - marketActivityTimestamp(a)
-      );
-    }
-    if (sortOrder === 'change') {
-      return scored
-        .filter((market) => Number.isFinite(Number(market.change24h)))
-        .sort(
-          (a, b) =>
-            Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0)) ||
-            Number(b.volume24h || 0) - Number(a.volume24h || 0)
-        );
-    }
-    if (sortOrder === 'new') {
-      return scored.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    }
-    return scored.sort(
-      (a, b) =>
-        b.impactScore - a.impactScore ||
-        marketActivityTimestamp(b) - marketActivityTimestamp(a) ||
-        Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
-        Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0)) ||
-        marketTradeabilityScore(b.latestPrice) - marketTradeabilityScore(a.latestPrice) ||
-        Number(b.volume24h || 0) - Number(a.volume24h || 0)
-    );
-  }, [markets, search, sortOrder]);
+  const hasGroups = marketGroups.length > 0;
+  const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
 
   return (
     <Panel
       title="MARKETS"
       badge="LIVE"
       status="live"
-      count={visibleMarkets.length}
+      count={panelCount}
       className="wm-market-panel"
       controls={
         <div className="wm-market-panel-controls">
@@ -335,19 +312,20 @@ function ActiveMarketsPanel({
           </label>
           <select
             className="wm-market-sort"
-            value={sortOrder}
-            onInput={(event) => setSortOrder(event.currentTarget.value as ActiveMarketSort)}
+            value={marketGroupSort}
+            onInput={(event) => setMarketGroupSort(event.currentTarget.value as MarketGroupSort)}
             aria-label="Sort markets"
           >
-            <option value="impact">Impact</option>
-            <option value="volume">Volume</option>
-            <option value="change">Change</option>
+            <option value="active">Active</option>
             <option value="new">Newest</option>
+            <option value="volume">Volume</option>
           </select>
         </div>
       }
     >
-      {activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}
+      {hasGroups
+        ? activeMarketGroupsList(visibleGroups, selectedMarketId, focusMarketGroup)
+        : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId)}
     </Panel>
   );
 }
@@ -358,8 +336,12 @@ export const marketPanelRenderers: PanelRenderMap = {
     render: (ctx) => (
       <ActiveMarketsPanel
         markets={globalMarkets(ctx)}
+        marketGroups={ctx.marketGroups}
+        marketGroupSort={ctx.marketGroupSort}
+        setMarketGroupSort={ctx.setMarketGroupSort}
         selectedMarketId={ctx.selectedMarketId}
         setSelectedMarketId={ctx.setSelectedMarketId}
+        focusMarketGroup={ctx.focusMarketGroup}
       />
     ),
   },

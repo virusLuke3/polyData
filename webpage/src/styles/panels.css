@@ -560,6 +560,16 @@
   background: #181c19;
 }
 
+.wm-poly-market-card:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.wm-poly-market-card:disabled:hover {
+  border-color: #242424;
+  background: #141414;
+}
+
 .wm-poly-market-card-main {
   display: flex;
   flex-direction: column;
@@ -636,16 +646,23 @@
 }
 
 .wm-poly-market-outcome {
-  flex: 1 1 58px;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 34%;
   overflow: hidden;
   color: #8d918e;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.wm-poly-market-outcome b {
+  color: var(--wm-text);
+  font-weight: 800;
+}
+
 .wm-poly-market-volume {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--wm-green);
   font-weight: 700;
 }

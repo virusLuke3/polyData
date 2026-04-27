@@ -4,6 +4,9 @@ import type {
   ContentPayload,
   LobPayload,
   MarketSummary,
+  MarketGroupChartPayload,
+  MarketGroupDetail,
+  MarketGroupsPayload,
   MarketsPayload,
   OraclePayload,
   PriceSummary,
@@ -87,6 +90,27 @@ export async function fetchAllActiveMarkets(query = '', pageSize = 160, maxPages
       hasMore,
     },
   } satisfies MarketsPayload;
+}
+
+export function fetchMarketGroups(query = '', pageSize = 80, sort: 'active' | 'new' | 'volume' = 'active') {
+  const params = new URLSearchParams({
+    page: '1',
+    pageSize: String(pageSize),
+    sort,
+  });
+  if (query.trim()) params.set('q', query.trim());
+  return apiGet<MarketGroupsPayload>(`/market-groups?${params.toString()}`);
+}
+
+export function fetchMarketGroupDetail(eventId: string, timeoutMs = 12000) {
+  return apiGetWithTimeout<MarketGroupDetail>(`/market-groups/${encodeURIComponent(eventId)}/detail`, timeoutMs);
+}
+
+export function fetchMarketGroupChart(eventId: string, range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d', timeoutMs = 12000) {
+  return apiGetWithTimeout<MarketGroupChartPayload>(
+    `/market-groups/${encodeURIComponent(eventId)}/chart?range=${encodeURIComponent(range)}`,
+    timeoutMs,
+  );
 }
 
 export function fetchSystemHealth() {

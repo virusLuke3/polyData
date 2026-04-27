@@ -74,7 +74,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, f1_runtime_service, jin10_runtime_service, lob_service, market_service, new_market_signal_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, f1_runtime_service, jin10_runtime_service, lob_service, market_group_service, market_service, new_market_signal_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -238,6 +238,22 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_market_detail_payload": lambda market_id: market_service.get_market_detail_payload(build_service_context(), market_id),
         "get_market_group_snapshot": get_market_group_snapshot,
+        "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
+            build_service_context(),
+            query=query,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        ),
+        "get_market_group_detail_payload": lambda event_id: market_group_service.get_market_group_detail_payload(
+            build_service_context(),
+            event_id,
+        ),
+        "get_market_group_chart_payload": lambda event_id, range_name="1d": market_group_service.get_market_group_chart_payload(
+            build_service_context(),
+            event_id,
+            range_name=range_name,
+        ),
         "get_market_oracle_payload": lambda market_id: market_service.get_market_oracle_payload(build_service_context(), market_id),
         "get_markets_payload": lambda status="active", query="", page=1, page_size=20: market_service.get_markets_payload(
             build_service_context(),
@@ -354,6 +370,22 @@ def build_service_context() -> Dict[str, Any]:
         ),
         "get_market_clob_price_snapshot": lambda market: market_data_client.get_market_clob_price_snapshot(build_service_context(), market),
         "get_market_group_snapshot": lambda items, kind: runtime_service.get_market_group_snapshot(build_service_context(), items, kind=kind),
+        "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
+            build_service_context(),
+            query=query,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        ),
+        "get_market_group_detail_payload": lambda event_id: market_group_service.get_market_group_detail_payload(
+            build_service_context(),
+            event_id,
+        ),
+        "get_market_group_chart_payload": lambda event_id, range_name="1d": market_group_service.get_market_group_chart_payload(
+            build_service_context(),
+            event_id,
+            range_name=range_name,
+        ),
         "get_market_by_slug": lambda slug: market_service.get_market_by_slug(build_service_context(), slug),
         "get_market_oracle_payload": lambda market_id: market_service.get_market_oracle_payload(build_service_context(), market_id),
         "get_market_price_summary": lambda market_id: market_service.get_market_price_summary(build_service_context(), market_id),

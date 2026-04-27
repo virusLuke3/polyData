@@ -8,6 +8,9 @@ import {
   fetchAllActiveMarkets,
   fetchBootstrap,
   fetchLatestContent,
+  fetchMarketGroupChart,
+  fetchMarketGroupDetail,
+  fetchMarketGroups,
   fetchRecentOracle,
   fetchRecentTrades,
   fetchSystemHealth,
@@ -16,7 +19,13 @@ import {
 import type {
   BootstrapPayload,
   ContentItem,
+  MarketGroupChartPayload,
+  MarketGroupChartRange,
+  MarketGroupDetail,
   MarketListItem,
+  MarketGroupItem,
+  MarketGroupsPayload,
+  MarketGroupSort,
   MarketsPayload,
   MarketSummary,
   OracleEvent,
@@ -44,8 +53,8 @@ type LayerToggle = {
 };
 
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
-
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v3';
+const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
@@ -135,6 +144,16 @@ function readSearchParam(key: string): string | null {
   return new URLSearchParams(window.location.search).get(key);
 }
 
+function readMarketGroupSortStorage(): MarketGroupSort {
+  const saved = readStringStorage<string>(MARKET_GROUP_SORT_STORAGE_KEY, 'active');
+  return saved === 'new' || saved === 'volume' || saved === 'active' ? saved : 'active';
+}
+
+function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {
+  if (!marketId) return null;
+  return groups.find((group) => (group.outcomes || []).some((outcome) => Number(outcome.marketId) === marketId)) || null;
+}
+
 type RuntimePanelRefreshOptions = {
   bootstrapPayload?: BootstrapPayload | null;
 };
@@ -216,6 +235,13 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
 export function App() {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
+  const [marketGroups, setMarketGroups] = useState<MarketGroupItem[]>([]);
+  const [marketGroupSort, setMarketGroupSort] = useState<MarketGroupSort>(() => readMarketGroupSortStorage());
+  const [selectedMarketGroupId, setSelectedMarketGroupId] = useState<string | null>(null);
+  const [selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey] = useState<string | null>(null);
+  const [selectedMarketGroupDetail, setSelectedMarketGroupDetail] = useState<MarketGroupDetail | null>(null);
+  const [selectedMarketGroupChart, setSelectedMarketGroupChart] = useState<MarketGroupChartPayload | null>(null);
+  const [selectedMarketGroupChartRange, setSelectedMarketGroupChartRange] = useState<MarketGroupChartRange>('1d');
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
   const [selectedMarketId, setSelectedMarketId] = useState<number | null>(null);
@@ -246,18 +272,29 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
+  const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
   const slowRefreshInFlightRef = useRef(false);
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
 
-  async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null }> {
+  const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
+    const eventId = group.eventId != null ? String(group.eventId) : null;
+    setSelectedMarketGroupId(eventId);
+    setSelectedMarketGroupOutcomeKey(outcomeKey || group.defaultOutcomeKey || null);
+    if (marketId != null) {
+      setSelectedMarketId(Number(marketId));
+    }
+  };
+
+  async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null; marketGroupsPayload: MarketGroupsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
     const settled = await Promise.allSettled([
       fetchSystemHealth(),
       fetchRecentTrades(24),
       fetchRecentOracle(16),
       fetchLatestContent(12),
+      fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSortRef.current),
       fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
       fetchPanelRuntimeData(FAST_RUNTIME_PANELS),
     ]);
@@ -275,10 +312,12 @@ export function App() {
     if (settled[3].status === 'fulfilled') setLatestContent(settled[3].value.items || []);
     else if (bootstrapPayload?.latestContentPreview) setLatestContent(bootstrapPayload.latestContentPreview);
 
-    if (settled[4].status === 'fulfilled') setMarkets(settled[4].value.items || []);
+    if (settled[4].status === 'fulfilled') setMarketGroups(settled[4].value.items || []);
+
+    if (settled[5].status === 'fulfilled') setMarkets(settled[5].value.items || []);
     else if (fallbackMarkets.length) setMarkets(fallbackMarkets);
 
-    const fastRuntimeResult = settled[5];
+    const fastRuntimeResult = settled[6];
     if (fastRuntimeResult.status === 'fulfilled') {
       setRuntimeData((current) => mergeRuntimeData(current, fastRuntimeResult.value));
     } else if (bootstrapPayload?.commoditiesPreview) {
@@ -286,7 +325,8 @@ export function App() {
     }
 
     return {
-      marketsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
+      marketsPayload: settled[5].status === 'fulfilled' ? settled[5].value : null,
+      marketGroupsPayload: settled[4].status === 'fulfilled' ? settled[4].value : null,
     };
   }
 
@@ -353,8 +393,41 @@ export function App() {
   }, [mapZoom]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(MARKET_GROUP_SORT_STORAGE_KEY, marketGroupSort);
+  }, [marketGroupSort]);
+
+  useEffect(() => {
     bootstrapRef.current = bootstrap;
   }, [bootstrap]);
+
+  useEffect(() => {
+    marketGroupSortRef.current = marketGroupSort;
+  }, [marketGroupSort]);
+
+  useEffect(() => {
+    const matchedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
+    if (!matchedGroup) {
+      if (selectedMarketId == null) {
+        setSelectedMarketGroupId(null);
+        setSelectedMarketGroupOutcomeKey(null);
+        setSelectedMarketGroupDetail(null);
+        setSelectedMarketGroupChart(null);
+      }
+      return;
+    }
+    const nextEventId = matchedGroup.eventId != null ? String(matchedGroup.eventId) : null;
+    const matchedOutcome = (matchedGroup.outcomes || []).find((outcome) => Number(outcome.marketId) === selectedMarketId) || null;
+    if (nextEventId && nextEventId !== selectedMarketGroupId) {
+      setSelectedMarketGroupId(nextEventId);
+      setSelectedMarketGroupDetail(null);
+      setSelectedMarketGroupChart(null);
+    }
+    const nextOutcomeKey = matchedOutcome?.outcomeKey || matchedGroup.defaultOutcomeKey || null;
+    if (nextOutcomeKey && nextOutcomeKey !== selectedMarketGroupOutcomeKey) {
+      setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
+    }
+  }, [marketGroups, selectedMarketId]);
 
   useEffect(() => () => {
     slowRefreshCancelRef.current?.();
@@ -392,12 +465,13 @@ export function App() {
         setLoading(false);
 
         void refreshRuntimePanels({ bootstrapPayload })
-          .then(({ marketsPayload }) => {
+          .then(({ marketsPayload, marketGroupsPayload }) => {
             if (cancelled) return;
             if (!liveFeatured && !bootstrapPayload.featuredMarket?.id) {
+              const groupedMarketId = marketGroupsPayload?.items?.find((group) => group.defaultMarketId)?.defaultMarketId || null;
               const marketItems = marketsPayload?.items || bootstrapPayload.activeMarketsPreview || [];
               const firstLiveMarket = marketItems.find((market) => isLiveStatus(market.status));
-              setSelectedMarketId(firstLiveMarket?.id || marketItems?.[0]?.id || null);
+              setSelectedMarketId(groupedMarketId || firstLiveMarket?.id || marketItems?.[0]?.id || null);
             }
           })
           .catch((loadError) => {
@@ -471,12 +545,28 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!marketQuery.trim()) return;
+    if (!marketQuery.trim()) {
+      let cancelled = false;
+      void fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSort)
+        .then((payload) => {
+          if (!cancelled) setMarketGroups(payload.items || []);
+        })
+        .catch(() => {
+          // Keep the last group list visible when the event feed has a transient miss.
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await fetchAllActiveMarkets(marketQuery.trim(), SEARCH_MARKETS_PAGE_SIZE);
-        if (!cancelled) setMarkets(payload.items || []);
+        const [groupsResult, marketsResult] = await Promise.allSettled([
+          fetchMarketGroups(marketQuery.trim(), SEARCH_MARKETS_PAGE_SIZE, marketGroupSort),
+          fetchAllActiveMarkets(marketQuery.trim(), SEARCH_MARKETS_PAGE_SIZE),
+        ]);
+        if (!cancelled && groupsResult.status === 'fulfilled') setMarketGroups(groupsResult.value.items || []);
+        if (!cancelled && marketsResult.status === 'fulfilled') setMarkets(marketsResult.value.items || []);
       } catch (loadError) {
         if (!cancelled) {
           setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh market search.'));
@@ -488,7 +578,49 @@ export function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [marketQuery]);
+  }, [marketGroupSort, marketQuery]);
+
+  useEffect(() => {
+    if (!selectedMarketGroupId) {
+      setSelectedMarketGroupDetail(null);
+      setSelectedMarketGroupChart(null);
+      return;
+    }
+    let cancelled = false;
+    const eventId = selectedMarketGroupId;
+    const chartRange = selectedMarketGroupChartRange;
+
+    async function loadGroupContext() {
+      try {
+        const [detailResult, chartResult] = await Promise.allSettled([
+          fetchMarketGroupDetail(eventId, 9000),
+          fetchMarketGroupChart(eventId, chartRange, 9000),
+        ]);
+        if (cancelled) return;
+        if (detailResult.status === 'fulfilled') {
+          setSelectedMarketGroupDetail(detailResult.value);
+          if (!selectedMarketGroupOutcomeKey) {
+            setSelectedMarketGroupOutcomeKey(detailResult.value.defaultOutcomeKey || null);
+          }
+        }
+        if (chartResult.status === 'fulfilled') {
+          setSelectedMarketGroupChart(chartResult.value);
+        } else if (!cancelled) {
+          setSelectedMarketGroupChart(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedMarketGroupDetail(null);
+          setSelectedMarketGroupChart(null);
+        }
+      }
+    }
+
+    void loadGroupContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMarketGroupChartRange, selectedMarketGroupId]);
 
   useEffect(() => {
     if (!selectedMarketId) return;
@@ -609,8 +741,19 @@ export function App() {
   const panelContext: PanelRenderContext = {
     bootstrap,
     markets: displayMarkets,
+    marketGroups,
+    marketGroupSort,
+    setMarketGroupSort,
     selectedMarketId,
     setSelectedMarketId,
+    focusMarketGroup,
+    selectedMarketGroupId,
+    selectedMarketGroupOutcomeKey,
+    setSelectedMarketGroupOutcomeKey,
+    selectedMarketGroupDetail,
+    selectedMarketGroupChart,
+    selectedMarketGroupChartRange,
+    setSelectedMarketGroupChartRange,
     selectedMarket,
     bundle,
     health,

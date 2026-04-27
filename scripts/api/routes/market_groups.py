@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+from flask import Blueprint, jsonify, request
+
+
+def create_market_groups_blueprint(helpers: dict) -> Blueprint:
+    bp = Blueprint("market_group_routes", __name__)
+
+    @bp.route("/market-groups", methods=["GET"])
+    def api_market_groups():
+        query = (request.args.get("q") or "").strip()
+        page = max(1, int(request.args.get("page", 1)))
+        page_size = min(200, max(1, int(request.args.get("pageSize", 80))))
+        sort = (request.args.get("sort") or "active").strip().lower()
+        return jsonify(helpers["get_market_groups_payload"](query=query, page=page, page_size=page_size, sort=sort))
+
+    @bp.route("/market-groups/<event_id>/detail", methods=["GET"])
+    def api_market_group_detail(event_id: str):
+        payload = helpers["get_market_group_detail_payload"](event_id)
+        if not payload:
+            return jsonify({"error": "market group not found", "eventId": event_id}), 404
+        return jsonify(payload)
+
+    @bp.route("/market-groups/<event_id>/chart", methods=["GET"])
+    def api_market_group_chart(event_id: str):
+        range_name = (request.args.get("range") or "1d").strip().lower()
+        payload = helpers["get_market_group_chart_payload"](event_id, range_name=range_name)
+        if not payload:
+            return jsonify({"error": "market group chart unavailable", "eventId": event_id, "range": range_name}), 404
+        return jsonify(payload)
+
+    return bp

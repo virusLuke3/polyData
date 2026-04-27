@@ -50,6 +50,85 @@ export type MarketsPayload = {
   };
 };
 
+export type MarketGroupOutcome = {
+  outcomeKey?: string | null;
+  marketId?: number | null;
+  gammaMarketId?: string | number | null;
+  label?: string | null;
+  title?: string | null;
+  yesPrice?: string | number | null;
+  noPrice?: string | number | null;
+  change24h?: string | number | null;
+  volume24h?: string | number | null;
+  tradeCount24h?: number | string | null;
+  lastTradeAt?: string | null;
+  conditionId?: string | null;
+  slug?: string | null;
+  yesTokenId?: string | null;
+};
+
+export type MarketGroupItem = {
+  groupId: string;
+  eventId?: string | number | null;
+  title: string;
+  slug?: string | null;
+  category?: string | null;
+  tags?: string[];
+  createdAt?: string | null;
+  endDate?: string | null;
+  volume24h?: string | number | null;
+  outcomeCount?: number | null;
+  defaultOutcomeKey?: string | null;
+  defaultMarketId?: number | null;
+  outcomes: MarketGroupOutcome[];
+  topOutcomes: MarketGroupOutcome[];
+};
+
+export type MarketGroupSort = 'active' | 'new' | 'volume';
+export type MarketGroupChartRange = '1h' | '6h' | '1d' | '1w' | '1m' | 'all';
+
+export type MarketGroupsPayload = {
+  items: MarketGroupItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total?: number;
+    totalPages?: number;
+    hasMore: boolean;
+  };
+  generatedAt?: string;
+};
+
+export type MarketGroupDetail = MarketGroupItem & {
+  defaultOutcomeKey?: string | null;
+  generatedAt?: string;
+  status?: string;
+};
+
+export type MarketGroupChartSeriesPoint = {
+  timestamp: string;
+  price: number | string;
+};
+
+export type MarketGroupChartSeries = {
+  outcomeKey?: string | null;
+  label?: string | null;
+  marketId?: number | null;
+  color?: string | null;
+  points: MarketGroupChartSeriesPoint[];
+};
+
+export type MarketGroupChartPayload = {
+  eventId?: string | number | null;
+  groupId?: string | null;
+  title?: string | null;
+  defaultOutcomeKey?: string | null;
+  range: string;
+  interval?: string | null;
+  generatedAt?: string;
+  series: MarketGroupChartSeries[];
+};
+
 export type MarketListItem = {
   id: number;
   slug: string;
@@ -481,8 +560,19 @@ export type PanelDefinition = {
 export type PanelRenderContext = {
   bootstrap: BootstrapPayload | null;
   markets: MarketListItem[];
+  marketGroups: MarketGroupItem[];
+  marketGroupSort: MarketGroupSort;
+  setMarketGroupSort: (sort: MarketGroupSort) => void;
   selectedMarketId: number | null;
   setSelectedMarketId: (marketId: number) => void;
+  focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
+  selectedMarketGroupId: string | null;
+  selectedMarketGroupOutcomeKey: string | null;
+  setSelectedMarketGroupOutcomeKey: (outcomeKey: string | null) => void;
+  selectedMarketGroupDetail: MarketGroupDetail | null;
+  selectedMarketGroupChart: MarketGroupChartPayload | null;
+  selectedMarketGroupChartRange: MarketGroupChartRange;
+  setSelectedMarketGroupChartRange: (range: MarketGroupChartRange) => void;
   selectedMarket: MarketSummary | null;
   bundle: WorkspaceBundle | null;
   health: SystemHealth | null;

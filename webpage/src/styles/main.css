@@ -1044,21 +1044,23 @@ body {
   padding: 8px 10px 0;
 }
 
-.wm-focus-chart-tabs span,
+.wm-focus-chart-tabs button,
 .wm-focus-chart-tabs i {
   font-family: var(--font-mono);
   font-size: 11px;
   font-style: normal;
 }
 
-.wm-focus-chart-tabs span {
+.wm-focus-chart-tabs button {
+  appearance: none;
   padding: 5px 8px;
   border: 1px solid #232323;
   background: #141414;
   color: var(--wm-text-dim);
+  cursor: pointer;
 }
 
-.wm-focus-chart-tabs span.active {
+.wm-focus-chart-tabs button.active {
   background: #2a2a2a;
   color: #f0f0f0;
 }
@@ -1121,6 +1123,10 @@ body {
   stroke: #ff9a1f;
 }
 
+.wm-focus-chart-line.event-series.selected {
+  stroke-width: 3;
+}
+
 .wm-focus-chart-overlay-label {
   position: absolute;
   right: 8px;
@@ -1180,12 +1186,30 @@ body {
   cursor: default;
 }
 
+.wm-focus-outcome-card.active {
+  border-color: #315f45;
+  background: #141915;
+}
+
+.wm-focus-outcome-card.pending {
+  opacity: 0.78;
+}
+
 .wm-focus-outcome-card.yes {
   box-shadow: inset 0 0 0 1px rgba(57, 255, 115, 0.08);
 }
 
 .wm-focus-outcome-card.no {
   box-shadow: inset 0 0 0 1px rgba(255, 100, 100, 0.08);
+}
+
+.wm-focus-outcome-card.event {
+  box-shadow: inset 0 0 0 1px rgba(120, 182, 255, 0.08);
+  cursor: pointer;
+}
+
+.wm-focus-outcome-card.event .wm-focus-outcome-top strong {
+  color: #f3f3f3;
 }
 
 .wm-focus-outcome-top {
