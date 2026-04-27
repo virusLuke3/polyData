@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v3"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v4"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     COALESCE(m.tags, '') NOT LIKE '%"hide-from-new"%'
     AND COALESCE(m.tags, '') NOT LIKE '%"recurring"%'
