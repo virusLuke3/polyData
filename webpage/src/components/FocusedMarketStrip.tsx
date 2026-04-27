@@ -494,6 +494,10 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
   const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
   const displayedNoPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice;
+  const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
+  const hasFocusedMarketHistory = Boolean(chartPoints.length);
+  const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
+  const noTradesYet = executionAvailable && trades.length === 0 && Number(displayedTrades || 0) === 0;
 
   return (
     <section className="wm-focus-strip">
@@ -541,7 +545,15 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
             }) : null}
             <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
               <div className="wm-focus-chart-wrap">
-                {detail ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey) : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
+                {detail
+                  ? (
+                      hasEventHistory
+                        ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey)
+                        : showFocusedOutcomeFallback
+                          ? renderDetailChart(chart)
+                          : emptyState('Fresh market: waiting for event price history to print.')
+                    )
+                  : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
               </div>
               {shouldShowOutcomeRail ? (
                 <aside className="wm-focus-outcome-rail" aria-label="outcomes">
@@ -608,7 +620,7 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
         {!executionAvailable && detail ? (
           emptyState('Select an outcome with local sync to load the order book.')
         ) : !lob || !activeBook ? (
-          emptyState('LOB runtime unavailable for the selected market.')
+          emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
         ) : (
           <div className="wm-focus-book">
             <div className="wm-focus-book-tabs">
@@ -643,14 +655,14 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
       >
         <div className="wm-focus-trades">
           <div className="wm-focus-trades-meta">
-            <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : 'waiting for trades'}</span>
+            <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
             <strong>{trades[0] && tradeNotional(trades[0]) ? `$${formatCompact(tradeNotional(trades[0]))}` : '--'}</strong>
           </div>
           {!executionAvailable && detail
             ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
             : trades.length
             ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
-            : emptyState('Waiting for trade rows.')}
+            : emptyState(noTradesYet ? 'No trade rows yet for this outcome.' : 'Waiting for trade rows.')}
         </div>
       </Panel>
     </section>

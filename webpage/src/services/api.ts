@@ -179,12 +179,12 @@ export function fetchRuntimeSuspicious(limit = 12) {
 
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
   const marketPromise = apiGetWithTimeout<MarketSummary>(`/markets/${marketId}`, 3500);
-  const pricePromise = apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, 3500);
-  const chartPromise = apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, 3500);
-  const tradesPromise = apiGetWithTimeout<TradeRow[]>(`/markets/${marketId}/trades?limit=24`, 2200);
+  const pricePromise = apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, 5000);
+  const chartPromise = apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, 5000);
+  const tradesPromise = apiGetWithTimeout<TradeRow[]>(`/markets/${marketId}/trades?limit=24`, 4000);
   const oraclePromise = apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, 2200);
   const contentPromise = apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=6`, 2200);
-  const lobPromise = apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, 2200);
+  const lobPromise = apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, 4000);
 
   const [
     marketResult,
