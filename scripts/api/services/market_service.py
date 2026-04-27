@@ -688,15 +688,20 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
         if range_name == "7d":
             limit = 700
         points = ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
-    if not points:
-        price = get_market_price_summary(ctx, market_id)
-        latest = price.get("latestYesPrice") or price.get("latestPrice")
+    price = get_market_price_summary(ctx, market_id)
+    latest = price.get("latestYesPrice") or price.get("latestPrice")
+    latest_decimal = _decimal_from_any(latest)
+    if points and latest_decimal is not None:
+        last_point = points[-1] or {}
+        last_decimal = _decimal_from_any(last_point.get("yesPrice"))
+        if last_decimal is not None and abs(last_decimal - latest_decimal) > Decimal("0.25"):
+            points = []
+    if not points and latest not in (None, ""):
         timestamp = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        if latest not in (None, ""):
-            points = [
-                {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-                {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-            ]
+        points = [
+            {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+        ]
     return {"marketId": market_id, "range": range_name, "interval": interval, "kind": "probability", "points": points}
 
 
