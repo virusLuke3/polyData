@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v6"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v7"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
     AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
@@ -38,6 +38,20 @@ def _default_active_market_price_sql(stats_alias: str) -> str:
         OR (CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) >= 0.10 AND CAST({stats_alias}.latest_price AS DECIMAL(18, 10)) <= 0.90)
     )
     """
+
+def _default_active_market_recent_trade_sql(stats_alias: str) -> str:
+    return f"COALESCE({stats_alias}.last_trade_at, {stats_alias}.latest_trade_at) >= ?"
+
+
+def _iso_hours_before(now_iso: str, hours: int) -> str:
+    text = str(now_iso or "").replace("Z", "+00:00")
+    try:
+        now = datetime.fromisoformat(text)
+    except ValueError:
+        now = datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
 PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")
@@ -860,6 +874,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
               AND {_default_active_market_activity_sql(stats_alias)}
               AND {_default_active_market_price_sql(stats_alias)}
+              AND {_default_active_market_recent_trade_sql(stats_alias)}
         """
 
 
@@ -916,6 +931,7 @@ def get_markets_payload(
 
     filters: List[str] = []
     params: List[Any] = []
+    recent_trade_cutoff = _iso_hours_before(now_iso, 72)
     if status == "active":
         filters.append("(COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
@@ -923,6 +939,8 @@ def get_markets_payload(
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
             filters.append(_default_active_market_activity_sql("mls"))
             filters.append(_default_active_market_price_sql("mls"))
+            filters.append(_default_active_market_recent_trade_sql("mls"))
+            params.append(recent_trade_cutoff)
     elif status == "closed":
         filters.append("(COALESCE(mss.has_settle, 0) = 1 OR (COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
         params.append(now_iso)
@@ -1045,7 +1063,7 @@ def build_active_markets_payload(
         ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
         LIMIT ?
         """,
-        (now_iso, raw_limit),
+        (now_iso, _iso_hours_before(now_iso, 72), raw_limit),
     )
     recent_candidate_rows = ctx["query_all"](
         f"""
@@ -1053,7 +1071,7 @@ def build_active_markets_payload(
         ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
         LIMIT ?
         """,
-        (now_iso, min(raw_limit, max(page_size * 2, 80))),
+        (now_iso, _iso_hours_before(now_iso, 72), min(raw_limit, max(page_size * 2, 80))),
     )
     candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
     candidate_stats_map = {
@@ -1112,7 +1130,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 10,
+            "v": 11,
         },
         sort_keys=True,
         ensure_ascii=True,

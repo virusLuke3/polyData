@@ -13,6 +13,8 @@ def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
         params={"token_id": token_id},
         timeout=min(float(ctx.get("CLOB_TIMEOUT_SECONDS") or 3), 3.0),
     )
+    if response.status_code == 404:
+        return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
     response.raise_for_status()
     data = response.json() or {}
 
