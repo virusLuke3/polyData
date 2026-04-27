@@ -262,6 +262,42 @@ class MarketGroupServiceTestCase(unittest.TestCase):
         self.assertEqual("jd-vance", payload["defaultOutcomeKey"])
         self.assertEqual(2, len(payload["outcomes"]))
 
+    def test_detail_defaults_to_top_outcome_even_without_local_market_match(self):
+        ctx = self.make_ctx(
+            [
+                {
+                    "id": "event-2",
+                    "title": "2026 NBA Champion",
+                    "slug": "2026-nba-champion",
+                    "active": True,
+                    "closed": False,
+                    "volume24hr": 900000,
+                    "markets": [
+                        {
+                            "id": "gamma-a",
+                            "question": "Will Oklahoma City Thunder win the 2026 NBA Championship?",
+                            "groupItemTitle": "Oklahoma City Thunder",
+                            "clobTokenIds": ["okc-yes", "okc-no"],
+                            "outcomePrices": ["0.34", "0.66"],
+                        },
+                        {
+                            "id": "gamma-b",
+                            "question": "Will Minnesota Timberwolves win the 2026 NBA Championship?",
+                            "groupItemTitle": "Minnesota Timberwolves",
+                            "clobTokenIds": ["min-yes", "min-no"],
+                            "outcomePrices": ["0.20", "0.80"],
+                        },
+                    ],
+                }
+            ]
+        )
+
+        payload = market_group_service.get_market_group_detail_payload(ctx, "event-2")
+
+        self.assertIsNotNone(payload)
+        self.assertEqual("oklahoma-city-thunder", payload["defaultOutcomeKey"])
+        self.assertIsNone(payload["defaultMarketId"])
+
     def test_chart_payload_returns_multiple_series(self):
         ctx = self.make_ctx(
             [

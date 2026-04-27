@@ -461,8 +461,10 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
             last_activity_ts = candidate_ts
             last_activity_at = candidate
     default_outcome = next((outcome for outcome in top_outcomes if outcome.get("marketId") is not None), None)
-    if default_outcome is None:
-        default_outcome = next((outcome for outcome in outcomes if outcome.get("marketId") is not None), None)
+    if default_outcome is None and top_outcomes:
+        default_outcome = top_outcomes[0]
+    if default_outcome is None and outcomes:
+        default_outcome = outcomes[0]
 
     return {
         "groupId": f"event:{event.get('id') or event.get('slug')}",
