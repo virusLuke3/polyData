@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v2"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v3"
 PRICE_TARGET_RE = re.compile(r"\b(?:hit|reach)\s+\$+\s*([0-9][0-9,]*(?:\.\d+)?)\s*([kmb])?\b", re.IGNORECASE)
 PAIR_RE = re.compile(r"\b([A-Z0-9]{2,12}/[A-Z0-9]{2,12})\b")
 YAHOO_QUOTE_RE = re.compile(r"finance\.yahoo\.com/quote/([^/?\"' )]+)", re.IGNORECASE)
@@ -56,6 +56,15 @@ def _trim_active_markets_payload(ctx: dict, payload: Any, page_size: int) -> Opt
         return None
     items = payload.get("items")
     if not isinstance(items, list) or not items:
+        return None
+    source_page_size = len(items)
+    pagination = payload.get("pagination")
+    if isinstance(pagination, dict):
+        try:
+            source_page_size = int(pagination.get("pageSize") or source_page_size)
+        except (TypeError, ValueError):
+            source_page_size = len(items)
+    if len(items) < page_size and source_page_size < page_size:
         return None
     trimmed_items = items[:page_size]
     return {
@@ -122,8 +131,7 @@ def _blend_recent_candidate_rows(volume_rows: List[Dict[str, Any]], recent_rows:
     if not recent_rows:
         return volume_rows
     target_count = max(1, int(target_count))
-    head_count = max(1, target_count // 3)
-    recent_count = max(1, target_count // 3)
+    recent_count = max(target_count, min(len(recent_rows), target_count * 2))
 
     blended: List[Dict[str, Any]] = []
     seen_ids: set[int] = set()
@@ -142,7 +150,6 @@ def _blend_recent_candidate_rows(volume_rows: List[Dict[str, Any]], recent_rows:
             if limit is not None and added >= limit:
                 break
 
-    append_rows(volume_rows, head_count)
     append_rows(recent_rows, recent_count)
     append_rows(volume_rows)
     append_rows(recent_rows)
@@ -785,6 +792,8 @@ def get_markets_payload(
         return get_active_markets_snapshot(ctx, page_size=page_size, include_runtime_prices=markets_runtime_prices_enabled())
 
     def build_payload() -> Dict[str, Any]:
+        recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
+        recent_30d_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
         raw_limit = min(5000, max((offset + page_size + 1) * 6, 180))
         candidate_rows = ctx["query_all"](
             f"""
@@ -805,10 +814,19 @@ def get_markets_payload(
             LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
             LEFT JOIN market_list_serving mls ON mls.market_id = m.id
             {where_clause}
-            ORDER BY COALESCE(mls.volume_24h, 0) DESC, COALESCE(mls.trade_count_24h, 0) DESC, mls.last_trade_at DESC, m.created_at DESC
+            ORDER BY
+                CASE
+                    WHEN m.created_at >= ? THEN 0
+                    WHEN m.created_at >= ? THEN 1
+                    ELSE 2
+                END ASC,
+                m.created_at DESC,
+                COALESCE(mls.trade_count_24h, 0) DESC,
+                COALESCE(mls.volume_24h, 0) DESC,
+                mls.last_trade_at DESC
             LIMIT ?
             """,
-            [*params, raw_limit],
+            [*params, recent_14d_iso, recent_30d_iso, raw_limit],
         )
         if status == "active":
             candidate_rows = _prefer_gamma_active_candidate_rows(ctx, candidate_rows, offset + page_size + 1)
@@ -942,7 +960,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 6,
+            "v": 7,
         },
         sort_keys=True,
         ensure_ascii=True,

@@ -8,7 +8,7 @@ import { globalMarkets } from './shared/selectors';
 
 type ImpactLevel = 'critical' | 'high' | 'medium' | 'low' | 'info';
 type ScoredMarket = MarketListItem & { impactScore: number; impactLevel: ImpactLevel };
-const MARKET_SORT_STORAGE_KEY = 'wm:marketSort:v2';
+const MARKET_SORT_STORAGE_KEY = 'wm:marketSort:v3';
 
 function numericValue(value: string | number | null | undefined) {
   const numeric = Number(value);
@@ -47,14 +47,45 @@ function marketTradeabilityScore(latestPrice: string | number | null | undefined
   const probability = numericValue(latestPrice);
   if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return 0;
   const distanceFromMid = Math.abs(probability - 0.5);
-  if (distanceFromMid <= 0.2) return 15;
-  if (distanceFromMid <= 0.32) return 10;
-  if (distanceFromMid <= 0.4) return 5;
+  if (distanceFromMid <= 0.2) return 10;
+  if (distanceFromMid <= 0.32) return 7;
+  if (distanceFromMid <= 0.4) return 4;
   return 0;
 }
 
 function marketActivityTimestamp(market: MarketListItem) {
   return Math.max(parseTimestamp(market.lastTradeAt), parseTimestamp(market.createdAt));
+}
+
+function marketAgeHours(market: MarketListItem, now: number) {
+  const createdAt = parseTimestamp(market.createdAt);
+  if (!createdAt) return Number.POSITIVE_INFINITY;
+  return Math.max(0, (now - createdAt) / (1000 * 60 * 60));
+}
+
+function marketRecencyScore(ageHours: number) {
+  if (ageHours < 6) return 45;
+  if (ageHours < 24) return 42;
+  if (ageHours < 72) return 35;
+  if (ageHours < 24 * 7) return 28;
+  if (ageHours < 24 * 14) return 20;
+  if (ageHours < 24 * 30) return 10;
+  return 0;
+}
+
+function oldMarketPenalty(ageHours: number) {
+  if (ageHours > 24 * 180) return 45;
+  if (ageHours > 24 * 90) return 30;
+  if (ageHours > 24 * 30) return 15;
+  return 0;
+}
+
+function terminalMarketPenalty(market: MarketListItem, ageHours: number) {
+  const probability = numericValue(market.latestPrice);
+  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) return ageHours > 24 * 7 ? 12 : 4;
+  if (probability <= 0.02 || probability >= 0.98) return ageHours > 24 * 7 ? 18 : 6;
+  if (probability <= 0.05 || probability >= 0.95) return ageHours > 24 * 30 ? 10 : 3;
+  return 0;
 }
 
 function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
@@ -69,24 +100,21 @@ function scoreMarkets(markets: MarketListItem[]): ScoredMarket[] {
   const tradesRanks = percentileRanks(tradesValues);
 
   return markets.map((market, index) => {
-    let recencyScore = 0;
-    if (market.createdAt) {
-      const ageHours = (now - new Date(market.createdAt).getTime()) / (1000 * 60 * 60);
-      if (ageHours < 6) recencyScore = 15;
-      else if (ageHours < 24) recencyScore = 10;
-      else if (ageHours < 48) recencyScore = 5;
-    }
+    const ageHours = marketAgeHours(market, now);
+    const recencyScore = marketRecencyScore(ageHours);
 
     const score = Math.round(
       Math.max(
         0,
         Math.min(
           100,
-          volumeRanks[index]! * 35 +
-          changeRanks[index]! * 25 +
-          tradesRanks[index]! * 15 +
           recencyScore +
-          marketTradeabilityScore(market.latestPrice),
+          tradesRanks[index]! * 20 +
+          volumeRanks[index]! * 15 +
+          changeRanks[index]! * 10 +
+          marketTradeabilityScore(market.latestPrice) -
+          oldMarketPenalty(ageHours) -
+          terminalMarketPenalty(market, ageHours),
         ),
       ),
     );
@@ -182,18 +210,6 @@ function ActiveMarketsPanel({
 
   useEffect(() => {
     try {
-      const legacy = localStorage.getItem('pw:marketSort');
-      const current = localStorage.getItem(MARKET_SORT_STORAGE_KEY);
-      if (!current && legacy && ['volume', 'impact', 'change', 'new'].includes(legacy)) {
-        localStorage.setItem(MARKET_SORT_STORAGE_KEY, legacy);
-      }
-    } catch {
-      return;
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
       const saved = localStorage.getItem(MARKET_SORT_STORAGE_KEY);
       if (saved && ['volume', 'impact', 'change', 'new'].includes(saved)) {
         setSortOrder(saved as ActiveMarketSort);
@@ -202,6 +218,14 @@ function ActiveMarketsPanel({
       return;
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MARKET_SORT_STORAGE_KEY, sortOrder);
+    } catch {
+      return;
+    }
+  }, [sortOrder]);
 
   const visibleMarkets = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -245,10 +269,11 @@ function ActiveMarketsPanel({
     return scored.sort(
       (a, b) =>
         b.impactScore - a.impactScore ||
-        marketTradeabilityScore(b.latestPrice) - marketTradeabilityScore(a.latestPrice) ||
-        Number(b.volume24h || 0) - Number(a.volume24h || 0) ||
+        marketActivityTimestamp(b) - marketActivityTimestamp(a) ||
+        Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0) ||
         Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0)) ||
-        marketActivityTimestamp(b) - marketActivityTimestamp(a)
+        marketTradeabilityScore(b.latestPrice) - marketTradeabilityScore(a.latestPrice) ||
+        Number(b.volume24h || 0) - Number(a.volume24h || 0)
     );
   }, [markets, search, sortOrder]);
 

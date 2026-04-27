@@ -238,7 +238,7 @@ class MarketFastPathTestCase(unittest.TestCase):
 
         self.assertEqual([item["id"] for item in payload["items"]], [11, 12])
 
-    def test_build_active_markets_payload_blends_recent_candidates_into_snapshot_pool(self):
+    def test_build_active_markets_payload_prioritizes_recent_candidates_in_snapshot_pool(self):
         volume_rows = [
             {
                 "id": 11,
@@ -327,7 +327,7 @@ class MarketFastPathTestCase(unittest.TestCase):
              patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
             payload = market_service.build_active_markets_payload(ctx, page_size=2, include_runtime_prices=False)
 
-        self.assertEqual([item["id"] for item in payload["items"]], [11, 12])
+        self.assertEqual([item["id"] for item in payload["items"]], [12, 11])
 
     def test_get_markets_payload_generic_uses_serving_tables(self):
         sql_calls: List[str] = []
