@@ -9,7 +9,7 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v8"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v9"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
     AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
@@ -254,7 +254,7 @@ def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str
 
 def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
-    recent_trade_cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_trade_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     recent_14d_iso = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat().replace("+00:00", "Z")
     recent_30d_iso = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
     raw_limit = max(page_size * 6, 120)
@@ -550,7 +550,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v8",
+        "active-markets-preview-v9",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )
@@ -683,7 +683,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v8",
+            "active-markets-preview-v9",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),

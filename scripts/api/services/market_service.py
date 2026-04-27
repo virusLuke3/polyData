@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 
-ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v7"
+ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v8"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
     AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
@@ -931,7 +931,7 @@ def get_markets_payload(
 
     filters: List[str] = []
     params: List[Any] = []
-    recent_trade_cutoff = _iso_hours_before(now_iso, 72)
+    recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
     if status == "active":
         filters.append("(COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
@@ -1063,7 +1063,7 @@ def build_active_markets_payload(
         ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
         LIMIT ?
         """,
-        (now_iso, _iso_hours_before(now_iso, 72), raw_limit),
+        (now_iso, _iso_hours_before(now_iso, 24 * 7), raw_limit),
     )
     recent_candidate_rows = ctx["query_all"](
         f"""
@@ -1071,7 +1071,7 @@ def build_active_markets_payload(
         ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
         LIMIT ?
         """,
-        (now_iso, _iso_hours_before(now_iso, 72), min(raw_limit, max(page_size * 2, 80))),
+        (now_iso, _iso_hours_before(now_iso, 24 * 7), min(raw_limit, max(page_size * 2, 80))),
     )
     candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
     candidate_stats_map = {
@@ -1130,7 +1130,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 11,
+            "v": 12,
         },
         sort_keys=True,
         ensure_ascii=True,
