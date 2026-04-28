@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { WorldFlatMap } from '@/components/WorldFlatMap';
 import { WorldGlobe } from '@/components/WorldGlobe';
-import { PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
+import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
 import {
   fetchAllActiveMarkets,
@@ -365,7 +365,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setActivePanelIds(sanitizePanelIds(readJsonStorage<string[]>(PANEL_STORAGE_KEY, [])));
+    const savedPanelIds = sanitizePanelIds(readJsonStorage<string[]>(PANEL_STORAGE_KEY, []));
+    setActivePanelIds(savedPanelIds.length ? sanitizePanelIds([...savedPanelIds, ...DEFAULT_PANEL_IDS]) : DEFAULT_PANEL_IDS);
     setPanelPrefsLoaded(true);
   }, []);
 
