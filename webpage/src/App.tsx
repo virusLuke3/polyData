@@ -61,9 +61,11 @@ const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
-const CRYPTO_REFRESH_INTERVAL_MS = 5000;
-const FAST_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'fast');
-const SLOW_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'slow');
+const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(
+  (panel) => typeof panel.fetchData === 'function' && Number(panel.refresh?.intervalMs || 0) > 0,
+);
+const FAST_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'fast').filter((panel) => !panel.refresh?.intervalMs);
+const SLOW_RUNTIME_PANELS = getRefreshablePanels(RUNTIME_PANEL_MODULES, 'slow').filter((panel) => !panel.refresh?.intervalMs);
 
 const INITIAL_LAYERS: LayerToggle[] = [
   { id: 'markets', label: 'Polymarket Markets', icon: '◎', enabled: true, hint: 'ACTIVE' },
@@ -529,28 +531,33 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const timers: number[] = [];
 
-    async function refreshCryptoPanel() {
+    async function refreshRuntimePanel(panelId: string) {
       try {
-        const cryptoPanel = PANEL_REGISTRY['crypto-watch'];
-        const payload = await cryptoPanel?.fetchData?.();
+        const panel = PANEL_REGISTRY[panelId];
+        const payload = await panel?.fetchData?.();
         if (!cancelled && payload !== undefined) {
-          setRuntimeData((current) => mergeRuntimeData(current, { 'crypto-watch': payload }));
+          setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: payload }));
         }
       } catch {
-        // Keep the latest visible quote board rather than flashing empty on transient market-data errors.
+        // Keep the latest visible runtime snapshot rather than flashing empty on transient upstream misses.
       }
     }
 
-    void refreshCryptoPanel();
-
-    const timer = window.setInterval(() => {
-      void refreshCryptoPanel();
-    }, CRYPTO_REFRESH_INTERVAL_MS);
+    for (const panel of INTERVAL_RUNTIME_PANELS) {
+      void refreshRuntimePanel(panel.id);
+      const intervalMs = Number(panel.refresh?.intervalMs || 0);
+      if (intervalMs > 0) {
+        timers.push(window.setInterval(() => {
+          void refreshRuntimePanel(panel.id);
+        }, intervalMs));
+      }
+    }
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      timers.forEach((timer) => window.clearInterval(timer));
     };
   }, []);
 

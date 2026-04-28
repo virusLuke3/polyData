@@ -1188,10 +1188,31 @@
   background: linear-gradient(180deg, #151515 0%, #101010 100%);
 }
 
-.wm-funding-summary-tile.is-pressure {
-  border-color: rgba(255, 170, 0, 0.32);
+.wm-funding-summary-tile.is-long {
+  border-color: rgba(255, 111, 76, 0.3);
   background:
-    linear-gradient(180deg, rgba(255, 170, 0, 0.09), rgba(18, 18, 18, 0.96)),
+    linear-gradient(180deg, rgba(255, 111, 76, 0.11), rgba(18, 18, 18, 0.96)),
+    #121212;
+}
+
+.wm-funding-summary-tile.is-short {
+  border-color: rgba(93, 188, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(93, 188, 255, 0.11), rgba(18, 18, 18, 0.96)),
+    #121212;
+}
+
+.wm-funding-summary-tile.is-heat {
+  border-color: rgba(255, 183, 66, 0.3);
+  background:
+    linear-gradient(180deg, rgba(255, 183, 66, 0.1), rgba(18, 18, 18, 0.96)),
+    #121212;
+}
+
+.wm-funding-summary-tile.is-mixed {
+  border-color: rgba(240, 204, 94, 0.3);
+  background:
+    linear-gradient(180deg, rgba(240, 204, 94, 0.1), rgba(18, 18, 18, 0.96)),
     #121212;
 }
 
@@ -1231,7 +1252,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   padding: 7px 9px;
   border-bottom: 1px solid #1d1d1d;
   background: linear-gradient(90deg, #151515 0%, #101010 100%);
@@ -1241,6 +1262,26 @@
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;
+}
+
+.wm-funding-section-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wm-funding-section-copy small {
+  overflow: hidden;
+  color: #818681;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .wm-funding-section-head em {
@@ -1255,49 +1296,49 @@
   overflow: hidden;
 }
 
-.wm-funding-row {
+.wm-funding-asset-row {
   position: relative;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 0;
   min-width: 0;
   padding: 8px 8px 8px 0;
-  border-left: 3px solid #35d16f;
+  border-left: 3px solid #5f6570;
   border-bottom: 1px solid #1d1d1d;
   background:
-    linear-gradient(90deg, rgba(53, 209, 111, 0.08), rgba(17, 17, 17, 0) 42%),
+    linear-gradient(90deg, rgba(95, 101, 112, 0.11), rgba(17, 17, 17, 0) 42%),
     #111111;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
-.wm-funding-row:hover {
+.wm-funding-asset-row:hover {
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
     #151515;
 }
 
-.wm-funding-row:last-child {
+.wm-funding-asset-row:last-child {
   border-bottom: 0;
 }
 
-.wm-funding-row.is-critical {
-  border-left-color: #ff4b4b;
+.wm-funding-asset-row.bias-longs-pay {
+  border-left-color: #ff6f4c;
   background:
-    linear-gradient(90deg, rgba(255, 75, 75, 0.17), rgba(17, 17, 17, 0) 48%),
+    linear-gradient(90deg, rgba(255, 111, 76, 0.16), rgba(17, 17, 17, 0) 48%),
     #111111;
 }
 
-.wm-funding-row.is-warning {
-  border-left-color: #ffaa00;
+.wm-funding-asset-row.bias-shorts-pay {
+  border-left-color: #49b7ff;
   background:
-    linear-gradient(90deg, rgba(255, 170, 0, 0.16), rgba(17, 17, 17, 0) 48%),
+    linear-gradient(90deg, rgba(73, 183, 255, 0.14), rgba(17, 17, 17, 0) 48%),
     #111111;
 }
 
-.wm-funding-row.is-negative {
-  border-left-color: #6aa7ff;
+.wm-funding-asset-row.bias-mixed {
+  border-left-color: #f0cc5e;
   background:
-    linear-gradient(90deg, rgba(106, 167, 255, 0.15), rgba(17, 17, 17, 0) 48%),
+    linear-gradient(90deg, rgba(240, 204, 94, 0.14), rgba(17, 17, 17, 0) 48%),
     #111111;
 }
 
@@ -1352,14 +1393,14 @@
   text-transform: uppercase;
 }
 
-.wm-funding-tone-badge {
+.wm-funding-bias-badge {
   flex: 0 0 auto;
-  min-width: 58px;
-  padding: 2px 6px;
-  border: 1px solid rgba(53, 209, 111, 0.32);
+  min-width: 68px;
+  padding: 2px 7px;
+  border: 1px solid rgba(95, 101, 112, 0.34);
   border-radius: 999px;
-  background: rgba(53, 209, 111, 0.09);
-  color: #44ff88;
+  background: rgba(95, 101, 112, 0.1);
+  color: #c3c7cb;
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 800;
@@ -1369,89 +1410,127 @@
   text-transform: uppercase;
 }
 
-.wm-funding-tone-badge.is-critical {
-  border-color: rgba(255, 75, 75, 0.45);
-  background: rgba(255, 75, 75, 0.13);
-  color: #ff6868;
+.wm-funding-bias-badge.bias-longs-pay {
+  border-color: rgba(255, 111, 76, 0.42);
+  background: rgba(255, 111, 76, 0.12);
+  color: #ff936e;
 }
 
-.wm-funding-tone-badge.is-warning {
-  border-color: rgba(255, 170, 0, 0.45);
-  background: rgba(255, 170, 0, 0.13);
-  color: #ffc247;
+.wm-funding-bias-badge.bias-shorts-pay {
+  border-color: rgba(73, 183, 255, 0.4);
+  background: rgba(73, 183, 255, 0.12);
+  color: #81d1ff;
 }
 
-.wm-funding-tone-badge.is-negative {
-  border-color: rgba(106, 167, 255, 0.45);
-  background: rgba(106, 167, 255, 0.13);
-  color: #8dbdff;
+.wm-funding-bias-badge.bias-mixed {
+  border-color: rgba(240, 204, 94, 0.42);
+  background: rgba(240, 204, 94, 0.12);
+  color: #f6d774;
 }
 
-.wm-funding-tone-badge.is-neutral {
-  border-color: rgba(145, 145, 145, 0.28);
-  background: rgba(145, 145, 145, 0.08);
-  color: #a0a4a0;
-}
-
-.wm-funding-row-metrics {
+.wm-funding-venue-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
 }
 
-.wm-funding-row-metric {
+.wm-funding-venue-card {
   min-width: 0;
-  padding: 6px 7px;
-  border: 1px solid #202020;
-  background: #151515;
+  padding: 7px 8px;
+  border: 1px solid #212121;
+  background: linear-gradient(180deg, #171717 0%, #111111 100%);
 }
 
-.wm-funding-row-metric span {
-  display: block;
-  overflow: hidden;
-  margin-bottom: 3px;
-  color: #7e837e;
+.wm-funding-venue-card.dir-positive {
+  border-color: rgba(255, 132, 88, 0.26);
+  background:
+    linear-gradient(180deg, rgba(255, 132, 88, 0.13), rgba(17, 17, 17, 0.97)),
+    #111111;
+}
+
+.wm-funding-venue-card.dir-negative {
+  border-color: rgba(73, 183, 255, 0.26);
+  background:
+    linear-gradient(180deg, rgba(73, 183, 255, 0.13), rgba(17, 17, 17, 0.97)),
+    #111111;
+}
+
+.wm-funding-venue-card.heat-strong.dir-positive,
+.wm-funding-venue-card.heat-extreme.dir-positive {
+  border-color: rgba(255, 90, 68, 0.4);
+  background:
+    linear-gradient(180deg, rgba(255, 90, 68, 0.2), rgba(17, 17, 17, 0.95)),
+    #111111;
+}
+
+.wm-funding-venue-card.heat-strong.dir-negative,
+.wm-funding-venue-card.heat-extreme.dir-negative {
+  border-color: rgba(57, 165, 255, 0.38);
+  background:
+    linear-gradient(180deg, rgba(57, 165, 255, 0.2), rgba(17, 17, 17, 0.95)),
+    #111111;
+}
+
+.wm-funding-venue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.wm-funding-venue-head span,
+.wm-funding-venue-head em,
+.wm-funding-venue-sub span {
+  color: #909590;
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.55px;
-  line-height: 1.1;
-  text-overflow: ellipsis;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 
-.wm-funding-row-metric strong {
+.wm-funding-venue-head em {
+  font-style: normal;
+}
+
+.wm-funding-venue-rate {
   display: block;
   overflow: hidden;
   color: #ececec;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wm-funding-row.is-critical .wm-funding-row-metric.is-rate strong,
-.wm-funding-row.is-critical .wm-funding-row-metric.is-annualized strong {
-  color: #ff4b4b;
+.wm-funding-venue-card.dir-positive .wm-funding-venue-rate {
+  color: #ff9d7a;
 }
 
-.wm-funding-row.is-warning .wm-funding-row-metric.is-rate strong,
-.wm-funding-row.is-warning .wm-funding-row-metric.is-annualized strong {
-  color: #ffaa00;
+.wm-funding-venue-card.dir-negative .wm-funding-venue-rate {
+  color: #8bd5ff;
 }
 
-.wm-funding-row.is-negative .wm-funding-row-metric.is-rate strong,
-.wm-funding-row.is-negative .wm-funding-row-metric.is-annualized strong {
-  color: #8dbdff;
+.wm-funding-venue-card.heat-strong.dir-positive .wm-funding-venue-rate,
+.wm-funding-venue-card.heat-extreme.dir-positive .wm-funding-venue-rate {
+  color: #ff6a4a;
 }
 
-.wm-funding-row.is-normal .wm-funding-row-metric.is-rate strong,
-.wm-funding-row.is-normal .wm-funding-row-metric.is-annualized strong {
-  color: var(--wm-green);
+.wm-funding-venue-card.heat-strong.dir-negative .wm-funding-venue-rate,
+.wm-funding-venue-card.heat-extreme.dir-negative .wm-funding-venue-rate {
+  color: #44b7ff;
+}
+
+.wm-funding-venue-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 @media (max-width: 720px) {
@@ -1469,6 +1548,15 @@
   .wm-market-search {
     flex: 1;
     width: auto;
+  }
+
+  .wm-funding-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wm-funding-venue-grid {
+    grid-template-columns: 1fr;
   }
 
   .wm-poly-market-bottom {

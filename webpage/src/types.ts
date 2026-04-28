@@ -390,12 +390,29 @@ export type RuntimeCryptoFundingItem = {
   fundingRatePercent?: number | null;
   annualizedPercent?: number | null;
   severity?: string | null;
-  tone?: 'critical' | 'warning' | 'normal' | 'negative' | 'neutral' | string | null;
+  tone?: 'critical' | 'warning' | 'normal' | 'neutral' | string | null;
   abnormalScore?: number | null;
+  direction?: 'positive' | 'negative' | 'flat' | string | null;
+  marketState?: 'longs-pay-shorts' | 'shorts-pay-longs' | 'flat' | string | null;
+  heatBand?: 'extreme' | 'strong' | 'medium' | 'light' | 'flat' | string | null;
   markPrice?: number | null;
   indexPrice?: number | null;
   nextFundingTime?: string | null;
   updatedAt?: string | null;
+};
+
+export type RuntimeCryptoFundingAsset = {
+  id: string;
+  asset?: string | null;
+  symbol?: string | null;
+  venues?: number | null;
+  bias?: 'longs-pay' | 'shorts-pay' | 'mixed' | 'flat' | string | null;
+  consensusFundingPercent?: number | null;
+  spreadPercent?: number | null;
+  maxAbsFundingPercent?: number | null;
+  tone?: 'critical' | 'warning' | 'normal' | 'neutral' | string | null;
+  nextFundingTime?: string | null;
+  quotes: RuntimeCryptoFundingItem[];
 };
 
 export type RuntimeCryptoFundingPayload = {
@@ -404,6 +421,9 @@ export type RuntimeCryptoFundingPayload = {
   sourceUrl?: string | null;
   status?: string | null;
   sources?: Record<string, string>;
+  venues?: string[];
+  legend?: Record<string, string>;
+  assets?: RuntimeCryptoFundingAsset[];
   items: RuntimeCryptoFundingItem[];
 };
 

@@ -161,7 +161,7 @@ def load_api_settings() -> ApiSettings:
         crypto_funding_watch_api_key=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_API_KEY", ""),
         crypto_funding_watch_bybit_api_key=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_BYBIT_API_KEY", ""),
         crypto_funding_watch_source_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_SOURCE_URL", CRYPTO_FUNDING_WATCH_SOURCE_URL),
-        crypto_funding_watch_ttl_seconds=_get_int("POLYDATA_CRYPTO_FUNDING_WATCH_TTL_SECONDS", 60),
+        crypto_funding_watch_ttl_seconds=_get_int("POLYDATA_CRYPTO_FUNDING_WATCH_TTL_SECONDS", 15),
         crypto_funding_watch_symbols=_get_csv(
             "POLYDATA_CRYPTO_FUNDING_WATCH_SYMBOLS",
             ("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT"),

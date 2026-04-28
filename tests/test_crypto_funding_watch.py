@@ -70,6 +70,13 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
                     "result": {
                         "list": [
                             {
+                                "symbol": "BTCUSDT",
+                                "fundingRate": "-0.00012000",
+                                "markPrice": "63990.0",
+                                "indexPrice": "63970.0",
+                                "nextFundingTime": "1777363200000",
+                            },
+                            {
                                 "symbol": "ETHUSDT",
                                 "fundingRate": "0.00030000",
                                 "markPrice": "3200.0",
@@ -93,23 +100,29 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
         payload = crypto_funding_service.get_crypto_funding_watch_snapshot(self.make_context(), limit=3)
 
         self.assertEqual("ok", payload["status"])
-        self.assertEqual(["SOL", "ETH", "BTC"], [item["asset"] for item in payload["items"]])
-        self.assertEqual("critical", payload["items"][0]["tone"])
-        self.assertAlmostEqual(0.07, payload["items"][0]["fundingRatePercent"])
-        self.assertEqual("Binance", payload["items"][0]["exchange"])
+        self.assertEqual(["SOL", "ETH", "BTC"], [item["asset"] for item in payload["assets"]])
+        self.assertEqual(["Binance", "Bybit"], payload["venues"])
+        btc_row = next(item for item in payload["assets"] if item["asset"] == "BTC")
+        self.assertEqual("mixed", btc_row["bias"])
+        self.assertAlmostEqual(0.022, btc_row["spreadPercent"], places=3)
+        self.assertEqual(["Binance", "Bybit"], [quote["exchange"] for quote in btc_row["quotes"]])
+        self.assertEqual("critical", payload["assets"][0]["tone"])
+        self.assertAlmostEqual(0.07, payload["assets"][0]["maxAbsFundingPercent"])
 
     def test_snapshot_returns_partial_degraded_payload_when_one_source_fails(self):
         payload = crypto_funding_service.get_crypto_funding_watch_snapshot(self.make_context(bybit_fails=True), limit=5)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual("error", payload["sources"]["bybit"])
-        self.assertEqual(["SOL", "BTC"], [item["asset"] for item in payload["items"]])
+        self.assertEqual(["SOL", "BTC"], [item["asset"] for item in payload["assets"]])
 
     def test_snapshot_can_return_stale_payload_when_builder_is_empty(self):
         stale = {
             "generatedAt": "2026-04-27T00:00:00Z",
             "source": "binance/bybit-funding",
             "status": "ok",
+            "venues": ["Binance"],
+            "assets": [{"id": "stale:BTC", "asset": "BTC", "quotes": []}],
             "items": [{"id": "stale:BTCUSDT", "asset": "BTC"}],
         }
 

@@ -43,14 +43,43 @@ def _asset_from_symbol(symbol: str) -> str:
 def _severity(rate: Optional[float]) -> tuple[str, str, float]:
     if rate is None:
         return "unknown", "neutral", 0.0
-    score = abs(rate) * 10000
-    if rate >= 0.0005:
-        return "extreme positive", "critical", score
-    if rate >= 0.0002:
-        return "elevated positive", "warning", score
-    if rate <= -0.0003:
-        return "negative", "negative", score
-    return "normal", "normal", score
+    abs_percent = abs(rate * 100)
+    if abs_percent >= 0.015:
+        return "extreme funding", "critical", abs_percent
+    if abs_percent >= 0.008:
+        return "elevated funding", "warning", abs_percent
+    return "normal funding", "normal", abs_percent
+
+
+def _direction(rate: Optional[float]) -> str:
+    if rate is None:
+        return "flat"
+    if rate > 0:
+        return "positive"
+    if rate < 0:
+        return "negative"
+    return "flat"
+
+
+def _market_state(direction: str) -> str:
+    if direction == "positive":
+        return "longs-pay-shorts"
+    if direction == "negative":
+        return "shorts-pay-longs"
+    return "flat"
+
+
+def _heat_band(rate_percent: Optional[float]) -> str:
+    value = abs(float(rate_percent or 0))
+    if value >= 0.015:
+        return "extreme"
+    if value >= 0.008:
+        return "strong"
+    if value >= 0.003:
+        return "medium"
+    if value > 0:
+        return "light"
+    return "flat"
 
 
 def _normalize_item(
@@ -72,6 +101,8 @@ def _normalize_item(
         return None
     severity, tone, score = _severity(rate)
     asset = _asset_from_symbol(normalized_symbol)
+    funding_rate_percent = rate * 100
+    direction = _direction(rate)
     return {
         "id": f"{exchange.lower()}:{normalized_symbol}",
         "exchange": exchange,
@@ -79,11 +110,14 @@ def _normalize_item(
         "asset": asset,
         "pair": normalized_symbol,
         "fundingRate": rate,
-        "fundingRatePercent": rate * 100,
+        "fundingRatePercent": funding_rate_percent,
         "annualizedPercent": rate * 3 * 365 * 100,
         "severity": severity,
         "tone": tone,
         "abnormalScore": score,
+        "direction": direction,
+        "marketState": _market_state(direction),
+        "heatBand": _heat_band(funding_rate_percent),
         "markPrice": _safe_float(mark_price),
         "indexPrice": _safe_float(index_price),
         "nextFundingTime": _millis_to_iso(next_funding_time),
@@ -106,6 +140,92 @@ def _url_fingerprint(*urls: str) -> str:
 
 def _filter_symbols(items: Iterable[Dict[str, Any]], symbols: set[str]) -> List[Dict[str, Any]]:
     return [item for item in items if str(item.get("symbol") or "").upper().strip() in symbols]
+
+
+def _nearest_timestamp(values: Iterable[Optional[str]]) -> Optional[str]:
+    timestamps = [value for value in values if value]
+    if not timestamps:
+        return None
+    return min(timestamps)
+
+
+def _group_asset_rows(items: List[Dict[str, Any]], *, limit: int) -> tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    venue_order: List[str] = []
+    grouped: Dict[str, Dict[str, Any]] = {}
+
+    for item in items:
+        exchange = str(item.get("exchange") or "Exchange")
+        if exchange not in venue_order:
+            venue_order.append(exchange)
+        asset_key = str(item.get("asset") or item.get("symbol") or item.get("id"))
+        bucket = grouped.setdefault(
+            asset_key,
+            {
+                "id": asset_key,
+                "asset": item.get("asset") or item.get("symbol") or asset_key,
+                "symbol": item.get("asset") or item.get("symbol") or asset_key,
+                "quotes": [],
+            },
+        )
+        bucket["quotes"].append(item)
+
+    rows: List[Dict[str, Any]] = []
+    for asset_key, bucket in grouped.items():
+        quotes = sorted(
+            bucket["quotes"],
+            key=lambda quote: (
+                venue_order.index(str(quote.get("exchange") or "Exchange")),
+                str(quote.get("symbol") or ""),
+            ),
+        )
+        rates = [float(quote["fundingRatePercent"]) for quote in quotes if isinstance(quote.get("fundingRatePercent"), (int, float))]
+        max_abs_percent = max((abs(rate) for rate in rates), default=0.0)
+        spread_percent = max(rates) - min(rates) if len(rates) >= 2 else 0.0
+        consensus_percent = sum(rates) / len(rates) if rates else 0.0
+        positive_count = sum(1 for quote in quotes if quote.get("direction") == "positive")
+        negative_count = sum(1 for quote in quotes if quote.get("direction") == "negative")
+        if positive_count and negative_count:
+            bias = "mixed"
+        elif positive_count:
+            bias = "longs-pay"
+        elif negative_count:
+            bias = "shorts-pay"
+        else:
+            bias = "flat"
+        if max_abs_percent >= 0.015:
+            row_tone = "critical"
+        elif max_abs_percent >= 0.008 or spread_percent >= 0.01:
+            row_tone = "warning"
+        else:
+            row_tone = "normal"
+
+        rows.append(
+            {
+                "id": asset_key,
+                "asset": bucket["asset"],
+                "symbol": bucket["symbol"],
+                "venues": len(quotes),
+                "bias": bias,
+                "consensusFundingPercent": consensus_percent,
+                "spreadPercent": spread_percent,
+                "maxAbsFundingPercent": max_abs_percent,
+                "tone": row_tone,
+                "nextFundingTime": _nearest_timestamp(quote.get("nextFundingTime") for quote in quotes),
+                "quotes": quotes,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            float(row.get("maxAbsFundingPercent") or 0),
+            float(row.get("spreadPercent") or 0),
+            str(row.get("asset") or ""),
+        ),
+        reverse=True,
+    )
+    limited_rows = rows[:limit]
+    limited_items = [quote for row in limited_rows for quote in row.get("quotes", [])]
+    return venue_order, limited_rows, limited_items
 
 
 def _fetch_binance(ctx: dict, symbols: set[str]) -> tuple[List[Dict[str, Any]], str]:
@@ -170,13 +290,13 @@ def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, A
     settings = ctx["SETTINGS"]
     symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
     symbol_set = set(symbols)
-    ttl_seconds = max(15, int(settings.crypto_funding_watch_ttl_seconds or 60))
+    ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
     cache_key = json.dumps(
         {
             "limit": limit,
             "symbols": symbols,
             "urlSet": _url_fingerprint(settings.crypto_funding_watch_api_url, settings.crypto_funding_watch_bybit_api_url),
-            "version": 1,
+            "version": 2,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -203,11 +323,11 @@ def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, A
             ),
             reverse=True,
         )
-        limited_items = items[:limit]
+        venue_order, asset_rows, limited_items = _group_asset_rows(items, limit=limit)
         ok_sources = [status for status in source_status.values() if status == "ok"]
-        if limited_items and len(ok_sources) == len(source_status):
+        if asset_rows and len(ok_sources) == len(source_status):
             status = "ok"
-        elif limited_items:
+        elif asset_rows:
             status = "degraded"
         elif any(value == "missing-url" for value in source_status.values()):
             status = "degraded"
@@ -222,6 +342,12 @@ def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, A
             "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
             "status": status,
             "sources": source_status,
+            "venues": venue_order,
+            "legend": {
+                "positive": "longs pay shorts",
+                "negative": "shorts pay longs",
+            },
+            "assets": asset_rows,
             "items": limited_items,
         }
 
