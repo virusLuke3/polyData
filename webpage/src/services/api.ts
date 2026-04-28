@@ -11,6 +11,7 @@ import type {
   OraclePayload,
   PriceSummary,
   RuntimeMarketGroup,
+  RuntimeCryptoFundingPayload,
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
   RuntimeJin10Payload,
@@ -135,6 +136,10 @@ export function fetchRuntimeCommodities() {
 
 export function fetchRuntimeCrypto() {
   return apiGet<RuntimeMarketGroup>('/runtime/markets/crypto');
+}
+
+export function fetchRuntimeCryptoFundingWatch(limit = 16) {
+  return apiGet<RuntimeCryptoFundingPayload>(`/runtime/crypto/funding-watch?limit=${limit}`);
 }
 
 export function fetchRuntimeF1(limit = 10) {

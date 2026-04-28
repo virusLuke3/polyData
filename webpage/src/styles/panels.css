@@ -1111,6 +1111,190 @@
   color: #8b8f93;
 }
 
+.wm-funding-panel .wm-panel-body {
+  padding: 8px;
+}
+
+.wm-funding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.wm-funding-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 7px;
+  width: 100%;
+  min-height: 94px;
+  margin: 0 0 5px;
+  padding: 8px 8px 7px 11px;
+  border: 1px solid #242424;
+  border-left: 2px solid #22c55e;
+  background: #141414;
+  color: inherit;
+  overflow: hidden;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.wm-funding-card:hover {
+  border-color: #363c38;
+  background: #181c19;
+}
+
+.wm-funding-card.is-critical {
+  border-left-color: #ff4b4b;
+}
+
+.wm-funding-card.is-warning,
+.wm-funding-card.is-negative {
+  border-left-color: #ff8f24;
+}
+
+.wm-funding-card.is-normal {
+  border-left-color: #22c55e;
+}
+
+.wm-funding-card-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wm-funding-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 5px;
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wm-funding-card-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: #22c55e;
+}
+
+.wm-funding-card.is-critical .wm-funding-card-dot {
+  background: #ff4b4b;
+}
+
+.wm-funding-card.is-warning .wm-funding-card-dot,
+.wm-funding-card.is-negative .wm-funding-card-dot {
+  background: #ff8f24;
+}
+
+.wm-funding-card-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 31px;
+  color: var(--wm-text);
+}
+
+.wm-funding-card-title strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-funding-card-title span {
+  flex: 0 0 auto;
+  color: #8d918e;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.wm-funding-card-bottom {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 6px;
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.wm-funding-card-primary {
+  color: var(--wm-text);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.wm-funding-card.is-critical .wm-funding-card-primary {
+  color: #ff4b4b;
+}
+
+.wm-funding-card.is-warning .wm-funding-card-primary,
+.wm-funding-card.is-negative .wm-funding-card-primary {
+  color: #ff8f24;
+}
+
+.wm-funding-card.is-normal .wm-funding-card-primary {
+  color: var(--wm-green);
+}
+
+.wm-funding-card-secondary {
+  flex: 0 0 auto;
+  color: #8d918e;
+}
+
+.wm-funding-card-tertiary {
+  min-width: 0;
+  overflow: hidden;
+  color: #747a75;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-funding-card-marker {
+  align-self: start;
+  justify-self: end;
+  color: #8f9692;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  line-height: 1;
+}
+
+.wm-funding-card.is-critical .wm-funding-card-marker {
+  color: #ff4b4b;
+}
+
+.wm-funding-card.is-warning .wm-funding-card-marker,
+.wm-funding-card.is-negative .wm-funding-card-marker {
+  color: #ff8f24;
+}
+
+.wm-funding-card.is-normal .wm-funding-card-marker {
+  color: var(--wm-green);
+}
+
 @media (max-width: 720px) {
   .wm-market-panel .wm-panel-header {
     align-items: stretch;

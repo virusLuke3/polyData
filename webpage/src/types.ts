@@ -380,6 +380,33 @@ export type RuntimeJin10Payload = {
   items: RuntimeJin10Item[];
 };
 
+export type RuntimeCryptoFundingItem = {
+  id: string;
+  exchange?: string | null;
+  symbol?: string | null;
+  asset?: string | null;
+  pair?: string | null;
+  fundingRate?: number | null;
+  fundingRatePercent?: number | null;
+  annualizedPercent?: number | null;
+  severity?: string | null;
+  tone?: 'critical' | 'warning' | 'normal' | 'negative' | 'neutral' | string | null;
+  abnormalScore?: number | null;
+  markPrice?: number | null;
+  indexPrice?: number | null;
+  nextFundingTime?: string | null;
+  updatedAt?: string | null;
+};
+
+export type RuntimeCryptoFundingPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  items: RuntimeCryptoFundingItem[];
+};
+
 export type RuntimeNbaGame = {
   id?: string;
   name?: string;

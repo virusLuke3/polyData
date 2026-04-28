@@ -18,6 +18,7 @@ import { panel as whaleTracker } from './whale-tracker';
 import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
+import { panel as cryptoFundingWatch } from './crypto-funding-watch';
 import { panel as nbaScoreboard } from './nba-scoreboard';
 import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
@@ -50,6 +51,7 @@ export const PANEL_MODULES: PanelModule[] = [
   suspiciousFlow,
   commoditiesWatch,
   cryptoWatch,
+  cryptoFundingWatch,
   nbaScoreboard,
   nbaIntel,
   espnMatchupPredictor,

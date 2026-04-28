@@ -13,6 +13,9 @@ from db import DEFAULT_DB_PATH
 from data_sources import (
     CLEVELAND_FED_NOWCAST_URL,
     COINGECKO_BASE_URL,
+    CRYPTO_FUNDING_WATCH_API_URL,
+    CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
+    CRYPTO_FUNDING_WATCH_SOURCE_URL,
     ESPN_CORE_NBA_BASE_URL,
     ESPN_NBA_BASE_URL,
     F1_BWENEWS_RSS_URL,
@@ -102,6 +105,13 @@ class ApiSettings:
     finance_runtime_ttl_seconds: int
     sports_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
+    crypto_funding_watch_api_url: str
+    crypto_funding_watch_bybit_api_url: str
+    crypto_funding_watch_api_key: str
+    crypto_funding_watch_bybit_api_key: str
+    crypto_funding_watch_source_url: str
+    crypto_funding_watch_ttl_seconds: int
+    crypto_funding_watch_symbols: tuple[str, ...]
     yahoo_chart_base_url: str
     coingecko_base_url: str
     espn_nba_base_url: str
@@ -146,6 +156,16 @@ def load_api_settings() -> ApiSettings:
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
+        crypto_funding_watch_api_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_API_URL", CRYPTO_FUNDING_WATCH_API_URL),
+        crypto_funding_watch_bybit_api_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_BYBIT_API_URL", CRYPTO_FUNDING_WATCH_BYBIT_API_URL),
+        crypto_funding_watch_api_key=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_API_KEY", ""),
+        crypto_funding_watch_bybit_api_key=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_BYBIT_API_KEY", ""),
+        crypto_funding_watch_source_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_SOURCE_URL", CRYPTO_FUNDING_WATCH_SOURCE_URL),
+        crypto_funding_watch_ttl_seconds=_get_int("POLYDATA_CRYPTO_FUNDING_WATCH_TTL_SECONDS", 60),
+        crypto_funding_watch_symbols=_get_csv(
+            "POLYDATA_CRYPTO_FUNDING_WATCH_SYMBOLS",
+            ("BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT"),
+        ),
         yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", YAHOO_CHART_BASE_URL),
         coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", COINGECKO_BASE_URL),
         espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", ESPN_NBA_BASE_URL),

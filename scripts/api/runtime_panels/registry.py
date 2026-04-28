@@ -5,6 +5,7 @@ from typing import Dict, Iterable, List, Optional
 
 from .modules import (
     alpha_signal,
+    crypto_funding_watch,
     commodities_watch,
     crypto_watch,
     espn_matchup_predictor,
@@ -23,6 +24,7 @@ from .types import RuntimePanelModule
 _MODULES: List[ModuleType] = [
     commodities_watch,
     crypto_watch,
+    crypto_funding_watch,
     f1_trackside,
     jin10_flash,
     new_market_signals,
@@ -69,6 +71,7 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "suspicious-flow",
     "commodities-watch",
     "crypto-watch",
+    "crypto-funding-watch",
     "nba-scoreboard",
     "nba-intel",
     "espn-matchup-predictor",
