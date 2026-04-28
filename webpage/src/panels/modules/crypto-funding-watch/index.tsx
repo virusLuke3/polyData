@@ -33,6 +33,14 @@ function toneLabel(item: RuntimeCryptoFundingItem) {
   return 'Normal';
 }
 
+function toneClass(item: RuntimeCryptoFundingItem) {
+  if (item.tone === 'critical') return 'critical';
+  if (item.tone === 'warning') return 'warning';
+  if (item.tone === 'negative') return 'negative';
+  if (item.tone === 'normal') return 'normal';
+  return 'neutral';
+}
+
 function compactTimeLabel(value?: string | null) {
   if (!value) return '--';
   const relative = formatRelative(value);
@@ -55,6 +63,10 @@ function maxAbsFunding(items: RuntimeCryptoFundingItem[]) {
   return `${Math.max(...values).toFixed(3)}%`;
 }
 
+function pressureCount(items: RuntimeCryptoFundingItem[]) {
+  return items.filter((item) => item.tone === 'critical' || item.tone === 'warning' || item.tone === 'negative').length;
+}
+
 function FundingSummary({ items }: { items: RuntimeCryptoFundingItem[] }) {
   return (
     <div className="wm-funding-summary-grid">
@@ -70,39 +82,48 @@ function FundingSummary({ items }: { items: RuntimeCryptoFundingItem[] }) {
         <span className="wm-funding-summary-label">Max Abs</span>
         <strong className="wm-funding-summary-value">{maxAbsFunding(items)}</strong>
       </div>
+      <div className="wm-funding-summary-tile is-pressure">
+        <span className="wm-funding-summary-label">Pressure</span>
+        <strong className="wm-funding-summary-value">{pressureCount(items)}</strong>
+      </div>
     </div>
   );
 }
 
 function FundingRow({ item, index }: { item: RuntimeCryptoFundingItem; index: number }) {
-  const tone = item.tone || 'neutral';
+  const tone = toneClass(item);
   return (
     <article className={`wm-funding-row is-${tone}`} title={`${item.exchange || 'Exchange'} ${item.symbol || ''}`}>
-      <span className="wm-funding-row-rail" aria-hidden="true" />
       <div className="wm-funding-row-rank">{String(index + 1).padStart(2, '0')}</div>
-      <div className="wm-funding-row-identity">
-        <div className="wm-funding-row-symbol">{item.asset || item.symbol || 'CRYPTO'}</div>
-        <div className="wm-funding-row-meta">
-          <span>{item.exchange || 'Exchange'}</span>
-          <span>{item.symbol || item.pair || '--'}</span>
+      <div className="wm-funding-row-main">
+        <div className="wm-funding-row-top">
+          <div className="wm-funding-row-identity">
+            <div className="wm-funding-row-symbol">{item.asset || item.symbol || 'CRYPTO'}</div>
+            <div className="wm-funding-row-meta">
+              <span>{item.exchange || 'Exchange'}</span>
+              <span>{item.symbol || item.pair || '--'}</span>
+            </div>
+          </div>
+          <span className={`wm-funding-tone-badge is-${tone}`}>{toneLabel(item)}</span>
         </div>
-      </div>
-      <div className="wm-funding-row-rate">
-        <strong>{percentLabel(item.fundingRatePercent)}</strong>
-        <span>{priceLabel(item.markPrice)}</span>
-      </div>
-      <div className="wm-funding-row-annualized">
-        <strong>{percentLabel(item.annualizedPercent, 1)}</strong>
-        <span>annualized</span>
-      </div>
-      <div className="wm-funding-row-timing">
-        <strong>{compactTimeLabel(item.nextFundingTime)}</strong>
-        <span>next funding</span>
-      </div>
-      <div className="wm-funding-row-tone">
-        <span className={`wm-status-pill ${tone === 'critical' ? 'critical' : tone === 'warning' || tone === 'negative' ? 'warning' : 'positive'}`}>
-          {toneLabel(item)}
-        </span>
+        <div className="wm-funding-row-metrics">
+          <div className="wm-funding-row-metric is-rate">
+            <span>Funding</span>
+            <strong>{percentLabel(item.fundingRatePercent)}</strong>
+          </div>
+          <div className="wm-funding-row-metric is-annualized">
+            <span>Annualized</span>
+            <strong>{percentLabel(item.annualizedPercent, 1)}</strong>
+          </div>
+          <div className="wm-funding-row-metric">
+            <span>Mark</span>
+            <strong>{priceLabel(item.markPrice)}</strong>
+          </div>
+          <div className="wm-funding-row-metric">
+            <span>Reset</span>
+            <strong>{compactTimeLabel(item.nextFundingTime)}</strong>
+          </div>
+        </div>
       </div>
     </article>
   );
@@ -112,7 +133,8 @@ function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null
   const items = payload?.items || [];
   if (!items.length) {
     return (
-      <div className="wm-empty-state">
+      <div className="wm-funding-empty-state">
+        <span>Standby</span>
         <strong>No funding rates loaded yet.</strong>
         <em>{sourceStatus(payload).toUpperCase()}</em>
       </div>
@@ -122,13 +144,9 @@ function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null
     <div className="wm-funding-monitor">
       <FundingSummary items={items} />
       <div className="wm-funding-table">
-        <div className="wm-funding-table-head">
-          <span>Rank</span>
-          <span>Market</span>
-          <span>Funding</span>
-          <span>Annualized</span>
-          <span>Reset</span>
-          <span>Tone</span>
+        <div className="wm-funding-section-head">
+          <span>Perpetual Funding Pressure</span>
+          <em>{sourceStatus(payload).toUpperCase()}</em>
         </div>
         <div className="wm-funding-table-body">
           {items.map((item, index) => <FundingRow key={item.id} item={item} index={index} />)}
