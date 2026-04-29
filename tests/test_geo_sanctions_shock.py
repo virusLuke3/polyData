@@ -138,48 +138,18 @@ class GeoSanctionsShockServiceTestCase(unittest.TestCase):
                 }
             raise RuntimeError(f"unexpected url {url}")
 
-        def search_markets(query, limit=10):
-            if "iran" in str(query).lower():
-                return {
-                    "items": [
-                        {
-                            "id": 101,
-                            "slug": "iran-ceasefire-market",
-                            "title": "Will Iran reach a ceasefire deal this quarter?",
-                            "conditionId": "condition-iran-1",
-                        }
-                    ]
-                }
-            if "china" in str(query).lower():
-                return {
-                    "items": [
-                        {
-                            "id": 102,
-                            "slug": "china-export-controls-market",
-                            "title": "Will the US tighten China export controls in 2026?",
-                            "conditionId": "condition-china-1",
-                        }
-                    ]
-                }
-            return {"items": []}
-
         return {
             "SETTINGS": settings,
             "app": FakeApp(),
             "requests": requests_lib,
             "http_json_get": http_json_get,
-            "search_markets": search_markets,
-            "get_gamma_active_market_filter": lambda: {
-                "conditionIds": ["condition-iran-1"],
-                "slugs": ["iran-ceasefire-market"],
-            },
             "get_cached_runtime_payload": lambda namespace, cache_key: {"ofacRecordCountTotal": previous_total},
             "SNAPSHOT_STORE": SimpleNamespace(get=lambda *args, **kwargs: None, get_stale=lambda *args, **kwargs: None),
             "get_snapshot_payload": lambda namespace, cache_key, builder, ttl_seconds=900: builder(),
             "utc_now_iso": lambda: "2026-04-28T00:00:00Z",
         }
 
-    def test_snapshot_builds_summary_items_and_linked_markets(self):
+    def test_snapshot_builds_summary_metrics_from_external_sources(self):
         payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(
             self.make_context(requests_lib=FakeRequests()),
             limit=5,
@@ -192,7 +162,7 @@ class GeoSanctionsShockServiceTestCase(unittest.TestCase):
         self.assertEqual("elevated", payload["summary"]["nuclearRisk"])
         self.assertEqual("active", payload["summary"]["militaryFeed"])
         self.assertTrue(payload["items"])
-        self.assertEqual("Will Iran reach a ceasefire deal this quarter?", payload["linkedMarkets"][0]["title"])
+        self.assertEqual([], payload["linkedMarkets"])
 
     def test_snapshot_returns_renderable_degraded_payload_when_sources_fail(self):
         def broken_http_json_get(url, params=None, timeout=12, headers=None):

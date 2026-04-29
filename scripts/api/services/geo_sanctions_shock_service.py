@@ -477,112 +477,6 @@ def _military_feed_label(conflict_state: str, conflict_items: List[Dict[str, Any
     return "degraded"
 
 
-def _gamma_active_sets(ctx: dict) -> tuple[set[str], set[str]]:
-    getter = ctx.get("get_gamma_active_market_filter")
-    if not callable(getter):
-        return set(), set()
-    try:
-        payload = getter() or {}
-    except Exception:
-        return set(), set()
-    condition_ids = {str(value or "").strip().lower() for value in (payload.get("conditionIds") or []) if str(value or "").strip()}
-    slugs = {str(value or "").strip().lower() for value in (payload.get("slugs") or []) if str(value or "").strip()}
-    return condition_ids, slugs
-
-
-def _theme_terms(items: List[Dict[str, Any]]) -> List[str]:
-    haystack = " ".join(
-        " ".join(
-            [
-                str(item.get("headline") or ""),
-                str(item.get("summary") or ""),
-                " ".join(item.get("targetLabels") or []),
-            ]
-        )
-        for item in items
-    ).lower()
-    themes: List[str] = []
-    for keyword in ("sanctions", "war", "ceasefire", "nuclear", "military", "oil", "tariff"):
-        if keyword.rstrip("s") in haystack or keyword in haystack:
-            themes.append(keyword)
-    return themes
-
-
-def _score_market_row(row: Dict[str, Any], *, targets: List[str], themes: List[str], query: str, gamma_condition_ids: set[str], gamma_slugs: set[str]) -> int:
-    text = " ".join([str(row.get("title") or ""), str(row.get("slug") or "")]).lower()
-    score = 0
-    lowered_query = query.lower()
-    if lowered_query and lowered_query in text:
-        score += 5
-    for target in targets:
-        if any(alias in text for alias in TARGET_ALIASES.get(target, ())):
-            score += 4
-    for theme in themes:
-        if theme in text:
-            score += 2
-    condition_id = str(row.get("conditionId") or "").strip().lower()
-    slug = str(row.get("slug") or "").strip().lower()
-    if (condition_id and condition_id in gamma_condition_ids) or (slug and slug in gamma_slugs):
-        score += 2
-    return score
-
-
-def _link_markets(ctx: dict, *, targets: List[str], items: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    search_markets = ctx.get("search_markets")
-    if not callable(search_markets):
-        return []
-    queries: List[str] = []
-    for target in targets[:3]:
-        lowered = target.lower()
-        queries.extend([lowered, f"{lowered} sanctions", f"{lowered} war"])
-        if target in {"IRAN", "ISRAEL / GAZA", "UKRAINE"}:
-            queries.append(f"{lowered} ceasefire")
-    for theme in _theme_terms(items):
-        queries.append(theme)
-    queries.extend(["sanctions", "war escalation"])
-    gamma_condition_ids, gamma_slugs = _gamma_active_sets(ctx)
-    themes = _theme_terms(items)
-
-    scored: Dict[str, Dict[str, Any]] = {}
-    for query in _unique(queries)[:10]:
-        try:
-            payload = search_markets(query, limit=max(limit * 2, 8)) or {}
-        except Exception:
-            continue
-        for row in payload.get("items") or []:
-            key = str(row.get("id") or row.get("slug") or row.get("title") or "")
-            if not key:
-                continue
-            score = _score_market_row(
-                row,
-                targets=targets,
-                themes=themes,
-                query=query,
-                gamma_condition_ids=gamma_condition_ids,
-                gamma_slugs=gamma_slugs,
-            )
-            if score <= 0:
-                continue
-            existing = scored.get(key)
-            gamma_active = (
-                str(row.get("conditionId") or "").strip().lower() in gamma_condition_ids
-                or str(row.get("slug") or "").strip().lower() in gamma_slugs
-            )
-            candidate = {
-                "marketId": row.get("id"),
-                "slug": row.get("slug"),
-                "title": row.get("title"),
-                "matchedBy": query,
-                "score": score,
-                "gammaActive": gamma_active,
-            }
-            if existing is None or int(candidate["score"] or 0) > int(existing["score"] or 0):
-                scored[key] = candidate
-    rows = list(scored.values())
-    rows.sort(key=lambda row: (bool(row.get("gammaActive")), int(row.get("score") or 0), str(row.get("title") or "")), reverse=True)
-    return rows[: max(1, min(limit, 6))]
-
-
 def _payload_status(source_states: Dict[str, str], items: List[Dict[str, Any]]) -> str:
     states = list(source_states.values())
     if not states:
@@ -637,7 +531,6 @@ def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = 6) -> Dict[str, Any
         recent_notice_count = len(notices_snapshot.get("items") or [])
         new_sanctions_count = max(0, record_total - previous_record_total) if previous_record_total else recent_notice_count
 
-        linked_markets = _link_markets(ctx, targets=targets, items=items, limit=limit)
         payload.update(
             {
                 "generatedAt": ctx["utc_now_iso"](),
@@ -653,7 +546,7 @@ def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = 6) -> Dict[str, Any
                     "militaryFeed": _military_feed_label(str(conflict_snapshot.get("state") or ""), conflict_snapshot.get("items") or []),
                 },
                 "items": items[: max(3, min(limit, 8))],
-                "linkedMarkets": linked_markets,
+                "linkedMarkets": [],
                 "ofacRecordCountTotal": record_total,
                 "publishDates": ofac_snapshot.get("publishDates") or [],
             }
