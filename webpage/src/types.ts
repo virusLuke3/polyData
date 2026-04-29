@@ -512,6 +512,51 @@ export type RuntimeInflationNowcastPayload = {
   url?: string;
 };
 
+export type RuntimeGeoSanctionsShockSummary = {
+  hotspotCount?: number;
+  newSanctionsCount?: number;
+  targetLabels?: string[];
+  targetSummary?: string;
+  nuclearRisk?: string;
+  militaryFeed?: string;
+};
+
+export type RuntimeGeoSanctionsShockItem = {
+  id?: string | null;
+  kind?: string | null;
+  headline?: string | null;
+  summary?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  occurredAt?: string | null;
+  severity?: string | null;
+  targetLabels?: string[];
+  country?: string | null;
+  tags?: string[];
+};
+
+export type RuntimeGeoSanctionsShockLinkedMarket = {
+  marketId?: number | string | null;
+  slug?: string | null;
+  title?: string | null;
+  matchedBy?: string | null;
+  score?: number | null;
+  gammaActive?: boolean;
+};
+
+export type RuntimeGeoSanctionsShockPayload = {
+  generatedAt?: string;
+  source?: string;
+  sourceUrl?: string;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeGeoSanctionsShockSummary | null;
+  items?: RuntimeGeoSanctionsShockItem[];
+  linkedMarkets?: RuntimeGeoSanctionsShockLinkedMarket[];
+  ofacRecordCountTotal?: number;
+  publishDates?: string[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

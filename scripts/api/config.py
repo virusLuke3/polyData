@@ -20,6 +20,11 @@ from data_sources import (
     ESPN_NBA_BASE_URL,
     F1_BWENEWS_RSS_URL,
     F1_BWENEWS_SOURCE_URL,
+    GEO_SHOCK_CONFLICT_API_URL,
+    GEO_SHOCK_FEDERAL_REGISTER_API_URL,
+    GEO_SHOCK_OFAC_CONSOLIDATED_URL,
+    GEO_SHOCK_OFAC_SDN_URL,
+    GEO_SHOCK_SOURCE_URL,
     JIN10_FLASH_API_URL,
     JIN10_FLASH_DETAIL_BASE_URL,
     JIN10_LIVE_URL,
@@ -119,6 +124,12 @@ class ApiSettings:
     nba_lineups_base_url: str
     nba_official_base_url: str
     cleveland_fed_nowcast_url: str
+    geo_shock_ofac_sdn_url: str
+    geo_shock_ofac_consolidated_url: str
+    geo_shock_federal_register_api_url: str
+    geo_shock_conflict_api_url: str
+    geo_shock_source_url: str
+    geo_shock_ttl_seconds: int
     f1_panel_path: str
     f1_bwenews_rss_url: str
     f1_bwenews_source_url: str
@@ -192,6 +203,24 @@ def load_api_settings() -> ApiSettings:
         nba_lineups_base_url=_get_str("POLYDATA_NBA_LINEUPS_BASE_URL", NBA_LINEUPS_BASE_URL),
         nba_official_base_url=_get_str("POLYDATA_NBA_OFFICIAL_BASE_URL", NBA_OFFICIAL_BASE_URL),
         cleveland_fed_nowcast_url=_get_str("POLYDATA_CLEVELAND_FED_NOWCAST_URL", CLEVELAND_FED_NOWCAST_URL),
+        geo_shock_ofac_sdn_url=_get_str(
+            "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
+            GEO_SHOCK_OFAC_SDN_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
+        ),
+        geo_shock_ofac_consolidated_url=_get_str(
+            "POLYDATA_GEO_SHOCK_OFAC_CONSOLIDATED_URL",
+            GEO_SHOCK_OFAC_CONSOLIDATED_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
+        ),
+        geo_shock_federal_register_api_url=_get_str(
+            "POLYDATA_GEO_SHOCK_FEDERAL_REGISTER_API_URL",
+            GEO_SHOCK_FEDERAL_REGISTER_API_URL or "https://www.federalregister.gov/api/v1/documents.json",
+        ),
+        geo_shock_conflict_api_url=_get_str("POLYDATA_GEO_SHOCK_CONFLICT_API_URL", GEO_SHOCK_CONFLICT_API_URL),
+        geo_shock_source_url=_get_str(
+            "POLYDATA_GEO_SHOCK_SOURCE_URL",
+            GEO_SHOCK_SOURCE_URL or "https://ofac.treasury.gov/sanctions-list-service",
+        ),
+        geo_shock_ttl_seconds=_get_int("POLYDATA_GEO_SHOCK_TTL_SECONDS", 900),
         f1_panel_path=_get_str(
             "POLYDATA_F1_PANEL_PATH",
             str((PROJECT_ROOT / "data" / "runtime" / "f1" / "panel.json").resolve()),

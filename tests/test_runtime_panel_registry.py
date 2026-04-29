@@ -31,6 +31,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "CRYPTO_SYMBOLS": [],
         "get_market_group_snapshot": lambda symbols, kind: {"kind": kind, "items": symbols},
         "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
+        "get_geo_sanctions_shock_snapshot": lambda limit=6: {"limit": limit},
         "get_jin10_panel_snapshot": lambda limit=24: {"limit": limit},
         "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
         "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},

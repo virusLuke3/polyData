@@ -12,6 +12,7 @@ import type {
   PriceSummary,
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
+  RuntimeGeoSanctionsShockPayload,
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
   RuntimeJin10Payload,
@@ -164,6 +165,10 @@ export function fetchRuntimeNbaMatchupPredictor(limit = 8) {
 
 export function fetchRuntimeInflationNowcast() {
   return apiGet<RuntimeInflationNowcastPayload>('/runtime/macro/inflation-nowcast');
+}
+
+export function fetchRuntimeGeoSanctionsShock(limit = 6) {
+  return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`);
 }
 
 export function fetchRuntimeAlpha(limit = 8) {
