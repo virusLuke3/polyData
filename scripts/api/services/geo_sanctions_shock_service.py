@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 
 
 GEO_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:world:geo-sanctions-shock"
+GEO_SHOCK_CACHE_KEY = "panel-v1"
 DEFAULT_FEDERAL_REGISTER_TERMS = (
     "OFAC sanctions action",
     "Iran sanctions",
@@ -17,6 +18,7 @@ DEFAULT_FEDERAL_REGISTER_TERMS = (
     "nuclear emergency",
     "export controls China",
 )
+DEFAULT_ITEM_LIMIT = 8
 TARGET_ALIASES: Dict[str, tuple[str, ...]] = {
     "IRAN": ("iran", "iranian", "tehran", "persian gulf"),
     "RUSSIA": ("russia", "russian", "moscow", "crimea", "kremlin"),
@@ -45,6 +47,12 @@ SHOCK_KEYWORDS = (
 MILITARY_KEYWORDS = ("military", "missile", "drone", "strike", "naval", "troop", "defense", "rocket")
 NUCLEAR_KEYWORDS = ("nuclear", "uranium", "reactor", "atomic", "radiological")
 SEVERITY_ORDER = {"critical": 3, "warning": 2, "watch": 1, "muted": 0}
+DEFAULT_SOURCE_STATES = {
+    "ofacSdn": "seed-missing",
+    "ofacConsolidated": "seed-missing",
+    "federalRegister": "seed-missing",
+    "conflictFeed": "seed-missing",
+}
 
 
 def _local_name(tag: str) -> str:
@@ -111,13 +119,15 @@ def _has_keyword(*parts: Any, keywords: Iterable[str]) -> bool:
     return any(keyword in haystack for keyword in keywords)
 
 
-def _empty_payload(ctx: dict, *, status: str = "empty", source_states: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    states = dict(DEFAULT_SOURCE_STATES)
+    states.update(source_states or {})
     return {
         "generatedAt": ctx["utc_now_iso"](),
         "source": "OFAC / Federal Register / Conflict feed",
         "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
         "status": status,
-        "sources": dict(source_states or {}),
+        "sources": states,
         "summary": {
             "hotspotCount": 0,
             "newSanctionsCount": 0,
@@ -132,22 +142,109 @@ def _empty_payload(ctx: dict, *, status: str = "empty", source_states: Optional[
     }
 
 
-def _previous_snapshot(ctx: dict, cache_key: str) -> Dict[str, Any]:
-    getter = ctx.get("get_cached_runtime_payload")
+def _seed_cache_ttl_seconds(ctx: dict) -> int:
+    return max(300, int(ctx["SETTINGS"].geo_shock_ttl_seconds or 900))
+
+
+def _copy_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+
+
+def _seeded_payload_from_cache(ctx: dict) -> Optional[Dict[str, Any]]:
+    getter = ctx.get("get_cached_json")
     if callable(getter):
-        payload = getter(GEO_SHOCK_SNAPSHOT_NAMESPACE, cache_key)
+        payload = getter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
         if isinstance(payload, dict):
+            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            if snapshot_store is not None:
+                snapshot_store.set(
+                    GEO_SHOCK_SNAPSHOT_NAMESPACE,
+                    GEO_SHOCK_CACHE_KEY,
+                    payload,
+                    _seed_cache_ttl_seconds(ctx),
+                )
             return payload
+
     snapshot_store = ctx.get("SNAPSHOT_STORE")
     if snapshot_store is None:
-        return {}
-    for method_name in ("get", "get_stale"):
-        method = getattr(snapshot_store, method_name, None)
-        if callable(method):
-            payload = method(GEO_SHOCK_SNAPSHOT_NAMESPACE, cache_key)
-            if isinstance(payload, dict):
-                return payload
+        return None
+    payload = snapshot_store.get(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
+    if isinstance(payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY, payload, _seed_cache_ttl_seconds(ctx))
+        return payload
+    return None
+
+
+def _stale_seeded_payload(ctx: dict) -> Optional[Dict[str, Any]]:
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is None:
+        return None
+    payload = snapshot_store.get_stale(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
+    return payload if isinstance(payload, dict) else None
+
+
+def _seeded_fallback_payload(ctx: dict) -> Dict[str, Any]:
+    stale = _stale_seeded_payload(ctx)
+    if isinstance(stale, dict):
+        return stale
+    payload = _empty_payload(
+        ctx,
+        status="degraded",
+        source_states={key: "warming" for key in DEFAULT_SOURCE_STATES},
+    )
+    payload["cacheMode"] = "warming"
+    return payload
+
+
+def _previous_seed_payload(ctx: dict) -> Dict[str, Any]:
+    payload = _seeded_payload_from_cache(ctx)
+    if isinstance(payload, dict):
+        return payload
+    payload = _stale_seeded_payload(ctx)
+    if isinstance(payload, dict):
+        return payload
     return {}
+
+
+def _with_limit(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
+    normalized_limit = max(1, min(int(limit or 6), DEFAULT_ITEM_LIMIT))
+    result = _copy_payload(payload)
+    items = result.get("items")
+    if isinstance(items, list):
+        result["items"] = items[:normalized_limit]
+    else:
+        result["items"] = []
+    result["linkedMarkets"] = []
+    return result
+
+
+def payload_has_material_signal(payload: Dict[str, Any]) -> bool:
+    items = payload.get("items")
+    if isinstance(items, list) and items:
+        return True
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    if int(summary.get("hotspotCount") or 0) > 0:
+        return True
+    if int(summary.get("newSanctionsCount") or 0) > 0:
+        return True
+    if summary.get("targetLabels"):
+        return True
+    if str(summary.get("targetSummary") or "").strip().upper() not in {"", "MONITORING"}:
+        return True
+    if str(summary.get("nuclearRisk") or "").strip().lower() not in {"", "guarded"}:
+        return True
+    if str(summary.get("militaryFeed") or "").strip().lower() not in {"", "standby"}:
+        return True
+    return False
+
+
+def payload_has_source_success(payload: Dict[str, Any]) -> bool:
+    sources = payload.get("sources")
+    if not isinstance(sources, dict):
+        return False
+    return any(str(state or "").strip().lower() == "ok" for state in sources.values())
 
 
 def _ofac_headers() -> Dict[str, str]:
@@ -480,7 +577,7 @@ def _military_feed_label(conflict_state: str, conflict_items: List[Dict[str, Any
 def _payload_status(source_states: Dict[str, str], items: List[Dict[str, Any]]) -> str:
     states = list(source_states.values())
     if not states:
-        return "empty" if not items else "ok"
+        return "degraded" if not items else "ok"
     if items and all(state == "ok" for state in states if state not in {"missing-url"}):
         return "ok" if all(state == "ok" for state in states) else "degraded"
     if items:
@@ -490,73 +587,70 @@ def _payload_status(source_states: Dict[str, str], items: List[Dict[str, Any]]) 
     return "degraded"
 
 
-def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = 6) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": max(1, int(limit or 6))}, sort_keys=True, ensure_ascii=True)
-    previous = _previous_snapshot(ctx, cache_key)
+def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict[str, Any]] = None, item_limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    previous_payload = previous or {}
+    payload = _empty_payload(ctx, status="degraded")
+    ofac_snapshot = _fetch_ofac_snapshot(ctx)
+    notices_snapshot = _fetch_federal_register_snapshot(ctx)
+    conflict_snapshot = _fetch_conflict_snapshot(ctx)
 
-    def _builder() -> Dict[str, Any]:
-        payload = _empty_payload(ctx, status="empty")
-        ofac_snapshot = _fetch_ofac_snapshot(ctx)
-        notices_snapshot = _fetch_federal_register_snapshot(ctx)
-        conflict_snapshot = _fetch_conflict_snapshot(ctx)
+    source_states = {
+        **(ofac_snapshot.get("states") or {}),
+        "federalRegister": notices_snapshot.get("state") or "error",
+        "conflictFeed": conflict_snapshot.get("state") or "error",
+    }
 
-        source_states = {
-            **(ofac_snapshot.get("states") or {}),
-            "federalRegister": notices_snapshot.get("state") or "error",
-            "conflictFeed": conflict_snapshot.get("state") or "error",
-        }
-
-        items = [
-            *(ofac_snapshot.get("focusEntries") or []),
-            *(notices_snapshot.get("items") or []),
-            *(conflict_snapshot.get("items") or []),
-        ]
-        items.sort(
-            key=lambda item: (
-                _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
-                SEVERITY_ORDER.get(str(item.get("severity")), 0),
-            ),
-            reverse=True,
-        )
-        items = items[: max(4, min(limit * 2, 12))]
-
-        target_scores = _merge_target_scores(
-            ofac_snapshot.get("targetScores") or {},
-            notices_snapshot.get("targetScores") or {},
-            conflict_snapshot.get("targetScores") or {},
-        )
-        targets = _top_targets(target_scores)
-        record_total = int(ofac_snapshot.get("recordCountTotal") or 0)
-        previous_record_total = int(previous.get("ofacRecordCountTotal") or 0)
-        recent_notice_count = len(notices_snapshot.get("items") or [])
-        new_sanctions_count = max(0, record_total - previous_record_total) if previous_record_total else recent_notice_count
-
-        payload.update(
-            {
-                "generatedAt": ctx["utc_now_iso"](),
-                "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
-                "status": _payload_status(source_states, items),
-                "sources": source_states,
-                "summary": {
-                    "hotspotCount": int(conflict_snapshot.get("hotspotCount") or 0),
-                    "newSanctionsCount": int(new_sanctions_count),
-                    "targetLabels": targets,
-                    "targetSummary": " / ".join(targets) if targets else "MONITORING",
-                    "nuclearRisk": _nuclear_risk(items, targets),
-                    "militaryFeed": _military_feed_label(str(conflict_snapshot.get("state") or ""), conflict_snapshot.get("items") or []),
-                },
-                "items": items[: max(3, min(limit, 8))],
-                "linkedMarkets": [],
-                "ofacRecordCountTotal": record_total,
-                "publishDates": ofac_snapshot.get("publishDates") or [],
-            }
-        )
-        return payload
-
-    ttl_seconds = max(300, int(ctx["SETTINGS"].geo_shock_ttl_seconds or 900))
-    return ctx["get_snapshot_payload"](
-        GEO_SHOCK_SNAPSHOT_NAMESPACE,
-        cache_key,
-        _builder,
-        ttl_seconds=ttl_seconds,
+    items = [
+        *(ofac_snapshot.get("focusEntries") or []),
+        *(notices_snapshot.get("items") or []),
+        *(conflict_snapshot.get("items") or []),
+    ]
+    items.sort(
+        key=lambda item: (
+            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
+            SEVERITY_ORDER.get(str(item.get("severity")), 0),
+        ),
+        reverse=True,
     )
+    items = items[: max(3, min(int(item_limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
+
+    target_scores = _merge_target_scores(
+        ofac_snapshot.get("targetScores") or {},
+        notices_snapshot.get("targetScores") or {},
+        conflict_snapshot.get("targetScores") or {},
+    )
+    targets = _top_targets(target_scores)
+    record_total = int(ofac_snapshot.get("recordCountTotal") or 0)
+    previous_record_total = int(previous_payload.get("ofacRecordCountTotal") or 0)
+    recent_notice_count = len(notices_snapshot.get("items") or [])
+    new_sanctions_count = max(0, record_total - previous_record_total) if previous_record_total else recent_notice_count
+
+    payload.update(
+        {
+            "generatedAt": ctx["utc_now_iso"](),
+            "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
+            "status": _payload_status(source_states, items),
+            "sources": source_states,
+            "summary": {
+                "hotspotCount": int(conflict_snapshot.get("hotspotCount") or 0),
+                "newSanctionsCount": int(new_sanctions_count),
+                "targetLabels": targets,
+                "targetSummary": " / ".join(targets) if targets else "MONITORING",
+                "nuclearRisk": _nuclear_risk(items, targets),
+                "militaryFeed": _military_feed_label(str(conflict_snapshot.get("state") or ""), conflict_snapshot.get("items") or []),
+            },
+            "items": items,
+            "linkedMarkets": [],
+            "ofacRecordCountTotal": record_total,
+            "publishDates": ofac_snapshot.get("publishDates") or [],
+            "cacheMode": "seeded",
+        }
+    )
+    return payload
+
+
+def get_geo_sanctions_shock_snapshot(ctx: dict, limit: int = 6) -> Dict[str, Any]:
+    payload = _seeded_payload_from_cache(ctx)
+    if payload is None:
+        payload = _seeded_fallback_payload(ctx)
+    return _with_limit(payload, limit)

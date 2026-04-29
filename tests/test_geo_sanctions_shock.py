@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +18,8 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.services import geo_sanctions_shock_service
+from runtime.geo_sanctions_shock_watcher import GeoSanctionsShockWatcher
+from runtime.snapshot_store import SnapshotStore
 
 
 SDN_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -58,6 +62,9 @@ class FakeLogger:
     def warning(self, *args, **kwargs) -> None:
         return None
 
+    def info(self, *args, **kwargs) -> None:
+        return None
+
 
 class FakeApp:
     logger = FakeLogger()
@@ -82,7 +89,21 @@ class FakeRequests:
         raise RuntimeError(f"unexpected url {url}")
 
 
-class GeoSanctionsShockServiceTestCase(unittest.TestCase):
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: Dict[str, str] = {}
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.values[key] = value
+
+    def ping(self) -> bool:
+        return True
+
+
+class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
     def make_context(self, *, requests_lib: Any = None, conflict_url: str = "conflict-url", previous_total: int = 3) -> Dict[str, Any]:
         settings = SimpleNamespace(
             geo_shock_ofac_sdn_url="sdn-url",
@@ -143,16 +164,15 @@ class GeoSanctionsShockServiceTestCase(unittest.TestCase):
             "app": FakeApp(),
             "requests": requests_lib,
             "http_json_get": http_json_get,
-            "get_cached_runtime_payload": lambda namespace, cache_key: {"ofacRecordCountTotal": previous_total},
-            "SNAPSHOT_STORE": SimpleNamespace(get=lambda *args, **kwargs: None, get_stale=lambda *args, **kwargs: None),
-            "get_snapshot_payload": lambda namespace, cache_key, builder, ttl_seconds=900: builder(),
             "utc_now_iso": lambda: "2026-04-28T00:00:00Z",
+            "get_cached_json": lambda namespace, cache_key: {"ofacRecordCountTotal": previous_total},
+            "SNAPSHOT_STORE": SimpleNamespace(set=lambda *args, **kwargs: None),
         }
 
-    def test_snapshot_builds_summary_metrics_from_external_sources(self):
-        payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(
+    def test_seed_builder_builds_summary_metrics_from_external_sources(self):
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(
             self.make_context(requests_lib=FakeRequests()),
-            limit=5,
+            previous={"ofacRecordCountTotal": 3},
         )
 
         self.assertEqual("ok", payload["status"])
@@ -164,34 +184,86 @@ class GeoSanctionsShockServiceTestCase(unittest.TestCase):
         self.assertTrue(payload["items"])
         self.assertEqual([], payload["linkedMarkets"])
 
-    def test_snapshot_returns_renderable_degraded_payload_when_sources_fail(self):
+    def test_seed_builder_returns_renderable_degraded_payload_when_sources_fail(self):
         def broken_http_json_get(url, params=None, timeout=12, headers=None):
             raise RuntimeError("upstream down")
 
         ctx = self.make_context(requests_lib=None, conflict_url="")
         ctx["http_json_get"] = broken_http_json_get
 
-        payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(ctx, limit=4)
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual([], payload["items"])
         self.assertEqual("requests-missing", payload["sources"]["ofacSdn"])
         self.assertEqual("missing-url", payload["sources"]["conflictFeed"])
 
-    def test_snapshot_can_preserve_stale_payload_when_builder_returns_no_items(self):
+
+class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
+    def make_context(self, *, redis_payload: Dict[str, Any] | None = None, stale_payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        settings = SimpleNamespace(
+            geo_shock_source_url="https://ofac.treasury.gov/sanctions-list-service",
+            geo_shock_ttl_seconds=900,
+        )
+        snapshot_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(snapshot_dir.cleanup)
+        store = SnapshotStore(str(Path(snapshot_dir.name) / "snapshots.sqlite3"))
+        if stale_payload is not None:
+            store.set(
+                geo_sanctions_shock_service.GEO_SHOCK_SNAPSHOT_NAMESPACE,
+                geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY,
+                stale_payload,
+                1,
+            )
+        redis_cache: Dict[tuple[str, str], Dict[str, Any]] = {}
+        if redis_payload is not None:
+            redis_cache[(geo_sanctions_shock_service.GEO_SHOCK_SNAPSHOT_NAMESPACE, geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY)] = redis_payload
+        return {
+            "SETTINGS": settings,
+            "app": FakeApp(),
+            "SNAPSHOT_STORE": store,
+            "get_cached_json": lambda namespace, cache_key: redis_cache.get((namespace, cache_key)),
+            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__((namespace, cache_key), payload),
+            "utc_now_iso": lambda: "2026-04-28T00:00:00Z",
+        }
+
+    def test_snapshot_reads_seeded_payload_from_redis_without_building_live_sources(self):
+        seeded = {
+            "status": "ok",
+            "summary": {"targetSummary": "IRAN / CHINA", "newSanctionsCount": 4},
+            "items": [{"id": "seed-1"}, {"id": "seed-2"}],
+            "linkedMarkets": [],
+        }
+        ctx = self.make_context(redis_payload=seeded)
+
+        payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(ctx, limit=1)
+
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual(1, len(payload["items"]))
+        self.assertEqual("IRAN / CHINA", payload["summary"]["targetSummary"])
+
+    def test_snapshot_uses_stale_payload_when_no_fresh_seed_exists(self):
         stale = {
             "status": "ok",
             "summary": {"targetSummary": "IRAN / RUSSIA"},
             "items": [{"id": "stale-1", "headline": "Stale item"}],
             "linkedMarkets": [],
         }
-        ctx = self.make_context(requests_lib=None, conflict_url="")
-        ctx["http_json_get"] = lambda *args, **kwargs: {"results": []}
-        ctx["get_snapshot_payload"] = lambda namespace, cache_key, builder, ttl_seconds=900: stale if not builder().get("items") else builder()
+        ctx = self.make_context(stale_payload=stale)
 
         payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(ctx, limit=4)
 
-        self.assertEqual(stale, payload)
+        self.assertEqual("IRAN / RUSSIA", payload["summary"]["targetSummary"])
+        self.assertEqual(stale["items"], payload["items"])
+
+    def test_snapshot_returns_warming_fallback_when_no_seed_exists(self):
+        ctx = self.make_context()
+
+        payload = geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(ctx, limit=4)
+
+        self.assertEqual("degraded", payload["status"])
+        self.assertEqual("warming", payload["sources"]["ofacSdn"])
+        self.assertEqual([], payload["items"])
 
     def test_runtime_panel_route_clamps_invalid_and_large_limits(self):
         seen_limits = []
@@ -224,5 +296,82 @@ class GeoSanctionsShockServiceTestCase(unittest.TestCase):
         self.assertEqual([6, 12], seen_limits)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
+    def make_watcher(self) -> GeoSanctionsShockWatcher:
+        watcher = GeoSanctionsShockWatcher.__new__(GeoSanctionsShockWatcher)
+        watcher.settings = SimpleNamespace(geo_shock_ttl_seconds=900)
+        watcher.redis_prefix = "polydata:"
+        watcher.redis_client = FakeRedis()
+        snapshot_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(snapshot_dir.cleanup)
+        watcher.snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "watcher.sqlite3"))
+        watcher.requests = FakeRequests()
+        watcher._http_json_get = lambda url, params=None, timeout=15, headers=None: {
+            "fr-url": {"results": []},
+            "conflict-url": {
+                "items": [
+                    {
+                        "id": "evt-1",
+                        "headline": "Missile strike near Iranian nuclear site",
+                        "country": "Iran",
+                        "event_date": "2026-04-25T00:00:00Z",
+                        "tags": ["military", "nuclear"],
+                        "source": "WorldMonitor",
+                    }
+                ]
+            },
+        }[url]
+        watcher.settings.geo_shock_ofac_sdn_url = "sdn-url"
+        watcher.settings.geo_shock_ofac_consolidated_url = "cons-url"
+        watcher.settings.geo_shock_federal_register_api_url = "fr-url"
+        watcher.settings.geo_shock_conflict_api_url = "conflict-url"
+        watcher.settings.geo_shock_source_url = "https://ofac.treasury.gov/sanctions-list-service"
+        return watcher
+
+    def test_watcher_stores_payload_into_redis_and_snapshot_store(self):
+        watcher = self.make_watcher()
+
+        result = watcher.run_once()
+
+        self.assertEqual("stored", result["status"])
+        raw = watcher.redis_client.get(watcher.redis_key())
+        self.assertIsNotNone(raw)
+        parsed = json.loads(str(raw))
+        self.assertEqual("seeded", parsed["cacheMode"])
+        self.assertIsNotNone(
+            watcher.snapshot_store.get(
+                geo_sanctions_shock_service.GEO_SHOCK_SNAPSHOT_NAMESPACE,
+                geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY,
+            )
+        )
+
+    def test_watcher_preserves_previous_payload_when_new_result_has_no_material_signal(self):
+        watcher = self.make_watcher()
+        previous = {
+            "status": "ok",
+            "summary": {"targetSummary": "IRAN / RUSSIA", "targetLabels": ["IRAN", "RUSSIA"], "newSanctionsCount": 2, "hotspotCount": 1, "nuclearRisk": "elevated", "militaryFeed": "active"},
+            "items": [{"id": "seed-1"}],
+            "linkedMarkets": [],
+        }
+        watcher.store_payload(previous)
+        watcher.requests = None
+        watcher._http_json_get = lambda *args, **kwargs: {"results": []}
+        watcher.build_payload = lambda: {
+            "status": "degraded",
+            "summary": {
+                "hotspotCount": 0,
+                "newSanctionsCount": 0,
+                "targetLabels": [],
+                "targetSummary": "MONITORING",
+                "nuclearRisk": "guarded",
+                "militaryFeed": "standby",
+            },
+            "items": [],
+            "linkedMarkets": [],
+        }
+
+        result = watcher.run_once()
+
+        self.assertEqual("preserved", result["status"])
+        raw = watcher.redis_client.get(watcher.redis_key())
+        self.assertEqual(previous["summary"]["targetSummary"], json.loads(str(raw))["summary"]["targetSummary"])
