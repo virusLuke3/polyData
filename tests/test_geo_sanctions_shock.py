@@ -110,6 +110,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
             geo_shock_ofac_consolidated_url="cons-url",
             geo_shock_federal_register_api_url="fr-url",
             geo_shock_conflict_api_url=conflict_url,
+            geo_shock_gdelt_doc_api_url="gdelt-url",
             geo_shock_source_url="https://ofac.treasury.gov/sanctions-list-service",
             geo_shock_ttl_seconds=900,
         )
@@ -157,6 +158,17 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
                         }
                     ]
                 }
+            if url == "gdelt-url":
+                return {
+                    "articles": [
+                        {
+                            "url": "https://example.com/iran-strike",
+                            "title": "Missile strike near Iranian nuclear site",
+                            "seendate": "20260425T000000Z",
+                            "domain": "example.com",
+                        }
+                    ]
+                }
             raise RuntimeError(f"unexpected url {url}")
 
         return {
@@ -196,7 +208,16 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("degraded", payload["status"])
         self.assertEqual([], payload["items"])
         self.assertEqual("requests-missing", payload["sources"]["ofacSdn"])
-        self.assertEqual("missing-url", payload["sources"]["conflictFeed"])
+        self.assertEqual("error", payload["sources"]["conflictFeed"])
+
+    def test_seed_builder_uses_gdelt_fallback_when_conflict_url_missing(self):
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="")
+
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
+
+        self.assertIn(payload["sources"]["conflictFeed"], {"ok", "empty"})
+        self.assertGreaterEqual(payload["summary"]["hotspotCount"], 1)
+        self.assertIn(payload["summary"]["militaryFeed"], {"active", "quiet"})
 
 
 class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
@@ -325,6 +346,7 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         watcher.settings.geo_shock_ofac_consolidated_url = "cons-url"
         watcher.settings.geo_shock_federal_register_api_url = "fr-url"
         watcher.settings.geo_shock_conflict_api_url = "conflict-url"
+        watcher.settings.geo_shock_gdelt_doc_api_url = "gdelt-url"
         watcher.settings.geo_shock_source_url = "https://ofac.treasury.gov/sanctions-list-service"
         return watcher
 

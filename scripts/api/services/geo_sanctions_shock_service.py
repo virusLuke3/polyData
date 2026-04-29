@@ -18,6 +18,10 @@ DEFAULT_FEDERAL_REGISTER_TERMS = (
     "nuclear emergency",
     "export controls China",
 )
+DEFAULT_GDELT_CONFLICT_QUERY = (
+    "(missile OR drone OR airstrike OR sanctions OR ceasefire OR military OR nuclear) "
+    "(Iran OR Russia OR Ukraine OR China OR Taiwan OR Israel OR Gaza)"
+)
 DEFAULT_ITEM_LIMIT = 8
 TARGET_ALIASES: Dict[str, tuple[str, ...]] = {
     "IRAN": ("iran", "iranian", "tehran", "persian gulf"),
@@ -497,10 +501,91 @@ def _normalize_conflict_item(raw: Dict[str, Any], index: int) -> Optional[Dict[s
     }
 
 
+def _normalize_gdelt_article(raw: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
+    title = _text_or_none(raw.get("title"))
+    if not title:
+        return None
+    summary = _text_or_none(raw.get("snippet")) or _text_or_none(raw.get("domain")) or ""
+    targets = _target_hits(title, summary)
+    if not targets and not _has_keyword(title, summary, keywords=SHOCK_KEYWORDS):
+        return None
+    occurred_at = _iso_or_none(raw.get("seendate"))
+    text_blob = " ".join(part for part in (title, summary, " ".join(targets)) if part)
+    if _has_keyword(text_blob, keywords=NUCLEAR_KEYWORDS):
+        severity = "critical"
+    elif _has_keyword(text_blob, keywords=MILITARY_KEYWORDS):
+        severity = "warning"
+    else:
+        severity = "watch"
+    country = targets[0] if targets else None
+    return {
+        "id": f"gdelt:{raw.get('url') or index}",
+        "kind": "conflict",
+        "headline": title,
+        "summary": " / ".join(_unique([country or "Monitoring", _text_or_none(raw.get("domain")) or "GDELT"])) or "Monitoring / GDELT",
+        "source": "GDELT DOC 2.0",
+        "sourceUrl": raw.get("url"),
+        "occurredAt": occurred_at,
+        "severity": severity,
+        "targetLabels": targets,
+        "country": country,
+        "tags": ["gdelt", "news"] + (["military"] if _has_keyword(text_blob, keywords=MILITARY_KEYWORDS) else []),
+    }
+
+
+def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
+    http_json_get = ctx.get("http_json_get")
+    url = ctx["SETTINGS"].geo_shock_gdelt_doc_api_url
+    if not callable(http_json_get) or not url:
+        return {"state": "missing-url", "items": [], "targetScores": {}, "hotspotCount": 0}
+    try:
+        payload = http_json_get(
+            url,
+            params={
+                "query": DEFAULT_GDELT_CONFLICT_QUERY,
+                "mode": "ArtList",
+                "format": "json",
+                "maxrecords": 12,
+                "timespan": "3days",
+            },
+            timeout=20,
+            headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
+        )
+    except Exception:
+        ctx["app"].logger.exception("geo shock gdelt fallback fetch failed")
+        return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    items: List[Dict[str, Any]] = []
+    target_scores: Dict[str, int] = defaultdict(int)
+    for index, row in enumerate((payload or {}).get("articles") or []):
+        if not isinstance(row, dict):
+            continue
+        item = _normalize_gdelt_article(row, index)
+        if item is None:
+            continue
+        items.append(item)
+        for target in item.get("targetLabels") or []:
+            target_scores[target] += 1
+    hotspot_count = len(_unique([item.get("country") or item.get("headline") or "" for item in items]))
+    items.sort(
+        key=lambda item: (
+            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
+            SEVERITY_ORDER.get(str(item.get("severity")), 0),
+        ),
+        reverse=True,
+    )
+    return {
+        "state": "ok" if items else "empty",
+        "items": items[:12],
+        "targetScores": dict(target_scores),
+        "hotspotCount": hotspot_count,
+    }
+
+
 def _fetch_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     url = ctx["SETTINGS"].geo_shock_conflict_api_url
     if not url:
-        return {"state": "missing-url", "items": [], "targetScores": {}, "hotspotCount": 0}
+        return _fetch_gdelt_conflict_snapshot(ctx)
     http_json_get = ctx.get("http_json_get")
     if not callable(http_json_get):
         return {"state": "requests-missing", "items": [], "targetScores": {}, "hotspotCount": 0}

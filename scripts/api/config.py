@@ -21,6 +21,7 @@ from data_sources import (
     F1_BWENEWS_RSS_URL,
     F1_BWENEWS_SOURCE_URL,
     GEO_SHOCK_CONFLICT_API_URL,
+    GEO_SHOCK_GDELT_DOC_API_URL,
     GEO_SHOCK_FEDERAL_REGISTER_API_URL,
     GEO_SHOCK_OFAC_CONSOLIDATED_URL,
     GEO_SHOCK_OFAC_SDN_URL,
@@ -128,6 +129,7 @@ class ApiSettings:
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
     geo_shock_conflict_api_url: str
+    geo_shock_gdelt_doc_api_url: str
     geo_shock_source_url: str
     geo_shock_ttl_seconds: int
     f1_panel_path: str
@@ -216,6 +218,10 @@ def load_api_settings() -> ApiSettings:
             GEO_SHOCK_FEDERAL_REGISTER_API_URL or "https://www.federalregister.gov/api/v1/documents.json",
         ),
         geo_shock_conflict_api_url=_get_str("POLYDATA_GEO_SHOCK_CONFLICT_API_URL", GEO_SHOCK_CONFLICT_API_URL),
+        geo_shock_gdelt_doc_api_url=_get_str(
+            "POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL",
+            GEO_SHOCK_GDELT_DOC_API_URL or "https://api.gdeltproject.org/api/v2/doc/doc",
+        ),
         geo_shock_source_url=_get_str(
             "POLYDATA_GEO_SHOCK_SOURCE_URL",
             GEO_SHOCK_SOURCE_URL or "https://ofac.treasury.gov/sanctions-list-service",
