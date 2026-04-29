@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 PANEL_ID = "crypto-funding-watch"
 ROUTE = "/runtime/crypto/funding-watch"
-DEFAULT_LIMIT = 16
+DEFAULT_LIMIT = 18
 MIN_LIMIT = 4
-MAX_LIMIT = 30
+MAX_LIMIT = 40
 
 
 def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:

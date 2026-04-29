@@ -151,7 +151,7 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
             "get_nba_matchup_predictor_snapshot": lambda limit=8: {"limit": limit},
             "get_inflation_nowcast_snapshot": lambda: {"items": []},
             "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
-            "get_crypto_funding_watch_snapshot": lambda limit=16: seen_limits.append(limit) or {"limit": limit},
+            "get_crypto_funding_watch_snapshot": lambda limit=18: seen_limits.append(limit) or {"limit": limit},
             "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
             "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
             "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
@@ -164,7 +164,7 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
 
         self.assertEqual(200, invalid.status_code)
         self.assertEqual(200, large.status_code)
-        self.assertEqual([16, 30], seen_limits)
+        self.assertEqual([18, 40], seen_limits)
 
 
 if __name__ == "__main__":

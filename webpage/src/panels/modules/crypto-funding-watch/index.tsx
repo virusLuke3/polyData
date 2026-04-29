@@ -1,3 +1,4 @@
+import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCryptoFundingWatch } from '@/services/api';
 import type { RuntimeCryptoFundingAsset, RuntimeCryptoFundingItem, RuntimeCryptoFundingPayload } from '@/types';
@@ -59,12 +60,6 @@ function biasLabel(asset: RuntimeCryptoFundingAsset) {
   if (asset.bias === 'shorts-pay') return 'Shorts Pay';
   if (asset.bias === 'mixed') return 'Mixed';
   return 'Flat';
-}
-
-function directionLegend(payload?: RuntimeCryptoFundingPayload | null) {
-  const positive = payload?.legend?.positive || 'longs pay shorts';
-  const negative = payload?.legend?.negative || 'shorts pay longs';
-  return `+ ${positive} / - ${negative}`;
 }
 
 function quoteDirectionLabel(quote: RuntimeCryptoFundingItem) {
@@ -176,13 +171,6 @@ function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null
     <div className="wm-funding-monitor">
       <FundingSummary payload={payload} assets={assets} />
       <div className="wm-funding-table">
-        <div className="wm-funding-section-head">
-          <div className="wm-funding-section-copy">
-            <span>Perpetual Funding Map</span>
-            <small>{directionLegend(payload)}</small>
-          </div>
-          <em>{sourceStatus(payload).toUpperCase()}</em>
-        </div>
         <div className="wm-funding-table-body">
           {assets.map((asset, index) => <FundingRow key={asset.id} asset={asset} index={index} payload={payload} />)}
         </div>
@@ -191,23 +179,46 @@ function FundingList({ payload }: { payload?: RuntimeCryptoFundingPayload | null
   );
 }
 
+function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload | null }) {
+  const [showHelp, setShowHelp] = useState(false);
+  const assets = payload?.assets || [];
+  const degraded = sourceStatus(payload) !== 'ok' && sourceStatus(payload) !== 'live';
+
+  return (
+    <Panel
+      title="FUNDING RATE"
+      titleControls={(
+        <button
+          type="button"
+          className="wm-panel-help-button"
+          aria-label="Explain perpetual funding rate"
+          aria-expanded={showHelp}
+          onClick={() => setShowHelp((current) => !current)}
+        >
+          ?
+        </button>
+      )}
+      badge={degraded ? 'STALE' : 'LIVE'}
+      status="live"
+      count={assets.length}
+      headerOverlay={showHelp ? (
+        <div className="wm-panel-help-popover">
+          <strong>Funding Rate</strong>
+          <p>Perpetual funding keeps perp prices anchored near spot. Positive funding means longs pay shorts. Negative funding means shorts pay longs.</p>
+        </div>
+      ) : null}
+      className="wm-market-panel wm-funding-panel"
+    >
+      <FundingList payload={payload} />
+    </Panel>
+  );
+}
+
 const renderers: PanelRenderMap = {
   'crypto-funding-watch': {
     render: (ctx) => {
       const payload = ctx.runtimeData['crypto-funding-watch'] as RuntimeCryptoFundingPayload | undefined;
-      const assets = payload?.assets || [];
-      const degraded = sourceStatus(payload) !== 'ok' && sourceStatus(payload) !== 'live';
-      return (
-        <Panel
-          title="FUNDING"
-          badge={degraded ? 'STALE' : 'LIVE'}
-          status="live"
-          count={assets.length}
-          className="wm-market-panel wm-funding-panel"
-        >
-          <FundingList payload={payload} />
-        </Panel>
-      );
+      return <FundingRatePanel payload={payload} />;
     },
   },
 };
@@ -221,5 +232,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 15000,
-  fetchData: () => fetchRuntimeCryptoFundingWatch(10),
+  fetchData: () => fetchRuntimeCryptoFundingWatch(18),
 });

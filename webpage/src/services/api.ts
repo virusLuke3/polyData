@@ -138,7 +138,7 @@ export function fetchRuntimeCrypto() {
   return apiGet<RuntimeMarketGroup>('/runtime/markets/crypto');
 }
 
-export function fetchRuntimeCryptoFundingWatch(limit = 16) {
+export function fetchRuntimeCryptoFundingWatch(limit = 18) {
   return apiGet<RuntimeCryptoFundingPayload>(`/runtime/crypto/funding-watch?limit=${limit}`);
 }
 
