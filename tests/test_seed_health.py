@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask
@@ -35,8 +36,8 @@ class SeedHealthTestCase(unittest.TestCase):
         redis_payloads = {
             ("seed-meta:world", "geo-sanctions-shock"): {
                 "status": "ok",
-                "lastAttemptAt": "2026-05-03T08:28:30Z",
-                "lastSuccessAt": "2026-05-03T08:28:30Z",
+                "lastAttemptAt": "2999-05-03T08:28:30Z",
+                "lastSuccessAt": "2999-05-03T08:28:30Z",
                 "recordCount": 8,
                 "sourceStates": {"conflictFeed": "ok"},
                 "cacheMode": "seeded",
@@ -44,18 +45,27 @@ class SeedHealthTestCase(unittest.TestCase):
             },
             ("seed-meta:markets", "new-market-signals"): {
                 "status": "error",
-                "lastAttemptAt": "2026-05-03T08:29:55Z",
-                "lastSuccessAt": "2026-05-03T08:20:00Z",
+                "lastAttemptAt": "2999-05-03T08:29:55Z",
+                "lastSuccessAt": "2999-05-03T08:20:00Z",
                 "recordCount": 2,
                 "errorSummary": "db unavailable",
                 "cacheMode": "seeded",
                 "payloadStatus": "error",
             },
+            ("seed-meta:macro", "jin10-flash"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:50Z",
+                "lastSuccessAt": "2999-05-03T08:29:50Z",
+                "recordCount": 24,
+                "sourceStates": {"jin10Flash": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
         }
         payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
 
         self.assertEqual("error", payload["status"])
-        self.assertEqual(2, payload["summary"]["watcherCount"])
+        self.assertEqual(3, payload["summary"]["watcherCount"])
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("ok", geo["status"])
         self.assertEqual("fresh", geo["freshness"])
@@ -64,11 +74,12 @@ class SeedHealthTestCase(unittest.TestCase):
         self.assertEqual("db unavailable", new_market["errorSummary"])
 
     def test_build_seed_health_payload_falls_back_to_stale_snapshot(self):
+        aging_timestamp = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat().replace("+00:00", "Z")
         stale_payloads = {
             ("seed-meta:world", "geo-sanctions-shock"): {
                 "status": "ok",
-                "lastAttemptAt": "2026-05-03T08:10:00Z",
-                "lastSuccessAt": "2026-05-03T08:10:00Z",
+                "lastAttemptAt": aging_timestamp,
+                "lastSuccessAt": aging_timestamp,
                 "recordCount": 4,
             }
         }

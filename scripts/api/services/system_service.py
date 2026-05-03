@@ -23,6 +23,14 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_NEW_MARKET_SIGNAL_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 20,
     },
+    {
+        "panelId": "jin10-flash",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "jin10-flash",
+        "serviceName": "polydata-jin10-seed.service",
+        "intervalEnv": "POLYDATA_JIN10_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
 ]
 
 

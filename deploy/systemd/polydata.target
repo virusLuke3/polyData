@@ -1,6 +1,6 @@
 [Unit]
 Description=polyData local production services
-Wants=polydata-api.service polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-new-market-signal.service polydata-geo-sanctions-shock.service
+Wants=polydata-api.service polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-new-market-signal.service polydata-geo-sanctions-shock.service polydata-jin10-seed.service
 After=network-online.target
 
 [Install]
