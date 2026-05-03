@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,8 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import new_market_signal_service
 from runtime.new_market_signal_watcher import NewMarketSignalWatcher
+from runtime.seed_meta import SeedMetaStore
+from runtime.snapshot_store import SnapshotStore
 
 
 class FakeLogger:
@@ -36,7 +39,7 @@ class FakeRedis:
     def get(self, key):
         return self.values.get(key)
 
-    def set(self, key, value):
+    def set(self, key, value, ex=None):
         self.values[key] = str(value)
         return True
 
@@ -105,10 +108,15 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
     def make_watcher(self) -> NewMarketSignalWatcher:
         watcher = NewMarketSignalWatcher.__new__(NewMarketSignalWatcher)
         watcher.redis_client = FakeRedis()
+        watcher.redis_prefix = "polydata:"
         watcher.last_seen_key = "polydata:runtime:new-market-signals:last_seen_market_id"
         watcher.items_key = "polydata:runtime:new-market-signals:items"
         watcher.pending_key = "polydata:runtime:new-market-signals:pending_market_ids"
         watcher.retention = 50
+        snapshot_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(snapshot_dir.cleanup)
+        watcher.snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "seed-meta.sqlite3"))
+        watcher.seed_meta_store = SeedMetaStore(redis_client=watcher.redis_client, redis_prefix="polydata:", snapshot_store=watcher.snapshot_store)
         return watcher
 
     def test_first_run_bootstraps_without_signals(self):
@@ -121,6 +129,7 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual(42, result["lastSeenMarketId"])
         self.assertEqual("42", watcher.redis_client.get(watcher.last_seen_key))
         self.assertIsNone(watcher.redis_client.get(watcher.items_key))
+        self.assertIsNotNone(watcher.seed_meta_store.load(watcher.seed_meta_namespace(), watcher.seed_meta_cache_key()))
 
     def test_scan_generates_signals_once_and_advances_watermark(self):
         watcher = self.make_watcher()
@@ -138,6 +147,9 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual("11", watcher.redis_client.get(watcher.last_seen_key))
         self.assertEqual(11, items[0]["marketId"])
         self.assertEqual("0.57", items[0]["initialYesProbability"])
+        meta = watcher.seed_meta_store.load(watcher.seed_meta_namespace(), watcher.seed_meta_cache_key())
+        self.assertEqual("scan", meta["status"])
+        self.assertEqual(1, meta["recordCount"])
 
     def test_scan_holds_placeholder_titles_in_pending_without_signal(self):
         watcher = self.make_watcher()

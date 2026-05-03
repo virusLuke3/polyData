@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from flask import Flask
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from api.routes.system import create_system_blueprint
+from api.services import system_service
+from runtime.snapshot_store import SnapshotStore
+
+
+class SeedHealthTestCase(unittest.TestCase):
+    def make_context(self, *, redis_payloads=None, stale_payloads=None):
+        snapshot_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(snapshot_dir.cleanup)
+        store = SnapshotStore(str(Path(snapshot_dir.name) / "seed-health.sqlite3"))
+        for (namespace, cache_key), payload in (stale_payloads or {}).items():
+            store.set(namespace, cache_key, payload, 1)
+        return {
+            "SNAPSHOT_STORE": store,
+            "get_cached_json": lambda namespace, cache_key: (redis_payloads or {}).get((namespace, cache_key)),
+            "utc_now_iso": lambda: "2026-05-03T08:30:00Z",
+        }
+
+    def test_build_seed_health_payload_reads_redis_seed_meta(self):
+        redis_payloads = {
+            ("seed-meta:world", "geo-sanctions-shock"): {
+                "status": "ok",
+                "lastAttemptAt": "2026-05-03T08:28:30Z",
+                "lastSuccessAt": "2026-05-03T08:28:30Z",
+                "recordCount": 8,
+                "sourceStates": {"conflictFeed": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
+            ("seed-meta:markets", "new-market-signals"): {
+                "status": "error",
+                "lastAttemptAt": "2026-05-03T08:29:55Z",
+                "lastSuccessAt": "2026-05-03T08:20:00Z",
+                "recordCount": 2,
+                "errorSummary": "db unavailable",
+                "cacheMode": "seeded",
+                "payloadStatus": "error",
+            },
+        }
+        payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
+
+        self.assertEqual("error", payload["status"])
+        self.assertEqual(2, payload["summary"]["watcherCount"])
+        geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
+        self.assertEqual("ok", geo["status"])
+        self.assertEqual("fresh", geo["freshness"])
+        new_market = next(item for item in payload["items"] if item["panelId"] == "new-market-signals")
+        self.assertEqual("error", new_market["status"])
+        self.assertEqual("db unavailable", new_market["errorSummary"])
+
+    def test_build_seed_health_payload_falls_back_to_stale_snapshot(self):
+        stale_payloads = {
+            ("seed-meta:world", "geo-sanctions-shock"): {
+                "status": "ok",
+                "lastAttemptAt": "2026-05-03T08:10:00Z",
+                "lastSuccessAt": "2026-05-03T08:10:00Z",
+                "recordCount": 4,
+            }
+        }
+        payload = system_service.build_seed_health_payload(self.make_context(stale_payloads=stale_payloads))
+
+        geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
+        self.assertEqual("degraded", geo["status"])
+        self.assertEqual("aging", geo["freshness"])
+
+    def test_seed_health_route_returns_json(self):
+        app = Flask(__name__)
+        helpers = {
+            "build_system_health_payload": lambda: {"status": "ok"},
+            "build_seed_health_payload": lambda: {"status": "ok", "items": [{"panelId": "geo-sanctions-shock"}]},
+            "describe_db_target": lambda: "mysql:test",
+            "get_redis_client": lambda: object(),
+        }
+        app.register_blueprint(create_system_blueprint(helpers))
+
+        with app.test_client() as client:
+            response = client.get("/runtime/system/seed-health")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("ok", response.get_json()["status"])
+
+
+if __name__ == "__main__":
+    unittest.main()

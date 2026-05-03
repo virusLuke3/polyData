@@ -10,6 +10,11 @@ def create_system_blueprint(helpers: dict) -> Blueprint:
     def api_system_health():
         return jsonify(helpers["build_system_health_payload"]())
 
+    @bp.route("/system/seed-health", methods=["GET"])
+    @bp.route("/runtime/system/seed-health", methods=["GET"])
+    def api_seed_health():
+        return jsonify(helpers["build_seed_health_payload"]())
+
     @bp.route("/health", methods=["GET"])
     def health():
         return jsonify(
@@ -21,4 +26,3 @@ def create_system_blueprint(helpers: dict) -> Blueprint:
         )
 
     return bp
-

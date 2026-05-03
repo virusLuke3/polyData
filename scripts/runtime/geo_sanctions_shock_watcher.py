@@ -34,10 +34,14 @@ except ImportError:
 
 from api.config import load_api_settings
 from api.services import geo_sanctions_shock_service
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 300
+SEED_META_NAMESPACE = "seed-meta:world"
+SEED_META_CACHE_KEY = "geo-sanctions-shock"
+SEED_META_SERVICE_NAME = "polydata-geo-sanctions-shock.service"
 
 
 class _LoggerAdapter:
@@ -86,8 +90,10 @@ class GeoSanctionsShockWatcher:
         self.redis_prefix = str(redis_prefix or "")
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
+        self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
         self.requests.headers.update({"User-Agent": "polyData-geo-shock-watcher/1.0"})
+        self._acled_auth_state: Dict[str, Any] | None = None
 
     def cache_key(self) -> str:
         return geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY
@@ -98,12 +104,103 @@ class GeoSanctionsShockWatcher:
     def redis_key(self) -> str:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
+    def acled_auth_namespace(self) -> str:
+        return geo_sanctions_shock_service.ACLED_AUTH_NAMESPACE
+
+    def acled_auth_cache_key(self) -> str:
+        return geo_sanctions_shock_service.ACLED_AUTH_CACHE_KEY
+
+    def acled_auth_redis_key(self) -> str:
+        return _redis_key(self.redis_prefix, self.acled_auth_namespace(), self.acled_auth_cache_key())
+
+    def seed_meta_namespace(self) -> str:
+        return SEED_META_NAMESPACE
+
+    def seed_meta_cache_key(self) -> str:
+        return SEED_META_CACHE_KEY
+
+    def load_seed_meta(self) -> Dict[str, Any]:
+        payload = self.seed_meta_store.load(self.seed_meta_namespace(), self.seed_meta_cache_key())
+        return payload if isinstance(payload, dict) else {}
+
+    def store_seed_meta(
+        self,
+        *,
+        status: str,
+        record_count: int,
+        source_states: Optional[Dict[str, Any]] = None,
+        error_summary: Optional[str] = None,
+        cache_mode: Optional[str] = None,
+        payload_status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        preserve_last_success: bool = False,
+    ) -> Dict[str, Any]:
+        previous = self.load_seed_meta()
+        attempted_at = utc_now_iso()
+        success_statuses = {"ok", "degraded", "preserved"}
+        last_success_at = previous.get("lastSuccessAt")
+        if not preserve_last_success and str(status or "").strip().lower() in success_statuses:
+            last_success_at = attempted_at
+        payload = build_seed_meta_payload(
+            panel_id="geo-sanctions-shock",
+            namespace=self.seed_meta_namespace(),
+            cache_key=self.seed_meta_cache_key(),
+            service_name=SEED_META_SERVICE_NAME,
+            expected_interval_seconds=DEFAULT_INTERVAL_SECONDS,
+            status=status,
+            last_attempt_at=attempted_at,
+            last_success_at=last_success_at or attempted_at,
+            record_count=record_count,
+            source_states=source_states,
+            error_summary=error_summary,
+            cache_mode=cache_mode,
+            payload_status=payload_status,
+            metadata=metadata,
+        )
+        return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
+
     def _http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15, headers: Optional[Dict[str, str]] = None) -> Any:
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
         response.raise_for_status()
         if not response.content:
             return {}
         return response.json()
+
+    def load_acled_auth_state(self) -> Optional[Dict[str, Any]]:
+        if isinstance(self._acled_auth_state, dict):
+            return dict(self._acled_auth_state)
+        try:
+            raw = self.redis_client.get(self.acled_auth_redis_key())
+            if raw:
+                payload = json.loads(raw)
+                normalized = geo_sanctions_shock_service._normalize_acled_auth_state(payload)
+                if normalized is not None:
+                    self._acled_auth_state = normalized
+                    self.snapshot_store.set(
+                        self.acled_auth_namespace(),
+                        self.acled_auth_cache_key(),
+                        normalized,
+                        geo_sanctions_shock_service.ACLED_AUTH_TTL_SECONDS,
+                    )
+                    return dict(normalized)
+        except Exception:
+            _AppAdapter.logger.exception("geo shock watcher acled auth redis read failed")
+
+        stale = self.snapshot_store.get_stale(self.acled_auth_namespace(), self.acled_auth_cache_key())
+        normalized = geo_sanctions_shock_service._normalize_acled_auth_state(stale)
+        if normalized is not None:
+            self._acled_auth_state = normalized
+            return dict(normalized)
+        return None
+
+    def store_acled_auth_state(self, payload: Dict[str, Any]) -> None:
+        normalized = geo_sanctions_shock_service._normalize_acled_auth_state(payload)
+        if normalized is None:
+            return
+        self._acled_auth_state = normalized
+        ttl_seconds = geo_sanctions_shock_service.ACLED_AUTH_TTL_SECONDS
+        self.snapshot_store.set(self.acled_auth_namespace(), self.acled_auth_cache_key(), normalized, ttl_seconds)
+        self.redis_client.set(self.acled_auth_redis_key(), json.dumps(normalized, ensure_ascii=True, default=str), ex=ttl_seconds)
 
     def load_previous_payload(self) -> Dict[str, Any]:
         try:
@@ -124,6 +221,8 @@ class GeoSanctionsShockWatcher:
             "app": _AppAdapter(),
             "requests": self.requests,
             "http_json_get": self._http_json_get,
+            "get_acled_auth_state": self.load_acled_auth_state,
+            "store_acled_auth_state": self.store_acled_auth_state,
             "utc_now_iso": utc_now_iso,
         }
         return geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous=previous)
@@ -143,8 +242,27 @@ class GeoSanctionsShockWatcher:
         ):
             _AppAdapter.logger.warning("geo shock watcher preserved previous snapshot because new payload had no material signal")
             self.store_payload(previous)
+            self.store_seed_meta(
+                status="preserved",
+                record_count=len(previous.get("items") or []),
+                source_states=payload.get("sources"),
+                error_summary="Preserved previous snapshot because new payload had no material signal",
+                cache_mode=previous.get("cacheMode"),
+                payload_status=previous.get("status"),
+                metadata={"result": "preserved"},
+                preserve_last_success=True,
+            )
             return {"status": "preserved", "payload": previous}
         self.store_payload(payload)
+        self.store_seed_meta(
+            status=payload.get("status") or "unknown",
+            record_count=len(payload.get("items") or []),
+            source_states=payload.get("sources"),
+            error_summary=None,
+            cache_mode=payload.get("cacheMode"),
+            payload_status=payload.get("status"),
+            metadata={"result": "stored"},
+        )
         return {"status": "stored", "payload": payload}
 
 
@@ -188,6 +306,13 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            watcher.store_seed_meta(
+                status="error",
+                record_count=0,
+                error_summary=str(exc),
+                preserve_last_success=True,
+                metadata={"result": "exception"},
+            )
             print(f"[geo-shock] ERROR watch loop failed: {exc}", file=sys.stderr)
         time.sleep(interval_seconds)
 

@@ -35,6 +35,8 @@ except ImportError:
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_connection
 from data_sources import POLYMARKET_CLOB_API_BASE
 from api.config import load_api_settings
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.snapshot_store import SnapshotStore
 
 
 DEFAULT_NAMESPACE = "runtime:new-market-signals"
@@ -44,6 +46,9 @@ DEFAULT_RETENTION = 50
 DEFAULT_PENDING_RETENTION = 500
 DEFAULT_CLOB_TIMEOUT_SECONDS = 10
 PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
+SEED_META_NAMESPACE = "seed-meta:markets"
+SEED_META_CACHE_KEY = "new-market-signals"
+SEED_META_SERVICE_NAME = "polydata-new-market-signal.service"
 
 
 def utc_now_iso() -> str:
@@ -90,6 +95,7 @@ class NewMarketSignalWatcher:
         redis_prefix: str,
         namespace: str = DEFAULT_NAMESPACE,
         clob_api_base: str,
+        snapshot_sqlite_path: str,
         clob_timeout_seconds: int = DEFAULT_CLOB_TIMEOUT_SECONDS,
         retention: int = DEFAULT_RETENTION,
     ) -> None:
@@ -111,8 +117,53 @@ class NewMarketSignalWatcher:
         self.clob_api_base = str(clob_api_base).rstrip("/")
         self.clob_timeout_seconds = max(1, int(clob_timeout_seconds))
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
+        self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=redis_prefix, snapshot_store=self.snapshot_store)
         self.http = requests.Session()
         self.http.headers.update({"Accept": "application/json", "User-Agent": "polyData-new-market-signal/1.0"})
+
+    def seed_meta_namespace(self) -> str:
+        return SEED_META_NAMESPACE
+
+    def seed_meta_cache_key(self) -> str:
+        return SEED_META_CACHE_KEY
+
+    def load_seed_meta(self) -> Dict[str, Any]:
+        payload = self.seed_meta_store.load(self.seed_meta_namespace(), self.seed_meta_cache_key())
+        return payload if isinstance(payload, dict) else {}
+
+    def store_seed_meta(
+        self,
+        *,
+        status: str,
+        record_count: int,
+        error_summary: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        preserve_last_success: bool = False,
+    ) -> Dict[str, Any]:
+        previous = self.load_seed_meta()
+        attempted_at = utc_now_iso()
+        success_statuses = {"ok", "bootstrap", "scan"}
+        last_success_at = previous.get("lastSuccessAt")
+        if not preserve_last_success and str(status or "").strip().lower() in success_statuses:
+            last_success_at = attempted_at
+        payload = build_seed_meta_payload(
+            panel_id="new-market-signals",
+            namespace=self.seed_meta_namespace(),
+            cache_key=self.seed_meta_cache_key(),
+            service_name=SEED_META_SERVICE_NAME,
+            expected_interval_seconds=DEFAULT_INTERVAL_SECONDS,
+            status=status,
+            last_attempt_at=attempted_at,
+            last_success_at=last_success_at or attempted_at,
+            record_count=record_count,
+            source_states={"database": "ok" if not error_summary else "error", "clob": "ok" if not error_summary else "error"},
+            error_summary=error_summary,
+            cache_mode="seeded",
+            payload_status=status,
+            metadata=metadata,
+        )
+        return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
 
     def get_last_seen_market_id(self) -> Optional[int]:
         raw = self.redis_client.get(self.last_seen_key)
@@ -251,13 +302,17 @@ class NewMarketSignalWatcher:
         if last_seen is None:
             baseline = self.get_current_max_market_id()
             self.set_last_seen_market_id(baseline)
-            return {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0}
+            result = {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0}
+            self.store_seed_meta(status="bootstrap", record_count=0, metadata=result)
+            return result
 
         pending_ids = self.load_pending_market_ids()
         pending_rows = self.fetch_markets_by_ids(pending_ids)
         rows = self.fetch_new_markets(last_seen, limit=limit)
         if not rows and not pending_rows:
-            return {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0, "pending": len(pending_ids)}
+            result = {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0, "pending": len(pending_ids)}
+            self.store_seed_meta(status="scan", record_count=len(self.load_items()), metadata=result)
+            return result
 
         observed_at = utc_now_iso()
         signals: List[Dict[str, Any]] = []
@@ -295,7 +350,10 @@ class NewMarketSignalWatcher:
         self.store_items([*reversed(signals), *deduped_existing])
         self.store_pending_market_ids(next_pending_ids)
         self.set_last_seen_market_id(max_seen)
-        return {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals), "pending": len(next_pending_ids), "skipped": skipped}
+        stored_items = self.load_items()
+        result = {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals), "pending": len(next_pending_ids), "skipped": skipped}
+        self.store_seed_meta(status="scan", record_count=len(stored_items), metadata=result)
+        return result
 
 
 def main() -> None:
@@ -319,6 +377,7 @@ def main() -> None:
         redis_prefix=args.redis_prefix,
         namespace=args.namespace,
         clob_api_base=args.clob_api_base,
+        snapshot_sqlite_path=settings.snapshot_sqlite_path,
         clob_timeout_seconds=args.clob_timeout_seconds,
         retention=args.retention,
     )
@@ -331,6 +390,7 @@ def main() -> None:
             elapsed_ms = (time.perf_counter() - started) * 1000
             print(f"[new-market-signal] {json.dumps(result, ensure_ascii=True)} duration_ms={elapsed_ms:.1f}", file=sys.stderr)
         except Exception as exc:
+            watcher.store_seed_meta(status="error", record_count=len(watcher.load_items()), error_summary=str(exc), metadata={"result": "exception"}, preserve_last_success=True)
             print(f"[new-market-signal] scan failed: {exc}", file=sys.stderr)
             if not args.watch:
                 raise

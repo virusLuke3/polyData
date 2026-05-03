@@ -215,6 +215,7 @@ def api_readonly_enabled() -> bool:
 
 def build_route_helpers() -> Dict[str, Any]:
     return {
+        "build_seed_health_payload": lambda: system_service.build_seed_health_payload(build_service_context()),
         "build_system_health_payload": build_system_health_payload,
         "COMMODITY_SYMBOLS": COMMODITY_SYMBOLS,
         "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
@@ -334,6 +335,7 @@ def build_service_context() -> Dict[str, Any]:
         "app": app,
         "BeautifulSoup": BeautifulSoup,
         "build_system_health_payload": lambda: system_service.build_system_health_payload(build_service_context()),
+        "build_seed_health_payload": lambda: system_service.build_seed_health_payload(build_service_context()),
         "build_market_status_case": build_market_status_case,
         "compat_maker_asset_id_sql": compat_maker_asset_id_sql,
         "compat_taker_asset_id_sql": compat_taker_asset_id_sql,

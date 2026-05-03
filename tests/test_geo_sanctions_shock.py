@@ -19,6 +19,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.services import geo_sanctions_shock_service
 from runtime.geo_sanctions_shock_watcher import GeoSanctionsShockWatcher
+from runtime.seed_meta import SeedMetaStore
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -71,21 +72,62 @@ class FakeApp:
 
 
 class FakeResponse:
-    def __init__(self, content: bytes, status_code: int = 200):
+    def __init__(self, content: bytes, status_code: int = 200, json_data: Any = None):
         self.content = content
         self.status_code = status_code
+        self._json_data = json_data
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise RuntimeError(f"http {self.status_code}")
 
+    def json(self) -> Any:
+        if self._json_data is not None:
+            return self._json_data
+        return json.loads(self.content.decode("utf-8"))
+
 
 class FakeRequests:
-    def get(self, url: str, timeout: int = 20, headers: Dict[str, str] | None = None):
+    def get(self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
         if url == "sdn-url":
             return FakeResponse(SDN_XML)
         if url == "cons-url":
             return FakeResponse(CONSOLIDATED_XML)
+        if url == "acled-api-url":
+            return FakeResponse(
+                b"{}",
+                json_data={
+                    "data": [
+                        {
+                            "event_id_cnty": "IRN100",
+                            "event_date": "2026-04-25",
+                            "event_type": "Political violence",
+                            "sub_event_type": "Shelling/artillery/missile attack",
+                            "country": "Iran",
+                            "admin1": "Tehran",
+                            "location": "Natanz",
+                            "actor1": "Military Forces of Iran",
+                            "actor2": "Unidentified Armed Group",
+                            "fatalities": 3,
+                            "notes": "Missile strike near Iranian nuclear site",
+                        }
+                    ]
+                },
+            )
+        raise RuntimeError(f"unexpected url {url}")
+
+    def post(self, url: str, data: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
+        if url == "acled-token-url":
+            grant_type = (data or {}).get("grant_type")
+            if grant_type == "refresh_token":
+                return FakeResponse(
+                    b'{"access_token":"refreshed-acled-token","refresh_token":"refresh-2","expires_in":86400}',
+                    json_data={"access_token": "refreshed-acled-token", "refresh_token": "refresh-2", "expires_in": 86400},
+                )
+            return FakeResponse(
+                b'{"access_token":"fake-acled-token","refresh_token":"refresh-1","expires_in":86400}',
+                json_data={"access_token": "fake-acled-token", "refresh_token": "refresh-1", "expires_in": 86400},
+            )
         raise RuntimeError(f"unexpected url {url}")
 
 
@@ -104,13 +146,24 @@ class FakeRedis:
 
 
 class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
-    def make_context(self, *, requests_lib: Any = None, conflict_url: str = "conflict-url", previous_total: int = 3) -> Dict[str, Any]:
+    def make_context(
+        self,
+        *,
+        requests_lib: Any = None,
+        conflict_url: str = "conflict-url",
+        previous_total: int = 3,
+        acled_enabled: bool = True,
+    ) -> Dict[str, Any]:
         settings = SimpleNamespace(
             geo_shock_ofac_sdn_url="sdn-url",
             geo_shock_ofac_consolidated_url="cons-url",
             geo_shock_federal_register_api_url="fr-url",
             geo_shock_conflict_api_url=conflict_url,
             geo_shock_gdelt_doc_api_url="gdelt-url",
+            geo_shock_acled_token_url="acled-token-url",
+            geo_shock_acled_api_url="acled-api-url",
+            geo_shock_acled_email="user@example.com" if acled_enabled else "",
+            geo_shock_acled_password="secret" if acled_enabled else "",
             geo_shock_source_url="https://ofac.treasury.gov/sanctions-list-service",
             geo_shock_ttl_seconds=900,
         )
@@ -194,13 +247,15 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("elevated", payload["summary"]["nuclearRisk"])
         self.assertEqual("active", payload["summary"]["militaryFeed"])
         self.assertTrue(payload["items"])
+        self.assertTrue(payload["targetBreakdown"])
+        self.assertEqual("IRAN", payload["targetBreakdown"][0]["label"])
         self.assertEqual([], payload["linkedMarkets"])
 
     def test_seed_builder_returns_renderable_degraded_payload_when_sources_fail(self):
         def broken_http_json_get(url, params=None, timeout=12, headers=None):
             raise RuntimeError("upstream down")
 
-        ctx = self.make_context(requests_lib=None, conflict_url="")
+        ctx = self.make_context(requests_lib=None, conflict_url="", acled_enabled=False)
         ctx["http_json_get"] = broken_http_json_get
 
         payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
@@ -211,13 +266,39 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("error", payload["sources"]["conflictFeed"])
 
     def test_seed_builder_uses_gdelt_fallback_when_conflict_url_missing(self):
-        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="")
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="", acled_enabled=False)
 
         payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
 
         self.assertIn(payload["sources"]["conflictFeed"], {"ok", "empty"})
         self.assertGreaterEqual(payload["summary"]["hotspotCount"], 1)
         self.assertIn(payload["summary"]["militaryFeed"], {"active", "quiet"})
+
+    def test_seed_builder_prefers_acled_when_credentials_are_present(self):
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="")
+
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
+
+        self.assertEqual("ok", payload["sources"]["conflictFeed"])
+        self.assertTrue(any(item.get("source") == "ACLED" for item in payload["items"]))
+        self.assertEqual("IRAN", payload["targetBreakdown"][0]["label"])
+
+    def test_acled_token_manager_refreshes_expired_token(self):
+        requests_lib = FakeRequests()
+        stored: Dict[str, Any] = {}
+        ctx = self.make_context(requests_lib=requests_lib, conflict_url="")
+        ctx["get_acled_auth_state"] = lambda: {
+            "access_token": "expired-token",
+            "refresh_token": "refresh-1",
+            "access_expires_at": 1,
+        }
+        ctx["store_acled_auth_state"] = lambda payload: stored.update(payload)
+
+        token = geo_sanctions_shock_service._fetch_acled_access_token(ctx)
+
+        self.assertEqual("refreshed-acled-token", token)
+        self.assertEqual("refreshed-acled-token", stored["access_token"])
+        self.assertEqual("refresh-2", stored["refresh_token"])
 
 
 class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
@@ -253,6 +334,7 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
             "status": "ok",
             "summary": {"targetSummary": "IRAN / CHINA", "newSanctionsCount": 4},
             "items": [{"id": "seed-1"}, {"id": "seed-2"}],
+            "targetBreakdown": [{"label": "IRAN", "count": 2}],
             "linkedMarkets": [],
         }
         ctx = self.make_context(redis_payload=seeded)
@@ -268,6 +350,7 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
             "status": "ok",
             "summary": {"targetSummary": "IRAN / RUSSIA"},
             "items": [{"id": "stale-1", "headline": "Stale item"}],
+            "targetBreakdown": [{"label": "IRAN", "count": 1}],
             "linkedMarkets": [],
         }
         ctx = self.make_context(stale_payload=stale)
@@ -326,7 +409,9 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         snapshot_dir = tempfile.TemporaryDirectory()
         self.addCleanup(snapshot_dir.cleanup)
         watcher.snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "watcher.sqlite3"))
+        watcher.seed_meta_store = SeedMetaStore(redis_client=watcher.redis_client, redis_prefix="polydata:", snapshot_store=watcher.snapshot_store)
         watcher.requests = FakeRequests()
+        watcher._acled_auth_state = None
         watcher._http_json_get = lambda url, params=None, timeout=15, headers=None: {
             "fr-url": {"results": []},
             "conflict-url": {
@@ -347,6 +432,10 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         watcher.settings.geo_shock_federal_register_api_url = "fr-url"
         watcher.settings.geo_shock_conflict_api_url = "conflict-url"
         watcher.settings.geo_shock_gdelt_doc_api_url = "gdelt-url"
+        watcher.settings.geo_shock_acled_token_url = "acled-token-url"
+        watcher.settings.geo_shock_acled_api_url = "acled-api-url"
+        watcher.settings.geo_shock_acled_email = "user@example.com"
+        watcher.settings.geo_shock_acled_password = "secret"
         watcher.settings.geo_shock_source_url = "https://ofac.treasury.gov/sanctions-list-service"
         return watcher
 
@@ -366,6 +455,18 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
                 geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY,
             )
         )
+        meta = watcher.seed_meta_store.load(watcher.seed_meta_namespace(), watcher.seed_meta_cache_key())
+        self.assertEqual("ok", meta["status"])
+        self.assertEqual(len(parsed["items"]), meta["recordCount"])
+
+    def test_watcher_persists_acled_auth_state_when_acled_path_is_used(self):
+        watcher = self.make_watcher()
+        watcher.settings.geo_shock_conflict_api_url = ""
+
+        result = watcher.run_once()
+
+        self.assertEqual("stored", result["status"])
+        self.assertIsNotNone(watcher.redis_client.get(watcher.acled_auth_redis_key()))
 
     def test_watcher_preserves_previous_payload_when_new_result_has_no_material_signal(self):
         watcher = self.make_watcher()
@@ -373,6 +474,7 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
             "status": "ok",
             "summary": {"targetSummary": "IRAN / RUSSIA", "targetLabels": ["IRAN", "RUSSIA"], "newSanctionsCount": 2, "hotspotCount": 1, "nuclearRisk": "elevated", "militaryFeed": "active"},
             "items": [{"id": "seed-1"}],
+            "targetBreakdown": [{"label": "IRAN", "count": 2}],
             "linkedMarkets": [],
         }
         watcher.store_payload(previous)
@@ -389,6 +491,7 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
                 "militaryFeed": "standby",
             },
             "items": [],
+            "targetBreakdown": [],
             "linkedMarkets": [],
         }
 
