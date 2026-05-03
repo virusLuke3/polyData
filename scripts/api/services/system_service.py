@@ -39,6 +39,14 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_F1_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 180,
     },
+    {
+        "panelId": "nba",
+        "namespace": "seed-meta:sports",
+        "cacheKey": "nba",
+        "serviceName": "polydata-nba-seed.service",
+        "intervalEnv": "POLYDATA_NBA_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
 ]
 
 

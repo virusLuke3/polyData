@@ -70,11 +70,20 @@ class SeedHealthTestCase(unittest.TestCase):
                 "cacheMode": "seeded",
                 "payloadStatus": "ok",
             },
+            ("seed-meta:sports", "nba"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:40Z",
+                "lastSuccessAt": "2999-05-03T08:29:40Z",
+                "recordCount": 30,
+                "sourceStates": {"scoreboard": "ok", "intel": "ok", "predictor": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
         }
         payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
 
         self.assertEqual("error", payload["status"])
-        self.assertEqual(4, payload["summary"]["watcherCount"])
+        self.assertEqual(5, payload["summary"]["watcherCount"])
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("ok", geo["status"])
         self.assertEqual("fresh", geo["freshness"])

@@ -108,41 +108,124 @@ def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, k
     return ctx["get_snapshot_payload"](f"snapshot:markets:{kind}", cache_key, _builder, ttl_seconds=ttl_seconds)
 
 
+NBA_SCOREBOARD_NAMESPACE = "snapshot:sports:nba"
+NBA_INTEL_NAMESPACE = "snapshot:sports:nba-intel"
+NBA_MATCHUP_PREDICTOR_NAMESPACE = "snapshot:sports:nba-matchup-predictor"
+
+
+def build_nba_scoreboard_cache_key(limit: int = 10) -> str:
+    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+
+def build_nba_intel_cache_key(limit: int = 12) -> str:
+    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+
+def build_nba_matchup_predictor_cache_key(limit: int = 8) -> str:
+    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+
+def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
+    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
+
+
+def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        redis_payload = reader(namespace, cache_key)
+        if isinstance(redis_payload, dict):
+            ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
+            return _with_cache_mode(redis_payload, "redis-seed")
+
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is None:
+        return None
+    sqlite_payload = snapshot_store.get(namespace, cache_key)
+    if isinstance(sqlite_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(namespace, cache_key, sqlite_payload, ttl_seconds)
+        return _with_cache_mode(sqlite_payload, "sqlite-seed")
+    stale_payload = snapshot_store.get_stale(namespace, cache_key)
+    if isinstance(stale_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        return _with_cache_mode(stale_payload, "stale-seed")
+    return None
+
+
+def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is not None:
+        snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(namespace, cache_key, payload, ttl_seconds)
+    return payload
+
+
+def normalize_nba_scoreboard_payload(payload: Any, *, limit: int = 10, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"items": [], "generatedAt": str(generated_at or ""), "status": "invalid"}
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)][:limit]
+    return {
+        **payload,
+        "items": items,
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
+        "status": str(payload.get("status") or ("ok" if items else "empty")),
+        "source": str(payload.get("source") or "ESPN NBA Scoreboard"),
+    }
+
+
+def fetch_live_nba_scoreboard_payload(ctx: dict, limit: int = 10) -> Dict[str, Any]:
+    payload = ctx["http_json_get"](
+        f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
+        params={"limit": limit},
+        timeout=12,
+    ) or {}
+    events = payload.get("events") or []
+    games = []
+    for event in events[:limit]:
+        competitions = event.get("competitions") or []
+        competition = competitions[0] if competitions else {}
+        competitors = competition.get("competitors") or []
+        away = next((item for item in competitors if item.get("homeAway") == "away"), None)
+        home = next((item for item in competitors if item.get("homeAway") == "home"), None)
+        status = (((competition.get("status") or {}).get("type")) or {})
+        games.append(
+            {
+                "id": event.get("id"),
+                "name": event.get("shortName") or event.get("name"),
+                "status": status.get("description") or status.get("detail"),
+                "state": status.get("state"),
+                "tipoff": event.get("date"),
+                "homeTeam": ((home or {}).get("team") or {}).get("displayName"),
+                "awayTeam": ((away or {}).get("team") or {}).get("displayName"),
+                "homeScore": (home or {}).get("score"),
+                "awayScore": (away or {}).get("score"),
+                "broadcast": (((competition.get("broadcasts") or [None])[0]) or {}).get("names", [None])[0],
+            }
+        )
+    return normalize_nba_scoreboard_payload({"items": games, "generatedAt": ctx["utc_now_iso"]()}, limit=limit)
+
+
 def get_nba_scoreboard_snapshot(ctx: dict, limit: int = 10) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+    cache_key = build_nba_scoreboard_cache_key(limit=limit)
+    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is None and int(limit or 0) != 10:
+        seeded_payload = _read_seeded_snapshot(
+            ctx,
+            namespace=NBA_SCOREBOARD_NAMESPACE,
+            cache_key=build_nba_scoreboard_cache_key(limit=10),
+            ttl_seconds=ttl_seconds,
+        )
+    if seeded_payload is not None:
+        return normalize_nba_scoreboard_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
 
-    def _builder() -> Dict[str, Any]:
-        payload = ctx["http_json_get"](
-            f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
-            params={"limit": limit},
-            timeout=12,
-        ) or {}
-        events = payload.get("events") or []
-        games = []
-        for event in events[:limit]:
-            competitions = event.get("competitions") or []
-            competition = competitions[0] if competitions else {}
-            competitors = competition.get("competitors") or []
-            away = next((item for item in competitors if item.get("homeAway") == "away"), None)
-            home = next((item for item in competitors if item.get("homeAway") == "home"), None)
-            status = (((competition.get("status") or {}).get("type")) or {})
-            games.append(
-                {
-                    "id": event.get("id"),
-                    "name": event.get("shortName") or event.get("name"),
-                    "status": status.get("description") or status.get("detail"),
-                    "state": status.get("state"),
-                    "tipoff": event.get("date"),
-                    "homeTeam": ((home or {}).get("team") or {}).get("displayName"),
-                    "awayTeam": ((away or {}).get("team") or {}).get("displayName"),
-                    "homeScore": (home or {}).get("score"),
-                    "awayScore": (away or {}).get("score"),
-                    "broadcast": (((competition.get("broadcasts") or [None])[0]) or {}).get("names", [None])[0],
-                }
-            )
-        return {"items": games, "generatedAt": ctx["utc_now_iso"]()}
-
-    return ctx["get_snapshot_payload"]("snapshot:sports:nba", cache_key, _builder, ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+    payload = _with_cache_mode(fetch_live_nba_scoreboard_payload(ctx, limit=limit), "live-fallback")
+    return _store_seed_fallback(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
 def _runtime_float(ctx: dict, value: Any) -> Optional[float]:
@@ -164,214 +247,266 @@ def _espn_stat_value(ctx: dict, stats: List[Dict[str, Any]], name: str) -> Optio
     return None
 
 
-def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+def normalize_nba_matchup_predictor_payload(payload: Any, *, limit: int = 8, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"items": [], "generatedAt": str(generated_at or ""), "source": "ESPN Matchup Predictor", "status": "invalid"}
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)][:limit]
+    return {
+        **payload,
+        "items": items,
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
+        "source": str(payload.get("source") or "ESPN Matchup Predictor"),
+        "status": str(payload.get("status") or ("ok" if items else "empty")),
+    }
 
-    def _builder() -> Dict[str, Any]:
-        scoreboard = ctx["http_json_get"](
-            f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
-            params={"limit": limit},
-            timeout=12,
-        ) or {}
-        events = scoreboard.get("events") or []
-        items_by_event_id: Dict[str, Dict[str, Any]] = {}
 
-        def _load_event(event: Dict[str, Any]) -> tuple[str, Optional[Dict[str, Any]]]:
-            event_id = str(event.get("id") or "").strip()
-            if not event_id:
-                return "", None
-            competitions = event.get("competitions") or []
-            competition = competitions[0] if competitions else {}
-            competition_id = str(competition.get("id") or event_id).strip()
-            competitors = competition.get("competitors") or []
-            away = next((item for item in competitors if item.get("homeAway") == "away"), None)
-            home = next((item for item in competitors if item.get("homeAway") == "home"), None)
-            status = (((competition.get("status") or {}).get("type")) or {})
-            try:
-                predictor = ctx["http_json_get"](
-                    (
-                        ctx["SETTINGS"].espn_core_nba_base_url.rstrip("/")
-                        + f"/events/{event_id}/competitions/{competition_id}/predictor"
-                    ),
-                    params={"lang": "en", "region": "us"},
-                    timeout=8,
-                    headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
-                ) or {}
-            except Exception:
-                ctx["app"].logger.exception("nba matchup predictor fetch failed event_id=%s", event_id)
-                return event_id, None
+def fetch_live_nba_matchup_predictor_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    scoreboard = ctx["http_json_get"](
+        f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/scoreboard",
+        params={"limit": limit},
+        timeout=12,
+    ) or {}
+    events = scoreboard.get("events") or []
+    items_by_event_id: Dict[str, Dict[str, Any]] = {}
 
-            away_stats = ((predictor.get("awayTeam") or {}).get("statistics") or [])
-            home_stats = ((predictor.get("homeTeam") or {}).get("statistics") or [])
-            away_projection = _espn_stat_value(ctx, away_stats, "gameProjection")
-            home_projection = _espn_stat_value(ctx, home_stats, "gameProjection")
-            if away_projection is None and home_projection is not None:
-                away_projection = max(0.0, min(100.0, 100.0 - home_projection))
-            if home_projection is None and away_projection is not None:
-                home_projection = max(0.0, min(100.0, 100.0 - away_projection))
+    def _load_event(event: Dict[str, Any]) -> tuple[str, Optional[Dict[str, Any]]]:
+        event_id = str(event.get("id") or "").strip()
+        if not event_id:
+            return "", None
+        competitions = event.get("competitions") or []
+        competition = competitions[0] if competitions else {}
+        competition_id = str(competition.get("id") or event_id).strip()
+        competitors = competition.get("competitors") or []
+        away = next((item for item in competitors if item.get("homeAway") == "away"), None)
+        home = next((item for item in competitors if item.get("homeAway") == "home"), None)
+        status = (((competition.get("status") or {}).get("type")) or {})
+        try:
+            predictor = ctx["http_json_get"](
+                (
+                    ctx["SETTINGS"].espn_core_nba_base_url.rstrip("/")
+                    + f"/events/{event_id}/competitions/{competition_id}/predictor"
+                ),
+                params={"lang": "en", "region": "us"},
+                timeout=8,
+                headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+            ) or {}
+        except Exception:
+            ctx["app"].logger.exception("nba matchup predictor fetch failed event_id=%s", event_id)
+            return event_id, None
 
-            away_expected = _espn_stat_value(ctx, away_stats, "teamExpectedPts")
-            home_expected = _espn_stat_value(ctx, home_stats, "teamExpectedPts")
-            if away_expected is None:
-                away_expected = _espn_stat_value(ctx, home_stats, "oppExpectedPts")
-            if home_expected is None:
-                home_expected = _espn_stat_value(ctx, away_stats, "oppExpectedPts")
+        away_stats = ((predictor.get("awayTeam") or {}).get("statistics") or [])
+        home_stats = ((predictor.get("homeTeam") or {}).get("statistics") or [])
+        away_projection = _espn_stat_value(ctx, away_stats, "gameProjection")
+        home_projection = _espn_stat_value(ctx, home_stats, "gameProjection")
+        if away_projection is None and home_projection is not None:
+            away_projection = max(0.0, min(100.0, 100.0 - home_projection))
+        if home_projection is None and away_projection is not None:
+            home_projection = max(0.0, min(100.0, 100.0 - away_projection))
 
-            projected_margin = _espn_stat_value(ctx, away_stats, "teamPredPtDiff")
-            if projected_margin is None:
-                home_margin = _espn_stat_value(ctx, home_stats, "teamPredPtDiff")
-                projected_margin = -home_margin if home_margin is not None else None
+        away_expected = _espn_stat_value(ctx, away_stats, "teamExpectedPts")
+        home_expected = _espn_stat_value(ctx, home_stats, "teamExpectedPts")
+        if away_expected is None:
+            away_expected = _espn_stat_value(ctx, home_stats, "oppExpectedPts")
+        if home_expected is None:
+            home_expected = _espn_stat_value(ctx, away_stats, "oppExpectedPts")
 
-            matchup_quality = _espn_stat_value(ctx, away_stats, "matchupQuality")
-            if matchup_quality is None:
-                matchup_quality = _espn_stat_value(ctx, home_stats, "matchupQuality")
+        projected_margin = _espn_stat_value(ctx, away_stats, "teamPredPtDiff")
+        if projected_margin is None:
+            home_margin = _espn_stat_value(ctx, home_stats, "teamPredPtDiff")
+            projected_margin = -home_margin if home_margin is not None else None
 
-            if away_projection is None and home_projection is None and matchup_quality is None:
-                return event_id, None
+        matchup_quality = _espn_stat_value(ctx, away_stats, "matchupQuality")
+        if matchup_quality is None:
+            matchup_quality = _espn_stat_value(ctx, home_stats, "matchupQuality")
 
-            return event_id, {
-                "eventId": event_id,
-                "name": event.get("name") or predictor.get("name"),
-                "shortName": event.get("shortName") or predictor.get("shortName"),
-                "tipoff": event.get("date"),
-                "state": status.get("state"),
-                "status": status.get("description") or status.get("detail"),
-                "awayTeam": ((away or {}).get("team") or {}).get("displayName"),
-                "homeTeam": ((home or {}).get("team") or {}).get("displayName"),
-                "awayWinProbability": away_projection,
-                "homeWinProbability": home_projection,
-                "matchupQuality": matchup_quality,
-                "projectedMargin": projected_margin,
-                "awayExpectedPoints": away_expected,
-                "homeExpectedPoints": home_expected,
-                "lastModified": predictor.get("lastModified"),
-            }
+        if away_projection is None and home_projection is None and matchup_quality is None:
+            return event_id, None
 
-        max_workers = min(6, max(1, len(events[:limit])))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_load_event, event) for event in events[:limit]]
-            for future in as_completed(futures):
-                event_id, item = future.result()
-                if event_id and item is not None:
-                    items_by_event_id[event_id] = item
+        return event_id, {
+            "eventId": event_id,
+            "name": event.get("name") or predictor.get("name"),
+            "shortName": event.get("shortName") or predictor.get("shortName"),
+            "tipoff": event.get("date"),
+            "state": status.get("state"),
+            "status": status.get("description") or status.get("detail"),
+            "awayTeam": ((away or {}).get("team") or {}).get("displayName"),
+            "homeTeam": ((home or {}).get("team") or {}).get("displayName"),
+            "awayWinProbability": away_projection,
+            "homeWinProbability": home_projection,
+            "matchupQuality": matchup_quality,
+            "projectedMargin": projected_margin,
+            "awayExpectedPoints": away_expected,
+            "homeExpectedPoints": home_expected,
+            "lastModified": predictor.get("lastModified"),
+        }
 
-        ordered_items = [
-            items_by_event_id[str(event.get("id"))]
-            for event in events[:limit]
-            if str(event.get("id")) in items_by_event_id
-        ]
-        return {
+    max_workers = min(6, max(1, len(events[:limit])))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_load_event, event) for event in events[:limit]]
+        for future in as_completed(futures):
+            event_id, item = future.result()
+            if event_id and item is not None:
+                items_by_event_id[event_id] = item
+
+    ordered_items = [
+        items_by_event_id[str(event.get("id"))]
+        for event in events[:limit]
+        if str(event.get("id")) in items_by_event_id
+    ]
+    return normalize_nba_matchup_predictor_payload(
+        {
             "items": ordered_items,
             "generatedAt": ctx["utc_now_iso"](),
             "source": "ESPN Matchup Predictor",
-        }
-
-    return ctx["get_snapshot_payload"](
-        "snapshot:sports:nba-matchup-predictor",
-        cache_key,
-        _builder,
-        ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"],
+        },
+        limit=limit,
     )
 
 
-def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+def get_nba_matchup_predictor_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+    cache_key = build_nba_matchup_predictor_cache_key(limit=limit)
+    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is None and int(limit or 0) != 8:
+        seeded_payload = _read_seeded_snapshot(
+            ctx,
+            namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE,
+            cache_key=build_nba_matchup_predictor_cache_key(limit=8),
+            ttl_seconds=ttl_seconds,
+        )
+    if seeded_payload is not None:
+        return normalize_nba_matchup_predictor_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
 
-    def _builder() -> Dict[str, Any]:
-        news_items: List[Dict[str, Any]] = []
-        lineup_items: List[Dict[str, Any]] = []
-        try:
-            payload = ctx["http_json_get"](
-                f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/news",
-                timeout=12,
-                headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
-            ) or {}
-            for article in (payload.get("articles") or [])[:limit]:
-                headline = str(article.get("headline") or "").strip()
-                if not headline:
-                    continue
-                source_node = article.get("source") or {}
-                source = source_node.get("name") if isinstance(source_node, dict) else None
-                links = article.get("links") or {}
-                web_link = ((links.get("web") or {}).get("href")) if isinstance(links, dict) else None
-                news_items.append(
-                    {
-                        "headline": headline,
-                        "description": (article.get("description") or article.get("story") or "")[:280] or None,
-                        "publishedAt": article.get("published") or article.get("lastModified"),
-                        "url": web_link,
-                        "source": source or "ESPN",
-                        "type": "news",
-                    }
-                )
-        except Exception:
-            ctx["app"].logger.exception("nba intel news fetch failed")
+    payload = _with_cache_mode(fetch_live_nba_matchup_predictor_payload(ctx, limit=limit), "live-fallback")
+    return _store_seed_fallback(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
-        try:
-            lineup_date = datetime.now(timezone.utc).strftime("%Y%m%d")
-            nba_headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                ),
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": f"{ctx['SETTINGS'].nba_official_base_url.rstrip('/')}/",
-                "Origin": ctx["SETTINGS"].nba_official_base_url.rstrip("/"),
-                "x-nba-stats-origin": "stats",
-                "x-nba-stats-token": "true",
-            }
-            payload = ctx["http_json_get"](
-                f"{ctx['SETTINGS'].nba_lineups_base_url.rstrip('/')}/00_daily_lineups_{lineup_date}.json",
-                timeout=8,
-                headers=nba_headers,
-            ) or {}
-            for game in (payload.get("games") or [])[: min(limit, 8)]:
-                home_team = ((game.get("homeTeam") or {}).get("teamName")) or ((game.get("homeTeam") or {}).get("teamTricode"))
-                away_team = ((game.get("awayTeam") or {}).get("teamName")) or ((game.get("awayTeam") or {}).get("teamTricode"))
-                starters: List[Dict[str, Any]] = []
-                for bucket_key, side_label in (("homePlayers", "HOME"), ("awayPlayers", "AWAY")):
-                    for player in (game.get(bucket_key) or []):
-                        player_name = str(player.get("playerName") or "").strip()
-                        if not player_name:
-                            continue
-                        starters.append(
-                            {
-                                "side": side_label,
-                                "playerName": player_name,
-                                "position": player.get("position") or "",
-                                "lineupStatus": player.get("lineupStatus") or player.get("rosterStatus") or "",
-                                "timestamp": player.get("timestamp"),
-                            }
-                        )
-                lineup_items.append(
-                    {
-                        "gameId": game.get("gameId"),
-                        "label": f"{away_team or 'Away'} @ {home_team or 'Home'}",
-                        "status": game.get("gameStatusText") or game.get("gameStatus"),
-                        "starters": starters[:10],
-                    }
-                )
-        except Exception:
-            ctx["app"].logger.exception("nba intel lineup fetch failed")
-        if not lineup_items:
-            try:
-                scoreboard = get_nba_scoreboard_snapshot(ctx, limit=min(limit, 8))
-                for game in (scoreboard.get("items") or [])[: min(limit, 8)]:
-                    lineup_items.append(
+
+def normalize_nba_intel_payload(payload: Any, *, limit: int = 12, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"items": [], "lineups": [], "generatedAt": str(generated_at or ""), "status": "invalid"}
+    news_items = [item for item in (payload.get("items") or []) if isinstance(item, dict)][:limit]
+    lineups = [item for item in (payload.get("lineups") or []) if isinstance(item, dict)][: min(limit, 8)]
+    return {
+        **payload,
+        "items": news_items,
+        "lineups": lineups,
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
+        "status": str(payload.get("status") or ("ok" if news_items or lineups else "empty")),
+        "source": str(payload.get("source") or "ESPN NBA Intel"),
+    }
+
+
+def fetch_live_nba_intel_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
+    news_items: List[Dict[str, Any]] = []
+    lineup_items: List[Dict[str, Any]] = []
+    try:
+        payload = ctx["http_json_get"](
+            f"{ctx['SETTINGS'].espn_nba_base_url.rstrip('/')}/news",
+            timeout=12,
+            headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+        ) or {}
+        for article in (payload.get("articles") or [])[:limit]:
+            headline = str(article.get("headline") or "").strip()
+            if not headline:
+                continue
+            source_node = article.get("source") or {}
+            source = source_node.get("name") if isinstance(source_node, dict) else None
+            links = article.get("links") or {}
+            web_link = ((links.get("web") or {}).get("href")) if isinstance(links, dict) else None
+            news_items.append(
+                {
+                    "headline": headline,
+                    "description": (article.get("description") or article.get("story") or "")[:280] or None,
+                    "publishedAt": article.get("published") or article.get("lastModified"),
+                    "url": web_link,
+                    "source": source or "ESPN",
+                    "type": "news",
+                }
+            )
+    except Exception:
+        ctx["app"].logger.exception("nba intel news fetch failed")
+
+    try:
+        lineup_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+        nba_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{ctx['SETTINGS'].nba_official_base_url.rstrip('/')}/",
+            "Origin": ctx["SETTINGS"].nba_official_base_url.rstrip("/"),
+            "x-nba-stats-origin": "stats",
+            "x-nba-stats-token": "true",
+        }
+        payload = ctx["http_json_get"](
+            f"{ctx['SETTINGS'].nba_lineups_base_url.rstrip('/')}/00_daily_lineups_{lineup_date}.json",
+            timeout=8,
+            headers=nba_headers,
+        ) or {}
+        for game in (payload.get("games") or [])[: min(limit, 8)]:
+            home_team = ((game.get("homeTeam") or {}).get("teamName")) or ((game.get("homeTeam") or {}).get("teamTricode"))
+            away_team = ((game.get("awayTeam") or {}).get("teamName")) or ((game.get("awayTeam") or {}).get("teamTricode"))
+            starters: List[Dict[str, Any]] = []
+            for bucket_key, side_label in (("homePlayers", "HOME"), ("awayPlayers", "AWAY")):
+                for player in (game.get(bucket_key) or []):
+                    player_name = str(player.get("playerName") or "").strip()
+                    if not player_name:
+                        continue
+                    starters.append(
                         {
-                            "gameId": game.get("id"),
-                            "label": f"{game.get('awayTeam') or 'Away'} @ {game.get('homeTeam') or 'Home'}",
-                            "status": game.get("status") or game.get("state"),
-                            "starters": [],
-                            "sourceMode": "scoreboard-fallback",
+                            "side": side_label,
+                            "playerName": player_name,
+                            "position": player.get("position") or "",
+                            "lineupStatus": player.get("lineupStatus") or player.get("rosterStatus") or "",
+                            "timestamp": player.get("timestamp"),
                         }
                     )
-            except Exception:
-                ctx["app"].logger.exception("nba intel scoreboard lineup fallback failed")
-        return {"items": news_items, "lineups": lineup_items, "generatedAt": ctx["utc_now_iso"]()}
+            lineup_items.append(
+                {
+                    "gameId": game.get("gameId"),
+                    "label": f"{away_team or 'Away'} @ {home_team or 'Home'}",
+                    "status": game.get("gameStatusText") or game.get("gameStatus"),
+                    "starters": starters[:10],
+                }
+            )
+    except Exception:
+        ctx["app"].logger.exception("nba intel lineup fetch failed")
+    if not lineup_items:
+        try:
+            scoreboard = fetch_live_nba_scoreboard_payload(ctx, limit=min(limit, 8))
+            for game in (scoreboard.get("items") or [])[: min(limit, 8)]:
+                lineup_items.append(
+                    {
+                        "gameId": game.get("id"),
+                        "label": f"{game.get('awayTeam') or 'Away'} @ {game.get('homeTeam') or 'Home'}",
+                        "status": game.get("status") or game.get("state"),
+                        "starters": [],
+                        "sourceMode": "scoreboard-fallback",
+                    }
+                )
+        except Exception:
+            ctx["app"].logger.exception("nba intel scoreboard lineup fallback failed")
+    return normalize_nba_intel_payload({"items": news_items, "lineups": lineup_items, "generatedAt": ctx["utc_now_iso"]()}, limit=limit)
 
-    return ctx["get_snapshot_payload"]("snapshot:sports:nba-intel", cache_key, _builder, ttl_seconds=ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+
+def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
+    ttl_seconds = int(ctx["SPORTS_RUNTIME_TTL_SECONDS"])
+    cache_key = build_nba_intel_cache_key(limit=limit)
+    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is None and int(limit or 0) != 12:
+        seeded_payload = _read_seeded_snapshot(
+            ctx,
+            namespace=NBA_INTEL_NAMESPACE,
+            cache_key=build_nba_intel_cache_key(limit=12),
+            ttl_seconds=ttl_seconds,
+        )
+    if seeded_payload is not None:
+        return normalize_nba_intel_payload(seeded_payload, limit=limit, generated_at=ctx["utc_now_iso"]())
+
+    payload = _with_cache_mode(fetch_live_nba_intel_payload(ctx, limit=limit), "live-fallback")
+    return _store_seed_fallback(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
 def get_inflation_nowcast_snapshot(ctx: dict) -> Dict[str, Any]:
