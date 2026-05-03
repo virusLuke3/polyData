@@ -31,6 +31,14 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_JIN10_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 60,
     },
+    {
+        "panelId": "f1-trackside",
+        "namespace": "seed-meta:sports",
+        "cacheKey": "f1-trackside",
+        "serviceName": "polydata-f1-seed.service",
+        "intervalEnv": "POLYDATA_F1_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 180,
+    },
 ]
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.services import f1_runtime_service
+from runtime.snapshot_store import SnapshotStore
 
 
 class FakeLogger:
@@ -62,6 +64,9 @@ class FakeRequests:
 
 class F1RuntimeServiceTestCase(unittest.TestCase):
     def make_context(self) -> dict:
+        snapshot_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(snapshot_dir.cleanup)
+        snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "f1.sqlite3"))
         return {
             "SPORTS_RUNTIME_TTL_SECONDS": 60,
             "SETTINGS": SimpleNamespace(
@@ -71,7 +76,9 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-23T00:00:00Z",
             "app": FakeApp(),
             "requests": FakeRequests(),
-            "get_snapshot_payload": lambda namespace, cache_key, builder, ttl_seconds: builder(),
+            "SNAPSHOT_STORE": snapshot_store,
+            "get_cached_json": lambda namespace, cache_key: None,
+            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: None,
         }
 
     def test_get_f1_panel_snapshot_builds_live_payload_with_news(self):
