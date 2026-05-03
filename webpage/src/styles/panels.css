@@ -3617,8 +3617,24 @@
   gap: 7px;
 }
 
+.wm-geo-shock-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wm-geo-shock-section-header span {
+  color: #868b87;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
 .wm-geo-shock-feed,
-.wm-geo-shock-markets {
+.wm-geo-shock-markets,
+.wm-geo-shock-breakdown {
   display: grid;
   gap: 7px;
 }
@@ -3700,12 +3716,107 @@
 
 .wm-geo-shock-summary {
   min-width: 0;
+  flex: 1 1 auto;
   color: #a1a6a1;
   font-size: 11px;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wm-geo-shock-breakdown-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #252525;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wm-geo-shock-breakdown-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wm-geo-shock-breakdown-top,
+.wm-geo-shock-breakdown-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.wm-geo-shock-breakdown-top {
+  justify-content: space-between;
+}
+
+.wm-geo-shock-breakdown-top strong,
+.wm-geo-shock-breakdown-top span,
+.wm-geo-shock-breakdown-meta em {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.wm-geo-shock-breakdown-top strong {
+  color: #f1f3f1;
+  font-size: 13px;
+}
+
+.wm-geo-shock-breakdown-top span {
+  color: #ffd27a;
+  font-size: 12px;
+}
+
+.wm-geo-shock-breakdown-meta span {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #a1a6a1;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-geo-shock-breakdown-meta em {
+  color: #8c908d;
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.wm-geo-shock-empty {
+  padding: 14px 12px;
+  border: 1px solid #252525;
+  background: rgba(255, 255, 255, 0.02);
+  color: #8f938f;
+  font-size: 12px;
+  text-align: center;
+}
+
+.wm-geo-shock-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+  color: #7f8480;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.wm-geo-shock-footer span {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid #252525;
+  background: #181818;
 }
 
 .wm-geo-shock-market {

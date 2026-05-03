@@ -535,6 +535,14 @@ export type RuntimeGeoSanctionsShockItem = {
   tags?: string[];
 };
 
+export type RuntimeGeoSanctionsShockTargetBreakdown = {
+  label?: string | null;
+  count?: number | null;
+  latestHeadline?: string | null;
+  latestOccurredAt?: string | null;
+  latestSource?: string | null;
+};
+
 export type RuntimeGeoSanctionsShockLinkedMarket = {
   marketId?: number | string | null;
   slug?: string | null;
@@ -548,10 +556,12 @@ export type RuntimeGeoSanctionsShockPayload = {
   generatedAt?: string;
   source?: string;
   sourceUrl?: string;
+  cacheMode?: string | null;
   status?: string | null;
   sources?: Record<string, string>;
   summary?: RuntimeGeoSanctionsShockSummary | null;
   items?: RuntimeGeoSanctionsShockItem[];
+  targetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
   linkedMarkets?: RuntimeGeoSanctionsShockLinkedMarket[];
   ofacRecordCountTotal?: number;
   publishDates?: string[];
