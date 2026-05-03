@@ -3,13 +3,16 @@ from __future__ import annotations
 import io
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from xml.etree import ElementTree as ET
 
 
 GEO_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:world:geo-sanctions-shock"
 GEO_SHOCK_CACHE_KEY = "panel-v1"
+ACLED_AUTH_NAMESPACE = "auth:world:geo-shock:acled"
+ACLED_AUTH_CACHE_KEY = "oauth-v1"
+ACLED_AUTH_TTL_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_FEDERAL_REGISTER_TERMS = (
     "OFAC sanctions action",
     "Iran sanctions",
@@ -17,6 +20,10 @@ DEFAULT_FEDERAL_REGISTER_TERMS = (
     "China sanctions",
     "nuclear emergency",
     "export controls China",
+)
+DEFAULT_ACLED_COUNTRY_FILTER = (
+    "Iran:OR:country=Russia:OR:country=Ukraine:OR:country=China:OR:country=Taiwan:"
+    "OR:country=Israel:OR:country=Palestine:OR:country=Lebanon:OR:country=North Korea"
 )
 DEFAULT_GDELT_CONFLICT_QUERY = (
     "(missile OR drone OR airstrike OR sanctions OR ceasefire OR military OR nuclear) "
@@ -141,6 +148,7 @@ def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Option
             "militaryFeed": "standby",
         },
         "items": [],
+        "targetBreakdown": [],
         "linkedMarkets": [],
         "ofacRecordCountTotal": 0,
     }
@@ -148,6 +156,10 @@ def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Option
 
 def _seed_cache_ttl_seconds(ctx: dict) -> int:
     return max(300, int(ctx["SETTINGS"].geo_shock_ttl_seconds or 900))
+
+
+def _now_epoch() -> int:
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 def _copy_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -582,9 +594,289 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     }
 
 
+def _has_acled_credentials(settings: Any) -> bool:
+    return bool(str(getattr(settings, "geo_shock_acled_email", "") or "").strip()) and bool(
+        str(getattr(settings, "geo_shock_acled_password", "") or "").strip()
+    )
+
+
+def _normalize_acled_auth_state(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    access_token = _text_or_none(payload.get("access_token"))
+    refresh_token = _text_or_none(payload.get("refresh_token"))
+    try:
+        access_expires_at = int(payload.get("access_expires_at") or 0)
+    except (TypeError, ValueError):
+        access_expires_at = 0
+    if not access_token and not refresh_token:
+        return None
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "access_expires_at": access_expires_at,
+    }
+
+
+def _get_acled_auth_state(ctx: dict) -> Optional[Dict[str, Any]]:
+    getter = ctx.get("get_acled_auth_state")
+    if not callable(getter):
+        return None
+    return _normalize_acled_auth_state(getter())
+
+
+def _store_acled_auth_state(ctx: dict, payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = _normalize_acled_auth_state(payload) or {"access_token": None, "refresh_token": None, "access_expires_at": 0}
+    setter = ctx.get("store_acled_auth_state")
+    if callable(setter):
+        setter(normalized)
+    return normalized
+
+
+def _build_acled_auth_state(token_payload: Dict[str, Any], *, fallback_refresh_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    access_token = _text_or_none(token_payload.get("access_token"))
+    if not access_token:
+        return None
+    refresh_token = _text_or_none(token_payload.get("refresh_token")) or fallback_refresh_token
+    try:
+        expires_in = int(token_payload.get("expires_in") or 86400)
+    except (TypeError, ValueError):
+        expires_in = 86400
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "access_expires_at": _now_epoch() + max(60, expires_in) - 300,
+    }
+
+
+def _acled_login_with_password(ctx: dict) -> Optional[Dict[str, Any]]:
+    settings = ctx["SETTINGS"]
+    requests_lib = ctx.get("requests")
+    token_url = str(getattr(settings, "geo_shock_acled_token_url", "") or "").strip()
+    if requests_lib is None or not token_url or not _has_acled_credentials(settings):
+        return None
+
+    try:
+        response = requests_lib.post(
+            token_url,
+            data={
+                "username": settings.geo_shock_acled_email,
+                "password": settings.geo_shock_acled_password,
+                "grant_type": "password",
+                "client_id": "acled",
+                "scope": "authenticated",
+            },
+            timeout=20,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "User-Agent": "polydata-runtime/1.0",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json() if hasattr(response, "json") else {}
+        state = _build_acled_auth_state(payload or {})
+        if state is None:
+            return None
+        return _store_acled_auth_state(ctx, state)
+    except Exception:
+        ctx["app"].logger.exception("geo shock acled token fetch failed")
+        return None
+
+
+def _acled_refresh_access_token(ctx: dict, current_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    settings = ctx["SETTINGS"]
+    requests_lib = ctx.get("requests")
+    token_url = str(getattr(settings, "geo_shock_acled_token_url", "") or "").strip()
+    refresh_token = _text_or_none((current_state or {}).get("refresh_token"))
+    if requests_lib is None or not token_url or not refresh_token:
+        return _acled_login_with_password(ctx)
+
+    try:
+        response = requests_lib.post(
+            token_url,
+            data={
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "client_id": "acled",
+            },
+            timeout=20,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "User-Agent": "polydata-runtime/1.0",
+            },
+        )
+        if int(getattr(response, "status_code", 500) or 500) != 200:
+            ctx["app"].logger.warning("geo shock acled refresh failed status=%s falling back to password login", getattr(response, "status_code", None))
+            return _acled_login_with_password(ctx)
+        payload = response.json() if hasattr(response, "json") else {}
+        state = _build_acled_auth_state(payload or {}, fallback_refresh_token=refresh_token)
+        if state is None:
+            return _acled_login_with_password(ctx)
+        return _store_acled_auth_state(ctx, state)
+    except Exception:
+        ctx["app"].logger.exception("geo shock acled refresh failed")
+        return _acled_login_with_password(ctx)
+
+
+def _fetch_acled_access_token(ctx: dict) -> Optional[str]:
+    current_state = _get_acled_auth_state(ctx)
+    access_token = _text_or_none((current_state or {}).get("access_token"))
+    if not access_token:
+        refreshed = _acled_login_with_password(ctx)
+        return _text_or_none((refreshed or {}).get("access_token"))
+
+    try:
+        access_expires_at = int((current_state or {}).get("access_expires_at") or 0)
+    except (TypeError, ValueError):
+        access_expires_at = 0
+    if _now_epoch() >= access_expires_at:
+        refreshed = _acled_refresh_access_token(ctx, current_state)
+        return _text_or_none((refreshed or {}).get("access_token"))
+    return access_token
+
+
+def _normalize_acled_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
+    headline = _text_or_none(raw.get("notes"))
+    event_type = _text_or_none(raw.get("event_type"))
+    sub_event_type = _text_or_none(raw.get("sub_event_type"))
+    actor1 = _text_or_none(raw.get("actor1"))
+    actor2 = _text_or_none(raw.get("actor2"))
+    country = _text_or_none(raw.get("country"))
+    admin1 = _text_or_none(raw.get("admin1"))
+    location = _text_or_none(raw.get("location"))
+    if not headline:
+        detail_parts = [part for part in (event_type, sub_event_type, actor1, actor2, country) if part]
+        headline = " / ".join(detail_parts[:3])
+    if not headline:
+        return None
+
+    try:
+        fatality_count = int(raw.get("fatalities") or 0)
+    except (TypeError, ValueError):
+        fatality_count = 0
+
+    tag_values = _unique([event_type or "", sub_event_type or ""])
+    text_blob = " ".join(part for part in (headline, country, admin1, location, event_type, sub_event_type, actor1, actor2) if part)
+    if fatality_count >= 20 or _has_keyword(text_blob, keywords=NUCLEAR_KEYWORDS):
+        severity = "critical"
+    elif fatality_count > 0 or _has_keyword(text_blob, keywords=MILITARY_KEYWORDS):
+        severity = "warning"
+    else:
+        severity = "watch"
+
+    targets = _target_hits(text_blob)
+    occurred_at = _iso_or_none(raw.get("event_date"))
+    summary_parts = _unique(
+        [
+            country or "",
+            admin1 or "",
+            sub_event_type or event_type or "",
+            f"{fatality_count} fatalities" if fatality_count > 0 else "",
+        ]
+    )
+    return {
+        "id": f"acled:{raw.get('event_id_cnty') or index}",
+        "kind": "conflict",
+        "headline": headline,
+        "summary": " / ".join(summary_parts[:3]) or "ACLED event",
+        "source": "ACLED",
+        "sourceUrl": None,
+        "occurredAt": occurred_at,
+        "severity": severity,
+        "targetLabels": targets,
+        "country": country or location or admin1,
+        "tags": tag_values,
+    }
+
+
+def _fetch_acled_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
+    settings = ctx["SETTINGS"]
+    requests_lib = ctx.get("requests")
+    api_url = str(getattr(settings, "geo_shock_acled_api_url", "") or "").strip()
+    if not api_url:
+        return {"state": "missing-url", "items": [], "targetScores": {}, "hotspotCount": 0}
+    if not _has_acled_credentials(settings):
+        return {"state": "auth-missing", "items": [], "targetScores": {}, "hotspotCount": 0}
+    if requests_lib is None:
+        return {"state": "requests-missing", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    token = _fetch_acled_access_token(ctx)
+    if not token:
+        return {"state": "auth-error", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    date_floor = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    params = {
+        "_format": "json",
+        "limit": 40,
+        "country": DEFAULT_ACLED_COUNTRY_FILTER,
+        "event_date": date_floor,
+        "event_date_where": ">=",
+        "fields": "event_id_cnty|event_date|event_type|sub_event_type|country|admin1|location|actor1|actor2|fatalities|notes",
+    }
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "polydata-runtime/1.0",
+    }
+    try:
+        response = requests_lib.get(
+            api_url,
+            params=params,
+            timeout=25,
+            headers=headers,
+        )
+        if int(getattr(response, "status_code", 500) or 500) == 401:
+            refreshed = _acled_refresh_access_token(ctx, _get_acled_auth_state(ctx))
+            refreshed_token = _text_or_none((refreshed or {}).get("access_token"))
+            if refreshed_token:
+                response = requests_lib.get(
+                    api_url,
+                    params=params,
+                    timeout=25,
+                    headers={**headers, "Authorization": f"Bearer {refreshed_token}"},
+                )
+        if int(getattr(response, "status_code", 500) or 500) == 403:
+            ctx["app"].logger.warning("geo shock acled access denied")
+            return {"state": "access-denied", "items": [], "targetScores": {}, "hotspotCount": 0}
+        response.raise_for_status()
+        payload = response.json() if hasattr(response, "json") else {}
+    except Exception:
+        ctx["app"].logger.exception("geo shock acled read failed")
+        return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    rows = _coerce_conflict_rows(payload if isinstance(payload, list) else ((payload or {}).get("data") or payload))
+    items: List[Dict[str, Any]] = []
+    target_scores: Dict[str, int] = defaultdict(int)
+    for index, row in enumerate(rows):
+        item = _normalize_acled_item(row, index)
+        if item is None:
+            continue
+        items.append(item)
+        for target in item.get("targetLabels") or []:
+            target_scores[target] += 2
+    hotspot_count = len(_unique([item.get("country") or item.get("headline") or "" for item in items]))
+    items.sort(
+        key=lambda item: (
+            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
+            SEVERITY_ORDER.get(str(item.get("severity")), 0),
+        ),
+        reverse=True,
+    )
+    return {
+        "state": "ok" if items else "empty",
+        "items": items[:12],
+        "targetScores": dict(target_scores),
+        "hotspotCount": hotspot_count,
+    }
+
+
 def _fetch_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     url = ctx["SETTINGS"].geo_shock_conflict_api_url
     if not url:
+        if _has_acled_credentials(ctx["SETTINGS"]):
+            return _fetch_acled_conflict_snapshot(ctx)
         return _fetch_gdelt_conflict_snapshot(ctx)
     http_json_get = ctx.get("http_json_get")
     if not callable(http_json_get):
@@ -637,6 +929,35 @@ def _top_targets(target_scores: Dict[str, int]) -> List[str]:
     return [label for label, score in ranked if score > 0][:3]
 
 
+def _build_target_breakdown(items: List[Dict[str, Any]], target_scores: Dict[str, int]) -> List[Dict[str, Any]]:
+    if not target_scores:
+        return []
+
+    latest_by_target: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        occurred = _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc)
+        for label in item.get("targetLabels") or []:
+            current = latest_by_target.get(label)
+            current_occurred = _parse_datetime((current or {}).get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc)
+            if current is None or occurred >= current_occurred:
+                latest_by_target[label] = item
+
+    ranked = sorted(target_scores.items(), key=lambda entry: (-int(entry[1] or 0), entry[0]))
+    breakdown: List[Dict[str, Any]] = []
+    for label, count in ranked[:3]:
+        latest = latest_by_target.get(label) or {}
+        breakdown.append(
+            {
+                "label": label,
+                "count": int(count or 0),
+                "latestHeadline": _text_or_none(latest.get("headline")),
+                "latestOccurredAt": _iso_or_none(latest.get("occurredAt")),
+                "latestSource": _text_or_none(latest.get("source")),
+            }
+        )
+    return breakdown
+
+
 def _nuclear_risk(items: List[Dict[str, Any]], targets: List[str]) -> str:
     nuclear_items = [
         item for item in items
@@ -685,19 +1006,19 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
         "conflictFeed": conflict_snapshot.get("state") or "error",
     }
 
-    items = [
+    all_items = [
         *(ofac_snapshot.get("focusEntries") or []),
         *(notices_snapshot.get("items") or []),
         *(conflict_snapshot.get("items") or []),
     ]
-    items.sort(
+    all_items.sort(
         key=lambda item: (
             _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
             SEVERITY_ORDER.get(str(item.get("severity")), 0),
         ),
         reverse=True,
     )
-    items = items[: max(3, min(int(item_limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
+    items = all_items[: max(3, min(int(item_limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
 
     target_scores = _merge_target_scores(
         ofac_snapshot.get("targetScores") or {},
@@ -725,6 +1046,7 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
                 "militaryFeed": _military_feed_label(str(conflict_snapshot.get("state") or ""), conflict_snapshot.get("items") or []),
             },
             "items": items,
+            "targetBreakdown": _build_target_breakdown(all_items, target_scores),
             "linkedMarkets": [],
             "ofacRecordCountTotal": record_total,
             "publishDates": ofac_snapshot.get("publishDates") or [],

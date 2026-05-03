@@ -20,6 +20,10 @@ from data_sources import (
     ESPN_NBA_BASE_URL,
     F1_BWENEWS_RSS_URL,
     F1_BWENEWS_SOURCE_URL,
+    GEO_SHOCK_ACLED_API_URL,
+    GEO_SHOCK_ACLED_EMAIL,
+    GEO_SHOCK_ACLED_PASSWORD,
+    GEO_SHOCK_ACLED_TOKEN_URL,
     GEO_SHOCK_CONFLICT_API_URL,
     GEO_SHOCK_GDELT_DOC_API_URL,
     GEO_SHOCK_FEDERAL_REGISTER_API_URL,
@@ -130,6 +134,10 @@ class ApiSettings:
     geo_shock_federal_register_api_url: str
     geo_shock_conflict_api_url: str
     geo_shock_gdelt_doc_api_url: str
+    geo_shock_acled_token_url: str
+    geo_shock_acled_api_url: str
+    geo_shock_acled_email: str
+    geo_shock_acled_password: str
     geo_shock_source_url: str
     geo_shock_ttl_seconds: int
     f1_panel_path: str
@@ -222,6 +230,16 @@ def load_api_settings() -> ApiSettings:
             "POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL",
             GEO_SHOCK_GDELT_DOC_API_URL or "https://api.gdeltproject.org/api/v2/doc/doc",
         ),
+        geo_shock_acled_token_url=_get_str(
+            "POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL",
+            GEO_SHOCK_ACLED_TOKEN_URL or "https://acleddata.com/oauth/token",
+        ),
+        geo_shock_acled_api_url=_get_str(
+            "POLYDATA_GEO_SHOCK_ACLED_API_URL",
+            GEO_SHOCK_ACLED_API_URL or "https://acleddata.com/api/acled/read",
+        ),
+        geo_shock_acled_email=_get_str("POLYDATA_GEO_SHOCK_ACLED_EMAIL", _get_str("ACLED_USERNAME", GEO_SHOCK_ACLED_EMAIL)),
+        geo_shock_acled_password=_get_str("POLYDATA_GEO_SHOCK_ACLED_PASSWORD", _get_str("ACLED_PASSWORD", GEO_SHOCK_ACLED_PASSWORD)),
         geo_shock_source_url=_get_str(
             "POLYDATA_GEO_SHOCK_SOURCE_URL",
             GEO_SHOCK_SOURCE_URL or "https://ofac.treasury.gov/sanctions-list-service",
