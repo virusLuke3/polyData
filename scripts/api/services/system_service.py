@@ -79,6 +79,38 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_INFLATION_NOWCAST_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 1800,
     },
+    {
+        "panelId": "alpha-signal",
+        "namespace": "seed-meta:signals",
+        "cacheKey": "alpha-signal",
+        "serviceName": "polydata-alpha-signal-seed.service",
+        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 45,
+    },
+    {
+        "panelId": "whale-trades",
+        "namespace": "seed-meta:signals",
+        "cacheKey": "whale-trades",
+        "serviceName": "polydata-whale-trades-seed.service",
+        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 45,
+    },
+    {
+        "panelId": "suspicious-trades",
+        "namespace": "seed-meta:signals",
+        "cacheKey": "suspicious-trades",
+        "serviceName": "polydata-suspicious-trades-seed.service",
+        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 45,
+    },
+    {
+        "panelId": "bootstrap",
+        "namespace": "seed-meta:bootstrap",
+        "cacheKey": "bootstrap",
+        "serviceName": "polydata-bootstrap-seed.service",
+        "intervalEnv": "POLYDATA_BOOTSTRAP_SEED_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
 ]
 
 
@@ -185,6 +217,8 @@ def build_seed_health_payload(ctx: dict) -> Dict[str, Any]:
         if status == "bootstrap":
             status = "ok"
         if status == "preserved":
+            status = "degraded"
+        if status == "empty":
             status = "degraded"
         item = {
             "panelId": spec["panelId"],

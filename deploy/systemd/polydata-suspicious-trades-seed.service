@@ -1,0 +1,14 @@
+[Unit]
+Description=polyData suspicious trades seed watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/polyData
+EnvironmentFile=/opt/polyData/deploy/systemd/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/signals_watcher.py --component suspicious --watch --interval "${POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS:-45}" --limit "${POLYDATA_SUSPICIOUS_TRADES_LIMIT:-12}"'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

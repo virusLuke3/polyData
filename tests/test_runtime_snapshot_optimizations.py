@@ -438,8 +438,10 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
         with patch.object(signal_service, "_build_alpha_signal_payload", return_value=payload):
             result = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
-        self.assertEqual(result, payload)
-        self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key), payload)
+        self.assertEqual(result["items"], payload["items"])
+        self.assertEqual("ok", result["status"])
+        self.assertEqual("live-build", result["cacheMode"])
+        self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key)["items"], payload["items"])
 
 
 if __name__ == "__main__":

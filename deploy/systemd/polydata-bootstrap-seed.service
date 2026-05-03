@@ -1,0 +1,14 @@
+[Unit]
+Description=polyData bootstrap seed watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/polyData
+EnvironmentFile=/opt/polyData/deploy/systemd/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/bootstrap_watcher.py --watch --interval "${POLYDATA_BOOTSTRAP_SEED_INTERVAL_SECONDS:-60}"'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

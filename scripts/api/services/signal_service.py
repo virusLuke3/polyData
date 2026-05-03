@@ -20,6 +20,29 @@ _SIGNAL_REFRESH_LOCK = threading.Lock()
 _SIGNAL_REFRESH_STATE: Dict[str, bool] = {}
 
 
+def build_whale_trades_cache_key(limit: int = 14, lookback_days: int = 7) -> str:
+    return json.dumps({"limit": limit, "lookbackDays": lookback_days}, sort_keys=True, ensure_ascii=True)
+
+
+def build_suspicious_trades_cache_key(limit: int = 12) -> str:
+    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+
+def build_alpha_signal_cache_key(limit: int = 8) -> str:
+    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+
+
+def normalize_signal_payload(payload: Dict[str, Any], *, generated_at: str, source: str = "polyData signal seed") -> Dict[str, Any]:
+    items = payload.get("items")
+    normalized = dict(payload)
+    normalized["items"] = items if isinstance(items, list) else []
+    normalized.setdefault("generatedAt", generated_at)
+    normalized.setdefault("source", source)
+    normalized.setdefault("status", "ok" if normalized["items"] else "empty")
+    normalized.setdefault("cacheMode", "live-build")
+    return normalized
+
+
 def _severity_for_notional(ctx: dict, notional: Any) -> str:
     value = ctx["_safe_decimal"](notional)
     if value is not None and value >= CRITICAL_NOTIONAL:
@@ -168,6 +191,13 @@ def _get_stale_first_runtime_snapshot(
     if cached is not None:
         return cached
 
+    redis_reader = ctx.get("get_cached_json")
+    if callable(redis_reader):
+        redis_payload = redis_reader(namespace, cache_key)
+        if isinstance(redis_payload, dict):
+            ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
+            return ctx["set_cached_runtime_payload"](namespace, cache_key, redis_payload, ttl_seconds)
+
     fresh_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
     if fresh_payload is not None:
         return ctx["set_cached_runtime_payload"](namespace, cache_key, fresh_payload, ttl_seconds)
@@ -236,17 +266,24 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
         items.append(_format_trade_item(ctx, row))
         if len(items) >= limit:
             break
-    return {"items": items, "generatedAt": ctx["utc_now_iso"]()}
+    return normalize_signal_payload({"items": items, "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]())
+
+
+def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+    return normalize_signal_payload(
+        _build_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
+        generated_at=ctx["utc_now_iso"](),
+    )
 
 
 def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit, "lookbackDays": lookback_days}, sort_keys=True, ensure_ascii=True)
+    cache_key = build_whale_trades_cache_key(limit=limit, lookback_days=lookback_days)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
         cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: _build_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
+        builder=lambda: fetch_live_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
         refresh_state_key=f"whales:{cache_key}",
         label="whales-snapshot",
     )
@@ -270,15 +307,22 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
 
 
 def get_suspicious_trades_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+    cache_key = build_suspicious_trades_cache_key(limit=limit)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
         cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: {"items": _build_suspicious_trade_items(ctx, limit), "generatedAt": ctx["utc_now_iso"]()},
+        builder=lambda: fetch_live_suspicious_trades_payload(ctx, limit=limit),
         refresh_state_key=f"suspicious:{cache_key}",
         label="suspicious-snapshot",
+    )
+
+
+def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
+    return normalize_signal_payload(
+        {"items": _build_suspicious_trade_items(ctx, limit), "generatedAt": ctx["utc_now_iso"]()},
+        generated_at=ctx["utc_now_iso"](),
     )
 
 
@@ -509,7 +553,7 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         deduped.append(signal)
         if len(deduped) >= limit:
             break
-    return {"items": deduped, "generatedAt": ctx["utc_now_iso"]()}
+    return normalize_signal_payload({"items": deduped, "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]())
 
 
 def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
@@ -544,17 +588,28 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 timestamp=ctx["utc_now_iso"](),
                 contributors=["fast-fallback", "market"],
             )
-    return {"items": signals[:limit], "generatedAt": ctx["utc_now_iso"](), "status": "warming", "sourceMode": "fast-fallback"}
+    return {
+        **normalize_signal_payload({"items": signals[:limit], "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]()),
+        "status": "warming",
+        "sourceMode": "fast-fallback",
+    }
+
+
+def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    return normalize_signal_payload(
+        _build_alpha_signal_payload(ctx, limit=limit),
+        generated_at=ctx["utc_now_iso"](),
+    )
 
 
 def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    cache_key = json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
+    cache_key = build_alpha_signal_cache_key(limit=limit)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
         cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: _build_alpha_signal_payload(ctx, limit=limit),
+        builder=lambda: fetch_live_alpha_signal_payload(ctx, limit=limit),
         refresh_state_key=f"alpha:{cache_key}",
         label="alpha-snapshot",
         cold_fallback=lambda: _build_alpha_fallback_payload(ctx, limit=limit),
