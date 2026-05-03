@@ -47,6 +47,38 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_NBA_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 60,
     },
+    {
+        "panelId": "commodities-watch",
+        "namespace": "seed-meta:markets",
+        "cacheKey": "commodities-watch",
+        "serviceName": "polydata-market-group-seed.service",
+        "intervalEnv": "POLYDATA_MARKET_GROUP_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
+    {
+        "panelId": "crypto-watch",
+        "namespace": "seed-meta:markets",
+        "cacheKey": "crypto-watch",
+        "serviceName": "polydata-market-group-seed.service",
+        "intervalEnv": "POLYDATA_MARKET_GROUP_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
+    {
+        "panelId": "crypto-funding-watch",
+        "namespace": "seed-meta:crypto",
+        "cacheKey": "funding-watch",
+        "serviceName": "polydata-crypto-funding-seed.service",
+        "intervalEnv": "POLYDATA_CRYPTO_FUNDING_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 30,
+    },
+    {
+        "panelId": "inflation-nowcast",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "inflation-nowcast",
+        "serviceName": "polydata-inflation-nowcast-seed.service",
+        "intervalEnv": "POLYDATA_INFLATION_NOWCAST_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 1800,
+    },
 ]
 
 

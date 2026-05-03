@@ -79,11 +79,47 @@ class SeedHealthTestCase(unittest.TestCase):
                 "cacheMode": "seeded",
                 "payloadStatus": "ok",
             },
+            ("seed-meta:markets", "commodities-watch"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:35Z",
+                "lastSuccessAt": "2999-05-03T08:29:35Z",
+                "recordCount": 24,
+                "sourceStates": {"commodities": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
+            ("seed-meta:markets", "crypto-watch"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:30Z",
+                "lastSuccessAt": "2999-05-03T08:29:30Z",
+                "recordCount": 13,
+                "sourceStates": {"crypto": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
+            ("seed-meta:crypto", "funding-watch"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:25Z",
+                "lastSuccessAt": "2999-05-03T08:29:25Z",
+                "recordCount": 8,
+                "sourceStates": {"binance": "ok", "bybit": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
+            ("seed-meta:macro", "inflation-nowcast"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:20Z",
+                "lastSuccessAt": "2999-05-03T08:29:20Z",
+                "recordCount": 1,
+                "sourceStates": {"clevelandFed": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
         }
         payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
 
         self.assertEqual("error", payload["status"])
-        self.assertEqual(5, payload["summary"]["watcherCount"])
+        self.assertEqual(9, payload["summary"]["watcherCount"])
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("ok", geo["status"])
         self.assertEqual("fresh", geo["freshness"])

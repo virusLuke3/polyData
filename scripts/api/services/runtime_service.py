@@ -6,9 +6,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
-def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
-    ttl_seconds = 10 if kind == "crypto" else ctx["FINANCE_RUNTIME_TTL_SECONDS"]
-    cache_key = json.dumps(
+def build_market_group_cache_key(items: List[tuple[str, str, str]], *, kind: str) -> str:
+    return json.dumps(
         {
             "kind": kind,
             "symbols": [symbol for _, _, symbol in items],
@@ -18,94 +17,118 @@ def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, k
         ensure_ascii=True,
     )
 
-    def _builder() -> Dict[str, Any]:
-        rows_by_symbol: Dict[str, Dict[str, Any]] = {}
 
-        def _load_row(entry: tuple[str, str, str]) -> tuple[str, Optional[Dict[str, Any]]]:
-            key, label, symbol = entry
-            is_crypto = kind == "crypto"
-            try:
-                snapshot = ctx["get_yahoo_market_snapshot"](
-                    symbol,
-                    interval="5m" if is_crypto else "30m",
-                    range_name="1d" if is_crypto else "5d",
-                    ttl_seconds=5 if is_crypto else None,
+def normalize_market_group_payload(payload: Any, *, kind: str, limit: Optional[int] = None, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"kind": kind, "items": [], "generatedAt": str(generated_at or ""), "status": "invalid"}
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+    if limit is not None:
+        items = items[: max(0, int(limit))]
+    return {
+        **payload,
+        "kind": str(payload.get("kind") or kind),
+        "items": items,
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
+        "status": str(payload.get("status") or ("ok" if items else "empty")),
+    }
+
+
+def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
+    rows_by_symbol: Dict[str, Dict[str, Any]] = {}
+
+    def _load_row(entry: tuple[str, str, str]) -> tuple[str, Optional[Dict[str, Any]]]:
+        key, label, symbol = entry
+        is_crypto = kind == "crypto"
+        try:
+            snapshot = ctx["get_yahoo_market_snapshot"](
+                symbol,
+                interval="5m" if is_crypto else "30m",
+                range_name="1d" if is_crypto else "5d",
+                ttl_seconds=5 if is_crypto else None,
+            )
+        except Exception:
+            ctx["app"].logger.exception("yahoo snapshot failed symbol=%s", symbol)
+            snapshot = None
+        if not snapshot:
+            return symbol, None
+        return symbol, {
+            "id": key,
+            "label": label,
+            "symbol": symbol,
+            "price": snapshot.get("price"),
+            "changePercent": snapshot.get("changePercent"),
+            "points": snapshot.get("points") or [],
+        }
+
+    max_workers = min(8, max(1, len(items)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_load_row, item) for item in items]
+        for future in as_completed(futures):
+            symbol, row = future.result()
+            if row is not None:
+                rows_by_symbol[symbol] = row
+
+    rows = [rows_by_symbol[symbol] for _, _, symbol in items if symbol in rows_by_symbol]
+    if kind == "crypto" and len(rows) < len(items):
+        try:
+            ids = [ctx["CRYPTO_COINGECKO_IDS"][symbol] for _, _, symbol in items if symbol in ctx["CRYPTO_COINGECKO_IDS"]]
+            payload = ctx["http_json_get"](
+                f"{ctx['SETTINGS'].coingecko_base_url.rstrip('/')}/coins/markets",
+                params={
+                    "vs_currency": "usd",
+                    "ids": ",".join(ids),
+                    "sparkline": "true",
+                    "price_change_percentage": "24h",
+                },
+                timeout=12,
+                headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+            ) or []
+            by_id = {str(item.get("id")): item for item in payload if isinstance(item, dict)}
+            yahoo_rows = {str(item.get("symbol")): item for item in rows if isinstance(item, dict)}
+            merged_rows = []
+            for key, label, symbol in items:
+                existing = yahoo_rows.get(symbol)
+                if existing:
+                    merged_rows.append(existing)
+                    continue
+                coin = by_id.get(ctx["CRYPTO_COINGECKO_IDS"].get(symbol, ""))
+                if not coin:
+                    continue
+                spark = (((coin.get("sparkline_in_7d") or {}).get("price")) or [])[-48:]
+                points = [
+                    {
+                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "value": ctx["_safe_float"](value),
+                    }
+                    for value in spark
+                    if ctx["_safe_float"](value) is not None
+                ]
+                merged_rows.append(
+                    {
+                        "id": key,
+                        "label": label,
+                        "symbol": symbol,
+                        "price": ctx["_safe_float"](coin.get("current_price")),
+                        "changePercent": ctx["_safe_float"](coin.get("price_change_percentage_24h")),
+                        "points": points,
+                    }
                 )
-            except Exception:
-                ctx["app"].logger.exception("yahoo snapshot failed symbol=%s", symbol)
-                snapshot = None
-            if not snapshot:
-                return symbol, None
-            return symbol, {
-                "id": key,
-                "label": label,
-                "symbol": symbol,
-                "price": snapshot.get("price"),
-                "changePercent": snapshot.get("changePercent"),
-                "points": snapshot.get("points") or [],
-            }
+            rows = merged_rows
+        except Exception:
+            ctx["app"].logger.exception("coingecko crypto fallback failed")
+    return normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": ctx["utc_now_iso"]()}, kind=kind)
 
-        max_workers = min(8, max(1, len(items)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_load_row, item) for item in items]
-            for future in as_completed(futures):
-                symbol, row = future.result()
-                if row is not None:
-                    rows_by_symbol[symbol] = row
 
-        rows = [rows_by_symbol[symbol] for _, _, symbol in items if symbol in rows_by_symbol]
-        if kind == "crypto" and len(rows) < len(items):
-            try:
-                ids = [ctx["CRYPTO_COINGECKO_IDS"][symbol] for _, _, symbol in items if symbol in ctx["CRYPTO_COINGECKO_IDS"]]
-                payload = ctx["http_json_get"](
-                    f"{ctx['SETTINGS'].coingecko_base_url.rstrip('/')}/coins/markets",
-                    params={
-                        "vs_currency": "usd",
-                        "ids": ",".join(ids),
-                        "sparkline": "true",
-                        "price_change_percentage": "24h",
-                    },
-                    timeout=12,
-                    headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
-                ) or []
-                by_id = {str(item.get("id")): item for item in payload if isinstance(item, dict)}
-                yahoo_rows = {str(item.get("symbol")): item for item in rows if isinstance(item, dict)}
-                merged_rows = []
-                for key, label, symbol in items:
-                    existing = yahoo_rows.get(symbol)
-                    if existing:
-                        merged_rows.append(existing)
-                        continue
-                    coin = by_id.get(ctx["CRYPTO_COINGECKO_IDS"].get(symbol, ""))
-                    if not coin:
-                        continue
-                    spark = (((coin.get("sparkline_in_7d") or {}).get("price")) or [])[-48:]
-                    points = [
-                        {
-                            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            "value": ctx["_safe_float"](value),
-                        }
-                        for value in spark
-                        if ctx["_safe_float"](value) is not None
-                    ]
-                    merged_rows.append(
-                        {
-                            "id": key,
-                            "label": label,
-                            "symbol": symbol,
-                            "price": ctx["_safe_float"](coin.get("current_price")),
-                            "changePercent": ctx["_safe_float"](coin.get("price_change_percentage_24h")),
-                            "points": points,
-                        }
-                    )
-                rows = merged_rows
-            except Exception:
-                ctx["app"].logger.exception("coingecko crypto fallback failed")
-        return {"kind": kind, "items": rows, "generatedAt": ctx["utc_now_iso"]()}
+def get_market_group_snapshot(ctx: dict, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
+    ttl_seconds = 10 if kind == "crypto" else ctx["FINANCE_RUNTIME_TTL_SECONDS"]
+    cache_key = build_market_group_cache_key(items, kind=kind)
+    namespace = f"snapshot:markets:{kind}"
+    seeded_payload = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is not None:
+        return normalize_market_group_payload(seeded_payload, kind=kind, generated_at=ctx["utc_now_iso"]())
 
-    if kind == "crypto":
-        return _builder()
-    return ctx["get_snapshot_payload"](f"snapshot:markets:{kind}", cache_key, _builder, ttl_seconds=ttl_seconds)
+    payload = _with_cache_mode(fetch_live_market_group_payload(ctx, items, kind=kind), "live-fallback")
+    return _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
 NBA_SCOREBOARD_NAMESPACE = "snapshot:sports:nba"
@@ -509,53 +532,90 @@ def get_nba_intel_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     return _store_seed_fallback(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
+INFLATION_NOWCAST_NAMESPACE = "snapshot:macro:inflation-nowcast"
+INFLATION_NOWCAST_CACHE_KEY = "latest"
+
+
+def normalize_inflation_nowcast_payload(payload: Any, *, ctx: dict, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        payload = {}
+    has_data = bool(payload.get("monthOverMonth") or payload.get("yearOverYear") or payload.get("quarterly"))
+    return {
+        **payload,
+        "monthOverMonth": payload.get("monthOverMonth"),
+        "yearOverYear": payload.get("yearOverYear"),
+        "quarterly": payload.get("quarterly") if isinstance(payload.get("quarterly"), list) else [],
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ctx["utc_now_iso"]()),
+        "source": str(payload.get("source") or "Cleveland Fed Inflation Nowcasting"),
+        "url": str(payload.get("url") or ctx["SETTINGS"].cleveland_fed_nowcast_url),
+        "status": str(payload.get("status") or ("ok" if has_data else "empty")),
+    }
+
+
+def fetch_live_inflation_nowcast_payload(ctx: dict) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "monthOverMonth": None,
+        "yearOverYear": None,
+        "quarterly": [],
+        "generatedAt": ctx["utc_now_iso"](),
+        "source": "Cleveland Fed Inflation Nowcasting",
+        "url": ctx["SETTINGS"].cleveland_fed_nowcast_url,
+    }
+    if ctx["requests"] is None or ctx["BeautifulSoup"] is None:
+        return normalize_inflation_nowcast_payload(payload, ctx=ctx)
+    try:
+        response = ctx["requests"].get(
+            payload["url"],
+            timeout=15,
+            headers={"User-Agent": "polydata-runtime/1.0", "Accept": "text/html,application/xhtml+xml"},
+        )
+        response.raise_for_status()
+        soup = ctx["BeautifulSoup"](response.text, "html.parser")
+        for table in soup.find_all("table"):
+            caption = table.find("caption")
+            caption_text = " ".join(caption.get_text(" ", strip=True).split()).lower() if caption else ""
+            headers = [th.get_text(" ", strip=True) for th in table.find_all("th")]
+            rows: List[Dict[str, str]] = []
+            for tr in table.find_all("tr"):
+                cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+                if not cells or len(cells) != len(headers):
+                    continue
+                rows.append({headers[index]: cells[index] for index in range(len(headers))})
+            if not rows:
+                continue
+            if "month-over-month percent change" in caption_text:
+                payload["monthOverMonth"] = rows[0]
+            elif "year-over-year percent change" in caption_text:
+                payload["yearOverYear"] = rows[0]
+            elif "quarterly annualized percent change" in caption_text:
+                payload["quarterly"] = rows[:4]
+    except Exception:
+        ctx["app"].logger.exception("inflation nowcast fetch failed")
+    return normalize_inflation_nowcast_payload(payload, ctx=ctx)
+
+
 def get_inflation_nowcast_snapshot(ctx: dict) -> Dict[str, Any]:
-    cache_key = "latest"
+    ttl_seconds = max(ctx["FINANCE_RUNTIME_TTL_SECONDS"], 1800)
+    seeded_payload = _read_seeded_snapshot(
+        ctx,
+        namespace=INFLATION_NOWCAST_NAMESPACE,
+        cache_key=INFLATION_NOWCAST_CACHE_KEY,
+        ttl_seconds=ttl_seconds,
+    )
+    if seeded_payload is not None:
+        return normalize_inflation_nowcast_payload(seeded_payload, ctx=ctx, generated_at=ctx["utc_now_iso"]())
 
     def _builder() -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "monthOverMonth": None,
-            "yearOverYear": None,
-            "quarterly": [],
-            "generatedAt": ctx["utc_now_iso"](),
-            "source": "Cleveland Fed Inflation Nowcasting",
-            "url": ctx["SETTINGS"].cleveland_fed_nowcast_url,
-        }
-        if ctx["requests"] is None or ctx["BeautifulSoup"] is None:
-            return payload
-        try:
-            response = ctx["requests"].get(
-                payload["url"],
-                timeout=15,
-                headers={"User-Agent": "polydata-runtime/1.0", "Accept": "text/html,application/xhtml+xml"},
-            )
-            response.raise_for_status()
-            soup = ctx["BeautifulSoup"](response.text, "html.parser")
-            for table in soup.find_all("table"):
-                caption = table.find("caption")
-                caption_text = " ".join(caption.get_text(" ", strip=True).split()).lower() if caption else ""
-                headers = [th.get_text(" ", strip=True) for th in table.find_all("th")]
-                rows: List[Dict[str, str]] = []
-                for tr in table.find_all("tr"):
-                    cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-                    if not cells or len(cells) != len(headers):
-                        continue
-                    rows.append({headers[index]: cells[index] for index in range(len(headers))})
-                if not rows:
-                    continue
-                if "month-over-month percent change" in caption_text:
-                    payload["monthOverMonth"] = rows[0]
-                elif "year-over-year percent change" in caption_text:
-                    payload["yearOverYear"] = rows[0]
-                elif "quarterly annualized percent change" in caption_text:
-                    payload["quarterly"] = rows[:4]
-        except Exception:
-            ctx["app"].logger.exception("inflation nowcast fetch failed")
-        return payload
+        return fetch_live_inflation_nowcast_payload(ctx)
 
-    return ctx["get_snapshot_payload"](
-        "snapshot:macro:inflation-nowcast",
-        cache_key,
-        _builder,
-        ttl_seconds=max(ctx["FINANCE_RUNTIME_TTL_SECONDS"], 1800),
+    if ctx.get("SNAPSHOT_STORE") is None and callable(ctx.get("get_snapshot_payload")):
+        return ctx["get_snapshot_payload"](INFLATION_NOWCAST_NAMESPACE, INFLATION_NOWCAST_CACHE_KEY, _builder, ttl_seconds=ttl_seconds)
+
+    payload = _with_cache_mode(fetch_live_inflation_nowcast_payload(ctx), "live-fallback")
+    return _store_seed_fallback(
+        ctx,
+        namespace=INFLATION_NOWCAST_NAMESPACE,
+        cache_key=INFLATION_NOWCAST_CACHE_KEY,
+        payload=payload,
+        ttl_seconds=ttl_seconds,
     )

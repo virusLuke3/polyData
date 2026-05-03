@@ -138,6 +138,9 @@ def _url_fingerprint(*urls: str) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:12]
 
 
+CRYPTO_FUNDING_NAMESPACE = "snapshot:crypto:funding-watch"
+
+
 def _filter_symbols(items: Iterable[Dict[str, Any]], symbols: set[str]) -> List[Dict[str, Any]]:
     return [item for item in items if str(item.get("symbol") or "").upper().strip() in symbols]
 
@@ -286,12 +289,9 @@ def _fetch_bybit(ctx: dict, symbols: set[str]) -> tuple[List[Dict[str, Any]], st
     return items, "ok" if items else "empty"
 
 
-def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, Any]:
-    settings = ctx["SETTINGS"]
+def build_crypto_funding_cache_key(settings: Any, *, limit: int = 16) -> str:
     symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
-    symbol_set = set(symbols)
-    ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
-    cache_key = json.dumps(
+    return json.dumps(
         {
             "limit": limit,
             "symbols": symbols,
@@ -302,41 +302,114 @@ def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, A
         ensure_ascii=True,
     )
 
-    def _builder() -> Dict[str, Any]:
-        source_status: Dict[str, str] = {}
-        items: List[Dict[str, Any]] = []
 
-        for source, fetcher in (("binance", _fetch_binance), ("bybit", _fetch_bybit)):
-            try:
-                source_items, status = fetcher(ctx, symbol_set)
-                source_status[source] = status
-                items.extend(source_items)
-            except Exception:
-                ctx["app"].logger.exception("crypto funding source failed source=%s", source)
-                source_status[source] = "error"
-
-        items.sort(
-            key=lambda item: (
-                float(item.get("abnormalScore") or 0),
-                1 if item.get("tone") == "critical" else 0,
-                str(item.get("asset") or ""),
-            ),
-            reverse=True,
-        )
-        venue_order, asset_rows, limited_items = _group_asset_rows(items, limit=limit)
-        ok_sources = [status for status in source_status.values() if status == "ok"]
-        if asset_rows and len(ok_sources) == len(source_status):
-            status = "ok"
-        elif asset_rows:
-            status = "degraded"
-        elif any(value == "missing-url" for value in source_status.values()):
-            status = "degraded"
-        elif all(value == "empty" for value in source_status.values()):
-            status = "empty"
-        else:
-            status = "invalid"
-
+def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int = 16, generated_at: str | None = None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
         return {
+            "generatedAt": str(generated_at or ""),
+            "source": "binance/bybit-funding",
+            "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
+            "status": "invalid",
+            "sources": {},
+            "venues": [],
+            "assets": [],
+            "items": [],
+        }
+    assets = [item for item in (payload.get("assets") or []) if isinstance(item, dict)][:limit]
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+    return {
+        **payload,
+        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
+        "source": str(payload.get("source") or "binance/bybit-funding"),
+        "sourceUrl": str(payload.get("sourceUrl") or settings.crypto_funding_watch_source_url or ""),
+        "status": str(payload.get("status") or ("ok" if assets or items else "empty")),
+        "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
+        "venues": payload.get("venues") if isinstance(payload.get("venues"), list) else [],
+        "assets": assets,
+        "items": items,
+    }
+
+
+def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
+    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
+
+
+def _read_seeded_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        redis_payload = reader(namespace, cache_key)
+        if isinstance(redis_payload, dict):
+            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            if snapshot_store is not None:
+                snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
+            return _with_cache_mode(redis_payload, "redis-seed")
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is None:
+        return None
+    sqlite_payload = snapshot_store.get(namespace, cache_key)
+    if isinstance(sqlite_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(namespace, cache_key, sqlite_payload, ttl_seconds)
+        return _with_cache_mode(sqlite_payload, "sqlite-seed")
+    stale_payload = snapshot_store.get_stale(namespace, cache_key)
+    if isinstance(stale_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
+        return _with_cache_mode(stale_payload, "stale-seed")
+    return None
+
+
+def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is not None:
+        snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(namespace, cache_key, payload, ttl_seconds)
+    return payload
+
+
+def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = 16) -> Dict[str, Any]:
+    settings = ctx["SETTINGS"]
+    symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
+    symbol_set = set(symbols)
+    source_status: Dict[str, str] = {}
+    items: List[Dict[str, Any]] = []
+
+    for source, fetcher in (("binance", _fetch_binance), ("bybit", _fetch_bybit)):
+        try:
+            source_items, status = fetcher(ctx, symbol_set)
+            source_status[source] = status
+            items.extend(source_items)
+        except Exception:
+            ctx["app"].logger.exception("crypto funding source failed source=%s", source)
+            source_status[source] = "error"
+
+    items.sort(
+        key=lambda item: (
+            float(item.get("abnormalScore") or 0),
+            1 if item.get("tone") == "critical" else 0,
+            str(item.get("asset") or ""),
+        ),
+        reverse=True,
+    )
+    venue_order, asset_rows, limited_items = _group_asset_rows(items, limit=limit)
+    ok_sources = [status for status in source_status.values() if status == "ok"]
+    if asset_rows and len(ok_sources) == len(source_status):
+        status = "ok"
+    elif asset_rows:
+        status = "degraded"
+    elif any(value == "missing-url" for value in source_status.values()):
+        status = "degraded"
+    elif all(value == "empty" for value in source_status.values()):
+        status = "empty"
+    else:
+        status = "invalid"
+
+    return normalize_crypto_funding_payload(
+        {
             "generatedAt": ctx["utc_now_iso"](),
             "source": "binance/bybit-funding",
             "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
@@ -349,11 +422,25 @@ def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, A
             },
             "assets": asset_rows,
             "items": limited_items,
-        }
-
-    return ctx["get_snapshot_payload"](
-        "snapshot:crypto:funding-watch",
-        cache_key,
-        _builder,
-        ttl_seconds=ttl_seconds,
+        },
+        settings=settings,
+        limit=limit,
     )
+
+
+def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, Any]:
+    settings = ctx["SETTINGS"]
+    ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
+    cache_key = build_crypto_funding_cache_key(settings, limit=limit)
+    seeded_payload = _read_seeded_snapshot(ctx, namespace=CRYPTO_FUNDING_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is not None:
+        return normalize_crypto_funding_payload(seeded_payload, settings=settings, limit=limit, generated_at=ctx["utc_now_iso"]())
+
+    def _builder() -> Dict[str, Any]:
+        return fetch_live_crypto_funding_watch_payload(ctx, limit=limit)
+
+    if ctx.get("SNAPSHOT_STORE") is None and callable(ctx.get("get_snapshot_payload")):
+        return ctx["get_snapshot_payload"](CRYPTO_FUNDING_NAMESPACE, cache_key, _builder, ttl_seconds=ttl_seconds)
+
+    payload = _with_cache_mode(fetch_live_crypto_funding_watch_payload(ctx, limit=limit), "live-fallback")
+    return _store_seed_fallback(ctx, namespace=CRYPTO_FUNDING_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
