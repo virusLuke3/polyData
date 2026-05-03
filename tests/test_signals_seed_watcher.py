@@ -102,6 +102,30 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("seeded", payload["cacheMode"])
         self.assertEqual("Seeded alpha", payload["items"][0]["title"])
 
+    def test_alpha_live_payload_degrades_when_database_sources_fail(self):
+        ctx = {
+            "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
+            "get_recent_trades": lambda limit=24: (_ for _ in ()).throw(RuntimeError("db down")),
+            "get_recent_oracle_events": lambda limit=24: (_ for _ in ()).throw(RuntimeError("db down")),
+            "get_active_markets_snapshot": lambda page_size=8: (_ for _ in ()).throw(RuntimeError("db down")),
+            "get_market_group_snapshot": lambda items, kind: {"items": [{"label": "BTC", "changePercent": 3.2, "price": 68000}]},
+            "get_inflation_nowcast_snapshot": lambda: {"monthOverMonth": {"CPI": "0.41", "Core CPI": "0.21"}},
+            "CRYPTO_SYMBOLS": [("btc", "BTC", "BTC-USD")],
+            "_safe_decimal": lambda value: None,
+            "_safe_float": lambda value: float(value) if value is not None else None,
+            "format_trade_decimal": lambda value: value,
+            "format_trade_address": lambda value: value,
+            "parse_iso_datetime": lambda value: None,
+            "utc_date_days_ago": lambda days: "2026-05-01",
+        }
+
+        payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
+
+        self.assertEqual("ok", payload["status"])
+        self.assertGreaterEqual(len(payload["items"]), 1)
+        self.assertEqual("macro", payload["items"][0]["kind"])
+
 
 if __name__ == "__main__":
     unittest.main()

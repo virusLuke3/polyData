@@ -79,7 +79,13 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
             return []
         threshold = utc_date_days_ago(lookback_days)
     threshold_dt = ctx["parse_iso_datetime"](threshold)
-    recent_trades = ctx["get_recent_trades"](limit=max(160, limit * 24))
+    try:
+        recent_trades = ctx["get_recent_trades"](limit=max(160, limit * 24))
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("whale rows trade source failed")
+        return []
     rows: List[Dict[str, Any]] = []
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -290,7 +296,13 @@ def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7
 
 
 def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
-    events = ctx["get_recent_oracle_events"](limit=max(limit * 2, 16))
+    try:
+        events = ctx["get_recent_oracle_events"](limit=max(limit * 2, 16))
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("suspicious oracle source failed")
+        return []
     filtered = []
     seen: set[tuple[Any, Any]] = set()
     for event in events:
@@ -328,7 +340,13 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
 
 def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, Any]]:
     oracle_events = _recent_oracle_candidates(ctx, limit)
-    recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
+    try:
+        recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("suspicious trade source failed")
+        recent_trades = []
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
     oracle_by_market: Dict[Any, List[Dict[str, Any]]] = {}
@@ -421,7 +439,13 @@ def _append_signal(signals: List[Dict[str, Any]], *, kind: str, severity: str, t
 
 def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     recent_limit = max(96, limit * int(os.environ.get("POLYDATA_ALPHA_TRADE_MULTIPLIER", "12")))
-    recent_trades = ctx["get_recent_trades"](limit=recent_limit)
+    try:
+        recent_trades = ctx["get_recent_trades"](limit=recent_limit)
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("alpha trade source failed")
+        recent_trades = []
     addresses_by_market: Dict[int, set[str]] = {}
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -451,17 +475,31 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         market_id
         for market_id, _ in sorted(market_notional_rank.items(), key=lambda item: item[1], reverse=True)[:max_profile_markets]
     }
-    address_profiles_by_market = {
-        market_id: address_intel_service.get_address_profiles(ctx, list(addresses)[:max_profile_addresses], market_id=market_id)
-        for market_id, addresses in addresses_by_market.items()
-        if addresses and market_id in profiled_market_ids
-    }
-    polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
-        ctx,
-        recent_trades,
-        address_profiles_by_market,
-        limit=limit,
-    )
+    address_profiles_by_market = {}
+    if recent_trades:
+        try:
+            address_profiles_by_market = {
+                market_id: address_intel_service.get_address_profiles(ctx, list(addresses)[:max_profile_addresses], market_id=market_id)
+                for market_id, addresses in addresses_by_market.items()
+                if addresses and market_id in profiled_market_ids
+            }
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("alpha address profile source failed")
+            address_profiles_by_market = {}
+    try:
+        polybeats_clusters = signal_cluster_service.build_polybeats_clusters(
+            ctx,
+            recent_trades,
+            address_profiles_by_market,
+            limit=limit,
+        )
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("alpha cluster build failed")
+        polybeats_clusters = []
 
     signals: List[Dict[str, Any]] = list(polybeats_clusters)
 
@@ -493,7 +531,14 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             contributors=["oracle", "timing"],
         )
 
-    for market in ctx["get_active_markets_snapshot"](page_size=8).get("items", [])[:2]:
+    try:
+        active_markets = ctx["get_active_markets_snapshot"](page_size=8).get("items", [])
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("alpha active markets source failed")
+        active_markets = []
+    for market in active_markets[:2]:
         if len(signals) >= limit:
             break
         price = ctx["_safe_decimal"](market.get("latestPrice"))
@@ -514,7 +559,13 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
         )
 
     if len(signals) < limit:
-        crypto = ctx["get_market_group_snapshot"](ctx["CRYPTO_SYMBOLS"][:3], kind="crypto").get("items", [])
+        try:
+            crypto = ctx["get_market_group_snapshot"](ctx["CRYPTO_SYMBOLS"][:3], kind="crypto").get("items", [])
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("alpha crypto source failed")
+            crypto = []
         for item in crypto[:2]:
             change = ctx["_safe_float"](item.get("changePercent"))
             _append_signal(
@@ -530,7 +581,13 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
                 break
 
     if len(signals) < limit:
-        nowcast = ctx["get_inflation_nowcast_snapshot"]()
+        try:
+            nowcast = ctx["get_inflation_nowcast_snapshot"]()
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("alpha inflation source failed")
+            nowcast = {}
         mom = nowcast.get("monthOverMonth") or {}
         if mom:
             _append_signal(
@@ -574,7 +631,14 @@ def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
 
     get_active_markets_snapshot = ctx.get("get_active_markets_snapshot")
     if len(signals) < limit and callable(get_active_markets_snapshot):
-        for market in get_active_markets_snapshot(page_size=8).get("items", [])[:4]:
+        try:
+            fallback_markets = get_active_markets_snapshot(page_size=8).get("items", [])
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("alpha fallback active markets source failed")
+            fallback_markets = []
+        for market in fallback_markets[:4]:
             if len(signals) >= limit:
                 break
             price = ctx["_safe_decimal"](market.get("latestPrice"))
