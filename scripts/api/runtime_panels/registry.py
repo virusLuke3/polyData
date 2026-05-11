@@ -81,7 +81,6 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "inflation-nowcast",
     "jin10-flash",
     "new-market-signals",
-    "bbo-monitor",
     "lob-depth",
     "live-api-status",
     "system-health",
