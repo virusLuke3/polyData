@@ -30,6 +30,8 @@ from data_sources import (
     GEO_SHOCK_OFAC_CONSOLIDATED_URL,
     GEO_SHOCK_OFAC_SDN_URL,
     GEO_SHOCK_SOURCE_URL,
+    GEO_SHOCK_UCDP_ACCESS_TOKEN,
+    GEO_SHOCK_UCDP_API_URL,
     JIN10_FLASH_API_URL,
     JIN10_FLASH_DETAIL_BASE_URL,
     JIN10_LIVE_URL,
@@ -134,6 +136,8 @@ class ApiSettings:
     geo_shock_federal_register_api_url: str
     geo_shock_conflict_api_url: str
     geo_shock_gdelt_doc_api_url: str
+    geo_shock_ucdp_api_url: str
+    geo_shock_ucdp_access_token: str
     geo_shock_acled_token_url: str
     geo_shock_acled_api_url: str
     geo_shock_acled_email: str
@@ -230,6 +234,11 @@ def load_api_settings() -> ApiSettings:
             "POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL",
             GEO_SHOCK_GDELT_DOC_API_URL or "https://api.gdeltproject.org/api/v2/doc/doc",
         ),
+        geo_shock_ucdp_api_url=_get_str(
+            "POLYDATA_GEO_SHOCK_UCDP_API_URL",
+            GEO_SHOCK_UCDP_API_URL or "https://ucdpapi.pcr.uu.se/api/gedevents/26.0.3",
+        ),
+        geo_shock_ucdp_access_token=_get_str("POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN", GEO_SHOCK_UCDP_ACCESS_TOKEN),
         geo_shock_acled_token_url=_get_str(
             "POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL",
             GEO_SHOCK_ACLED_TOKEN_URL or "https://acleddata.com/oauth/token",

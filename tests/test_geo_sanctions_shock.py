@@ -114,6 +114,27 @@ class FakeRequests:
                     ]
                 },
             )
+        if url == "ucdp-api-url":
+            return FakeResponse(
+                b"{}",
+                json_data={
+                    "Result": [
+                        {
+                            "id": 9001,
+                            "date_start": "2026-04-26",
+                            "date_end": "2026-04-26",
+                            "country": "Ukraine",
+                            "region": "Europe",
+                            "conflict_name": "Russia - Ukraine",
+                            "dyad_name": "Government of Russia - Government of Ukraine",
+                            "side_a": "Government of Russia",
+                            "side_b": "Government of Ukraine",
+                            "where_coordinates": "Kyiv",
+                            "best": 4,
+                        }
+                    ]
+                },
+            )
         raise RuntimeError(f"unexpected url {url}")
 
     def post(self, url: str, data: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
@@ -153,6 +174,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         conflict_url: str = "conflict-url",
         previous_total: int = 3,
         acled_enabled: bool = True,
+        ucdp_enabled: bool = False,
     ) -> Dict[str, Any]:
         settings = SimpleNamespace(
             geo_shock_ofac_sdn_url="sdn-url",
@@ -160,6 +182,8 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
             geo_shock_federal_register_api_url="fr-url",
             geo_shock_conflict_api_url=conflict_url,
             geo_shock_gdelt_doc_api_url="gdelt-url",
+            geo_shock_ucdp_api_url="ucdp-api-url",
+            geo_shock_ucdp_access_token="ucdp-token" if ucdp_enabled else "",
             geo_shock_acled_token_url="acled-token-url",
             geo_shock_acled_api_url="acled-api-url",
             geo_shock_acled_email="user@example.com" if acled_enabled else "",
@@ -273,6 +297,50 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertIn(payload["sources"]["conflictFeed"], {"ok", "empty"})
         self.assertGreaterEqual(payload["summary"]["hotspotCount"], 1)
         self.assertIn(payload["summary"]["militaryFeed"], {"active", "quiet"})
+        self.assertEqual("GDELT", payload["conflictProvider"])
+
+    def test_seed_builder_uses_ucdp_before_gdelt_when_token_is_present(self):
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="", acled_enabled=False, ucdp_enabled=True)
+
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
+
+        self.assertEqual("ok", payload["sources"]["conflictFeed"])
+        self.assertEqual("UCDP", payload["conflictProvider"])
+        self.assertTrue(any(item.get("source") == "UCDP" for item in payload["items"]))
+        ucdp_items = [item for item in payload["items"] if item.get("source") == "UCDP"]
+        self.assertTrue(any("UKRAINE" in (item.get("targetLabels") or []) for item in ucdp_items))
+
+    def test_seed_builder_marks_gdelt_rate_limited_and_preserves_previous_conflict_items(self):
+        def rate_limited_http_json_get(url, params=None, timeout=12, headers=None):
+            if url == "fr-url":
+                return {"results": []}
+            if url == "gdelt-url":
+                raise RuntimeError("http 429")
+            return {"results": []}
+
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="", acled_enabled=False)
+        ctx["http_json_get"] = rate_limited_http_json_get
+        previous = {
+            "items": [
+                {
+                    "id": "conflict:prev",
+                    "kind": "conflict",
+                    "headline": "Cached missile report near Iran",
+                    "country": "Iran",
+                    "occurredAt": "2026-04-27T00:00:00Z",
+                    "severity": "warning",
+                    "targetLabels": ["IRAN"],
+                    "source": "GDELT DOC 2.0",
+                }
+            ]
+        }
+
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous=previous)
+
+        self.assertEqual("stale", payload["sources"]["conflictFeed"])
+        self.assertEqual("GDELT", payload["conflictProvider"])
+        self.assertEqual("cached", payload["summary"]["militaryFeed"])
+        self.assertTrue(any(item.get("id") == "conflict:prev" for item in payload["items"]))
 
     def test_seed_builder_prefers_acled_when_credentials_are_present(self):
         ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="")
@@ -432,6 +500,8 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         watcher.settings.geo_shock_federal_register_api_url = "fr-url"
         watcher.settings.geo_shock_conflict_api_url = "conflict-url"
         watcher.settings.geo_shock_gdelt_doc_api_url = "gdelt-url"
+        watcher.settings.geo_shock_ucdp_api_url = "ucdp-api-url"
+        watcher.settings.geo_shock_ucdp_access_token = ""
         watcher.settings.geo_shock_acled_token_url = "acled-token-url"
         watcher.settings.geo_shock_acled_api_url = "acled-api-url"
         watcher.settings.geo_shock_acled_email = "user@example.com"

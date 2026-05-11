@@ -559,6 +559,8 @@ export type RuntimeGeoSanctionsShockPayload = {
   cacheMode?: string | null;
   status?: string | null;
   sources?: Record<string, string>;
+  conflictProvider?: string | null;
+  conflictState?: string | null;
   summary?: RuntimeGeoSanctionsShockSummary | null;
   items?: RuntimeGeoSanctionsShockItem[];
   targetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];

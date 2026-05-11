@@ -116,6 +116,21 @@ def _iso_or_none(value: Any) -> Optional[str]:
     return parsed.isoformat().replace("+00:00", "Z")
 
 
+def _exception_http_status(exc: Exception) -> Optional[int]:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    try:
+        if status_code is not None:
+            return int(status_code)
+    except (TypeError, ValueError):
+        pass
+    text = str(exc).lower()
+    for candidate in (429, 403, 401, 500, 502, 503, 504):
+        if str(candidate) in text or f"http {candidate}" in text or f"status {candidate}" in text:
+            return candidate
+    return None
+
+
 def _target_hits(*parts: Any) -> List[str]:
     haystack = " ".join(str(part or "") for part in parts).lower()
     hits: List[str] = []
@@ -139,6 +154,8 @@ def _empty_payload(ctx: dict, *, status: str = "degraded", source_states: Option
         "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
         "status": status,
         "sources": states,
+        "conflictProvider": None,
+        "conflictState": states.get("conflictFeed"),
         "summary": {
             "hotspotCount": 0,
             "newSanctionsCount": 0,
@@ -549,7 +566,7 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     http_json_get = ctx.get("http_json_get")
     url = ctx["SETTINGS"].geo_shock_gdelt_doc_api_url
     if not callable(http_json_get) or not url:
-        return {"state": "missing-url", "items": [], "targetScores": {}, "hotspotCount": 0}
+        return {"state": "missing-url", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
     try:
         payload = http_json_get(
             url,
@@ -563,9 +580,13 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
             timeout=20,
             headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
         )
-    except Exception:
+    except Exception as exc:
+        status_code = _exception_http_status(exc)
+        if status_code == 429:
+            ctx["app"].logger.warning("geo shock gdelt fallback rate limited")
+            return {"state": "rate-limited", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
         ctx["app"].logger.exception("geo shock gdelt fallback fetch failed")
-        return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}
+        return {"state": "error", "provider": "GDELT", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     items: List[Dict[str, Any]] = []
     target_scores: Dict[str, int] = defaultdict(int)
@@ -588,6 +609,128 @@ def _fetch_gdelt_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     )
     return {
         "state": "ok" if items else "empty",
+        "provider": "GDELT",
+        "items": items[:12],
+        "targetScores": dict(target_scores),
+        "hotspotCount": hotspot_count,
+    }
+
+
+def _normalize_ucdp_item(raw: Dict[str, Any], index: int) -> Optional[Dict[str, Any]]:
+    conflict_name = _text_or_none(raw.get("conflict_name"))
+    dyad_name = _text_or_none(raw.get("dyad_name"))
+    country = _text_or_none(raw.get("country"))
+    region = _text_or_none(raw.get("region"))
+    location = _text_or_none(raw.get("where_coordinates")) or _text_or_none(raw.get("where_description"))
+    side_a = _text_or_none(raw.get("side_a"))
+    side_b = _text_or_none(raw.get("side_b"))
+    headline = conflict_name or dyad_name or "UCDP conflict event"
+
+    try:
+        best = int(raw.get("best") or 0)
+    except (TypeError, ValueError):
+        best = 0
+
+    text_blob = " ".join(part for part in (headline, dyad_name, country, region, location, side_a, side_b) if part)
+    if best >= 20 or _has_keyword(text_blob, keywords=NUCLEAR_KEYWORDS):
+        severity = "critical"
+    elif best > 0 or _has_keyword(text_blob, keywords=MILITARY_KEYWORDS):
+        severity = "warning"
+    else:
+        severity = "watch"
+
+    tags = _unique(
+        [
+            _text_or_none(raw.get("type_of_violence")) or "",
+            _text_or_none(raw.get("active_year")) or "",
+            region or "",
+        ]
+    )
+    summary_parts = _unique(
+        [
+            country or "",
+            location or "",
+            dyad_name or "",
+            f"{best} fatalities" if best > 0 else "",
+        ]
+    )
+    return {
+        "id": f"ucdp:{raw.get('id') or raw.get('relid') or index}",
+        "kind": "conflict",
+        "headline": headline,
+        "summary": " / ".join(summary_parts[:3]) or "UCDP conflict event",
+        "source": "UCDP",
+        "sourceUrl": None,
+        "occurredAt": _iso_or_none(raw.get("date_end") or raw.get("date_start")),
+        "severity": severity,
+        "targetLabels": _target_hits(text_blob),
+        "country": country or location or region,
+        "tags": tags,
+    }
+
+
+def _fetch_ucdp_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
+    settings = ctx["SETTINGS"]
+    requests_lib = ctx.get("requests")
+    api_url = str(getattr(settings, "geo_shock_ucdp_api_url", "") or "").strip()
+    token = str(getattr(settings, "geo_shock_ucdp_access_token", "") or "").strip()
+    if not api_url:
+        return {"state": "missing-url", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+    if not token:
+        return {"state": "auth-missing", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+    if requests_lib is None:
+        return {"state": "requests-missing", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    date_floor = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "polydata-runtime/1.0",
+        "x-ucdp-access-token": token,
+    }
+    try:
+        response = requests_lib.get(
+            api_url,
+            params={"pagesize": 50, "StartDate": date_floor},
+            timeout=25,
+            headers=headers,
+        )
+        status_code = int(getattr(response, "status_code", 500) or 500)
+        if status_code == 429:
+            ctx["app"].logger.warning("geo shock ucdp rate limited")
+            return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+        if status_code in {401, 403}:
+            ctx["app"].logger.warning("geo shock ucdp access denied status=%s", status_code)
+            return {"state": "access-denied", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+        response.raise_for_status()
+        payload = response.json() if hasattr(response, "json") else {}
+    except Exception as exc:
+        status_code = _exception_http_status(exc)
+        if status_code == 429:
+            return {"state": "rate-limited", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+        ctx["app"].logger.exception("geo shock ucdp fetch failed")
+        return {"state": "error", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+
+    rows = _coerce_conflict_rows((payload or {}).get("Result") if isinstance(payload, dict) else payload)
+    items: List[Dict[str, Any]] = []
+    target_scores: Dict[str, int] = defaultdict(int)
+    for index, row in enumerate(rows):
+        item = _normalize_ucdp_item(row, index)
+        if item is None:
+            continue
+        items.append(item)
+        for target in item.get("targetLabels") or []:
+            target_scores[target] += 2
+    hotspot_count = len(_unique([item.get("country") or item.get("headline") or "" for item in items]))
+    items.sort(
+        key=lambda item: (
+            _parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc),
+            SEVERITY_ORDER.get(str(item.get("severity")), 0),
+        ),
+        reverse=True,
+    )
+    return {
+        "state": "ok" if items else "empty",
+        "provider": "UCDP",
         "items": items[:12],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
@@ -866,30 +1009,70 @@ def _fetch_acled_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     )
     return {
         "state": "ok" if items else "empty",
+        "provider": "ACLED",
         "items": items[:12],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
     }
 
 
-def _fetch_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
+def _previous_conflict_snapshot(previous: Optional[Dict[str, Any]], *, provider: str = "cached") -> Dict[str, Any]:
+    if not isinstance(previous, dict):
+        return {"state": "error", "provider": provider, "items": [], "targetScores": {}, "hotspotCount": 0}
+    previous_items = previous.get("items") if isinstance(previous.get("items"), list) else []
+    items = [item for item in previous_items if isinstance(item, dict) and str(item.get("kind") or "").lower() == "conflict"]
+    if not items:
+        return {"state": "error", "provider": provider, "items": [], "targetScores": {}, "hotspotCount": 0}
+    target_scores: Dict[str, int] = defaultdict(int)
+    for item in items:
+        for target in item.get("targetLabels") or []:
+            target_scores[str(target)] += 1
+    hotspot_count = len(_unique([item.get("country") or item.get("headline") or "" for item in items]))
+    return {
+        "state": "stale",
+        "provider": provider,
+        "items": items[:12],
+        "targetScores": dict(target_scores),
+        "hotspotCount": hotspot_count,
+    }
+
+
+def _successful_conflict_snapshot(snapshot: Dict[str, Any]) -> bool:
+    return str(snapshot.get("state") or "").lower() in {"ok", "empty"}
+
+
+def _fetch_conflict_snapshot(ctx: dict, *, previous: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     url = ctx["SETTINGS"].geo_shock_conflict_api_url
     if not url:
         if _has_acled_credentials(ctx["SETTINGS"]):
-            return _fetch_acled_conflict_snapshot(ctx)
-        return _fetch_gdelt_conflict_snapshot(ctx)
+            acled_snapshot = _fetch_acled_conflict_snapshot(ctx)
+            if _successful_conflict_snapshot(acled_snapshot):
+                return acled_snapshot
+        ucdp_snapshot = _fetch_ucdp_conflict_snapshot(ctx)
+        if _successful_conflict_snapshot(ucdp_snapshot):
+            return ucdp_snapshot
+        gdelt_snapshot = _fetch_gdelt_conflict_snapshot(ctx)
+        if _successful_conflict_snapshot(gdelt_snapshot):
+            return gdelt_snapshot
+        stale_snapshot = _previous_conflict_snapshot(previous, provider=str(gdelt_snapshot.get("provider") or ucdp_snapshot.get("provider") or "cached"))
+        if stale_snapshot.get("state") == "stale":
+            return stale_snapshot
+        return gdelt_snapshot if gdelt_snapshot.get("state") != "missing-url" else ucdp_snapshot
     http_json_get = ctx.get("http_json_get")
     if not callable(http_json_get):
-        return {"state": "requests-missing", "items": [], "targetScores": {}, "hotspotCount": 0}
+        return {"state": "requests-missing", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
     try:
         payload = http_json_get(
             url,
             timeout=15,
             headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
         )
-    except Exception:
+    except Exception as exc:
+        status_code = _exception_http_status(exc)
+        if status_code == 429:
+            return {"state": "rate-limited", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
         ctx["app"].logger.exception("geo shock conflict fetch failed")
-        return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}
+        return {"state": "error", "provider": "custom", "items": [], "targetScores": {}, "hotspotCount": 0}
 
     items: List[Dict[str, Any]] = []
     target_scores: Dict[str, int] = defaultdict(int)
@@ -910,6 +1093,7 @@ def _fetch_conflict_snapshot(ctx: dict) -> Dict[str, Any]:
     )
     return {
         "state": "ok",
+        "provider": "custom",
         "items": items[:12],
         "targetScores": dict(target_scores),
         "hotspotCount": hotspot_count,
@@ -975,7 +1159,11 @@ def _military_feed_label(conflict_state: str, conflict_items: List[Dict[str, Any
         return "active"
     if conflict_state == "ok":
         return "quiet"
+    if conflict_state == "stale" and conflict_items:
+        return "cached"
     if conflict_state == "missing-url":
+        return "limited"
+    if conflict_state == "rate-limited":
         return "limited"
     return "degraded"
 
@@ -998,7 +1186,7 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
     payload = _empty_payload(ctx, status="degraded")
     ofac_snapshot = _fetch_ofac_snapshot(ctx)
     notices_snapshot = _fetch_federal_register_snapshot(ctx)
-    conflict_snapshot = _fetch_conflict_snapshot(ctx)
+    conflict_snapshot = _fetch_conflict_snapshot(ctx, previous=previous_payload)
 
     source_states = {
         **(ofac_snapshot.get("states") or {}),
@@ -1037,6 +1225,8 @@ def build_geo_sanctions_shock_seed_payload(ctx: dict, *, previous: Optional[Dict
             "sourceUrl": ctx["SETTINGS"].geo_shock_source_url,
             "status": _payload_status(source_states, items),
             "sources": source_states,
+            "conflictProvider": conflict_snapshot.get("provider"),
+            "conflictState": conflict_snapshot.get("state"),
             "summary": {
                 "hotspotCount": int(conflict_snapshot.get("hotspotCount") or 0),
                 "newSanctionsCount": int(new_sanctions_count),

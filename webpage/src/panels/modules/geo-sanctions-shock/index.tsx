@@ -76,6 +76,12 @@ function sourceHealthLabel(sources?: Record<string, string>) {
   return `${okCount}/${values.length} SOURCES OK`;
 }
 
+function conflictFeedLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  const provider = upperMetric(payload?.conflictProvider || 'conflict');
+  const state = upperMetric(payload?.conflictState || payload?.sources?.conflictFeed || 'warming');
+  return `${provider} ${state}`;
+}
+
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
@@ -174,6 +180,7 @@ function GeoShockPanel({ payload }: {
 
         <footer className="wm-geo-shock-footer">
           <span>{sourceHealthLabel(payload?.sources)}</span>
+          <span>{conflictFeedLabel(payload)}</span>
           <span>{upperMetric(payload?.cacheMode || 'warming')}</span>
           <span>{formatAge(payload?.generatedAt)}</span>
         </footer>
