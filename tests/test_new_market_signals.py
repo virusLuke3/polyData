@@ -67,6 +67,42 @@ class NewMarketSignalServiceTestCase(unittest.TestCase):
 
         self.assertEqual([{"marketId": 2, "title": "Second", "initialYesProbability": "0.6"}], payload["items"])
         self.assertEqual("2026-04-25T00:00:00Z", payload["generatedAt"])
+        self.assertEqual("runtime-redis", payload["cacheMode"])
+        self.assertEqual("ok", payload["status"])
+
+    def test_snapshot_prefers_seed_payload_over_legacy_runtime_key(self):
+        redis_client = FakeRedis()
+        redis_client.set(
+            "polydata:runtime:new-market-signals:items",
+            json.dumps([{"marketId": 1, "title": "Legacy"}]),
+        )
+        seed_payload = {
+            "items": [{"marketId": 2, "title": "Seeded"}],
+            "generatedAt": "2026-04-25T00:01:00Z",
+            "status": "ok",
+            "cacheMode": "seeded",
+        }
+        def get_cached_json(namespace, cache_key):
+            if (namespace, cache_key) == (
+                new_market_signal_service.SNAPSHOT_NAMESPACE,
+                new_market_signal_service.SNAPSHOT_CACHE_KEY,
+            ):
+                return seed_payload
+            return None
+
+        ctx = {
+            "REDIS_PREFIX": "polydata:",
+            "get_redis_client": lambda: redis_client,
+            "get_cached_json": get_cached_json,
+            "SNAPSHOT_STORE": None,
+            "utc_now_iso": lambda: "2026-04-25T00:00:00Z",
+            "app": FakeApp(),
+        }
+
+        payload = new_market_signal_service.get_new_market_signals_snapshot(ctx, limit=12)
+
+        self.assertEqual([{"marketId": 2, "title": "Seeded"}], payload["items"])
+        self.assertEqual("seeded", payload["cacheMode"])
 
     def test_snapshot_filters_placeholder_recovered_titles(self):
         redis_client = FakeRedis()
@@ -129,6 +165,13 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual(42, result["lastSeenMarketId"])
         self.assertEqual("42", watcher.redis_client.get(watcher.last_seen_key))
         self.assertIsNone(watcher.redis_client.get(watcher.items_key))
+        self.assertIsNotNone(watcher.redis_client.get(watcher.snapshot_redis_key()))
+        snapshot = watcher.snapshot_store.get_stale(
+            new_market_signal_service.SNAPSHOT_NAMESPACE,
+            new_market_signal_service.SNAPSHOT_CACHE_KEY,
+        )
+        self.assertEqual("seeded", snapshot["cacheMode"])
+        self.assertEqual("empty", snapshot["status"])
         self.assertIsNotNone(watcher.seed_meta_store.load(watcher.seed_meta_namespace(), watcher.seed_meta_cache_key()))
 
     def test_scan_generates_signals_once_and_advances_watermark(self):
@@ -147,6 +190,13 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual("11", watcher.redis_client.get(watcher.last_seen_key))
         self.assertEqual(11, items[0]["marketId"])
         self.assertEqual("0.57", items[0]["initialYesProbability"])
+        snapshot = watcher.snapshot_store.get_stale(
+            new_market_signal_service.SNAPSHOT_NAMESPACE,
+            new_market_signal_service.SNAPSHOT_CACHE_KEY,
+        )
+        self.assertEqual("seeded", snapshot["cacheMode"])
+        self.assertEqual("ok", snapshot["status"])
+        self.assertEqual(11, snapshot["items"][0]["marketId"])
         meta = watcher.seed_meta_store.load(watcher.seed_meta_namespace(), watcher.seed_meta_cache_key())
         self.assertEqual("scan", meta["status"])
         self.assertEqual(1, meta["recordCount"])

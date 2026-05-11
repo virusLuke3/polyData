@@ -39,6 +39,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_inflation_nowcast_snapshot": lambda: {"items": []},
         "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
         "get_crypto_funding_watch_snapshot": lambda limit=16: {"limit": limit},
+        "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
     }

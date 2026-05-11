@@ -35,6 +35,12 @@ except ImportError:
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_connection
 from data_sources import POLYMARKET_CLOB_API_BASE
 from api.config import load_api_settings
+from api.services.new_market_signal_service import (
+    SNAPSHOT_CACHE_KEY,
+    SNAPSHOT_NAMESPACE,
+    SNAPSHOT_TTL_SECONDS,
+    normalize_new_market_signals_payload,
+)
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -121,6 +127,9 @@ class NewMarketSignalWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=redis_prefix, snapshot_store=self.snapshot_store)
         self.http = requests.Session()
         self.http.headers.update({"Accept": "application/json", "User-Agent": "polyData-new-market-signal/1.0"})
+
+    def snapshot_redis_key(self) -> str:
+        return _redis_key(self.redis_prefix, SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY)
 
     def seed_meta_namespace(self) -> str:
         return SEED_META_NAMESPACE
@@ -269,6 +278,30 @@ class NewMarketSignalWatcher:
         normalized = [item for item in items if not is_placeholder_market_title(item.get("title"))][: self.retention]
         self.redis_client.set(self.items_key, json.dumps(normalized, ensure_ascii=True, default=str))
 
+    def build_snapshot_payload(self, *, status: str | None = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        items = self.load_items()
+        payload = normalize_new_market_signals_payload(
+            {
+                "items": items,
+                "generatedAt": utc_now_iso(),
+                "status": status or ("ok" if items else "empty"),
+                "cacheMode": "seeded",
+                "source": "polyData new-market-signal seed",
+                "sources": {"database": "ok", "clob": "ok"},
+                "metadata": dict(metadata or {}),
+            },
+            limit=self.retention,
+            generated_at=utc_now_iso(),
+            cache_mode="seeded",
+        )
+        return payload
+
+    def store_snapshot_payload(self, *, status: str | None = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        payload = self.build_snapshot_payload(status=status, metadata=metadata)
+        self.snapshot_store.set(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY, payload, SNAPSHOT_TTL_SECONDS)
+        self.redis_client.set(self.snapshot_redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=SNAPSHOT_TTL_SECONDS)
+        return payload
+
     def load_pending_market_ids(self) -> List[int]:
         raw = self.redis_client.get(self.pending_key)
         if not raw:
@@ -303,6 +336,7 @@ class NewMarketSignalWatcher:
             baseline = self.get_current_max_market_id()
             self.set_last_seen_market_id(baseline)
             result = {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0}
+            self.store_snapshot_payload(status="empty", metadata=result)
             self.store_seed_meta(status="bootstrap", record_count=0, metadata=result)
             return result
 
@@ -311,6 +345,7 @@ class NewMarketSignalWatcher:
         rows = self.fetch_new_markets(last_seen, limit=limit)
         if not rows and not pending_rows:
             result = {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0, "pending": len(pending_ids)}
+            self.store_snapshot_payload(status="ok" if self.load_items() else "empty", metadata=result)
             self.store_seed_meta(status="scan", record_count=len(self.load_items()), metadata=result)
             return result
 
@@ -352,6 +387,7 @@ class NewMarketSignalWatcher:
         self.set_last_seen_market_id(max_seen)
         stored_items = self.load_items()
         result = {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals), "pending": len(next_pending_ids), "skipped": skipped}
+        self.store_snapshot_payload(status="ok" if stored_items else "empty", metadata=result)
         self.store_seed_meta(status="scan", record_count=len(stored_items), metadata=result)
         return result
 
