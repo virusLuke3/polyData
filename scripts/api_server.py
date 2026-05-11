@@ -55,6 +55,11 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_backend, get_connection, init_schema, DEFAULT_DB_PATH
 from db.trade_v2 import (
     LEGACY_TRADES_TABLE,
@@ -74,7 +79,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, f1_runtime_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -231,6 +236,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_dashboard_payload_cached": get_dashboard_payload_cached,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_cpi_release_calendar_snapshot": get_cpi_release_calendar_snapshot,
+        "get_energy_gasoline_shock_snapshot": get_energy_gasoline_shock_snapshot,
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
         "get_inflation_nowcast_snapshot": get_inflation_nowcast_snapshot,
@@ -364,6 +370,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_cached_runtime_payload": get_cached_runtime_payload,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_cpi_release_calendar_snapshot": lambda limit=8: cpi_release_calendar_service.get_cpi_release_calendar_snapshot(build_service_context(), limit=limit),
+        "get_energy_gasoline_shock_snapshot": lambda limit=6: energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot(build_service_context(), limit=limit),
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=6: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
         "get_existing_trade_read_source": get_existing_trade_read_source,
@@ -442,6 +449,8 @@ def build_service_context() -> Dict[str, Any]:
             headers=headers,
         ),
         "http_text_get": http_text_get,
+        "http_bytes_get": http_bytes_get,
+        "xlrd": xlrd,
         "iso_days_before": iso_days_before,
         "get_connection": get_connection,
         "get_redis_client_state": lambda: _redis_client,
@@ -665,6 +674,14 @@ def http_text_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, st
     return response.text
 
 
+def http_bytes_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> bytes:
+    if requests is None:
+        raise RuntimeError("requests is not installed")
+    response = requests.get(url, timeout=timeout, headers=headers)
+    response.raise_for_status()
+    return response.content
+
+
 def _safe_decimal(value: Any) -> Optional[Decimal]:
     if value in (None, ""):
         return None
@@ -804,6 +821,10 @@ def get_polymarket_macro_map_snapshot(limit: int = 12) -> Dict[str, Any]:
 
 def get_cpi_release_calendar_snapshot(limit: int = 8) -> Dict[str, Any]:
     return cpi_release_calendar_service.get_cpi_release_calendar_snapshot(build_service_context(), limit=limit)
+
+
+def get_energy_gasoline_shock_snapshot(limit: int = 6) -> Dict[str, Any]:
+    return energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot(build_service_context(), limit=limit)
 
 
 def get_jin10_panel_snapshot(limit: int = 24) -> Dict[str, Any]:

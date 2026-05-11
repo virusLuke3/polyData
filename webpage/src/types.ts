@@ -679,6 +679,37 @@ export type RuntimeCpiReleaseCalendarPayload = {
   items?: RuntimeCpiCalendarItem[];
 };
 
+export type RuntimeEnergyShockItem = {
+  key?: string | null;
+  label?: string | null;
+  unit?: string | null;
+  cadence?: string | null;
+  date?: string | null;
+  value?: number | string | null;
+  change1?: number | string | null;
+  changeWeek?: number | string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+};
+
+export type RuntimeEnergyShockSummary = {
+  signal?: string | null;
+  bias?: string | null;
+  headlineImpulsePp?: number | string | null;
+  linkedMarkets?: string[];
+};
+
+export type RuntimeEnergyGasolineShockPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeEnergyShockSummary | null;
+  items?: RuntimeEnergyShockItem[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

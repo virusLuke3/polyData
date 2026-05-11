@@ -18,6 +18,10 @@ from data_sources import (
     CPI_CALENDAR_BLS_EMPLOYMENT_URL,
     CPI_CALENDAR_FOMC_URL,
     CPI_CALENDAR_SOURCE_URL,
+    ENERGY_SHOCK_DIESEL_XLS_URL,
+    ENERGY_SHOCK_GASOLINE_XLS_URL,
+    ENERGY_SHOCK_SOURCE_URL,
+    ENERGY_SHOCK_WTI_XLS_URL,
     CRYPTO_FUNDING_WATCH_API_URL,
     CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
     CRYPTO_FUNDING_WATCH_SOURCE_URL,
@@ -146,6 +150,11 @@ class ApiSettings:
     cpi_calendar_fomc_url: str
     cpi_calendar_source_url: str
     cpi_calendar_ttl_seconds: int
+    energy_shock_wti_xls_url: str
+    energy_shock_gasoline_xls_url: str
+    energy_shock_diesel_xls_url: str
+    energy_shock_source_url: str
+    energy_shock_ttl_seconds: int
     geo_shock_ofac_sdn_url: str
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
@@ -259,6 +268,23 @@ def load_api_settings() -> ApiSettings:
             CPI_CALENDAR_SOURCE_URL or "https://www.bls.gov/schedule/news_release/cpi.htm?lv=true",
         ),
         cpi_calendar_ttl_seconds=_get_int("POLYDATA_CPI_CALENDAR_TTL_SECONDS", 3600),
+        energy_shock_wti_xls_url=_get_str(
+            "POLYDATA_ENERGY_SHOCK_WTI_XLS_URL",
+            ENERGY_SHOCK_WTI_XLS_URL or "https://www.eia.gov/dnav/pet/hist_xls/RWTCd.xls",
+        ),
+        energy_shock_gasoline_xls_url=_get_str(
+            "POLYDATA_ENERGY_SHOCK_GASOLINE_XLS_URL",
+            ENERGY_SHOCK_GASOLINE_XLS_URL or "https://www.eia.gov/dnav/pet/hist_xls/EMM_EPM0_PTE_NUS_DPGw.xls",
+        ),
+        energy_shock_diesel_xls_url=_get_str(
+            "POLYDATA_ENERGY_SHOCK_DIESEL_XLS_URL",
+            ENERGY_SHOCK_DIESEL_XLS_URL or "https://www.eia.gov/dnav/pet/hist_xls/EMD_EPD2D_PTE_NUS_DPGw.xls",
+        ),
+        energy_shock_source_url=_get_str(
+            "POLYDATA_ENERGY_SHOCK_SOURCE_URL",
+            ENERGY_SHOCK_SOURCE_URL or "https://www.eia.gov/petroleum/",
+        ),
+        energy_shock_ttl_seconds=_get_int("POLYDATA_ENERGY_SHOCK_TTL_SECONDS", 21600),
         geo_shock_ofac_sdn_url=_get_str(
             "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
             GEO_SHOCK_OFAC_SDN_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",

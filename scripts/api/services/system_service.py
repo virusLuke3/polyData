@@ -96,6 +96,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 3600,
     },
     {
+        "panelId": "energy-gasoline-shock",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "energy-gasoline-shock",
+        "serviceName": "polydata-energy-gasoline-shock-seed.service",
+        "intervalEnv": "POLYDATA_ENERGY_SHOCK_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 21600,
+    },
+    {
         "panelId": "alpha-signal",
         "namespace": "seed-meta:signals",
         "cacheKey": "alpha-signal",

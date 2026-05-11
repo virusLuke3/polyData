@@ -74,7 +74,7 @@ DATA HEALTH                updated / stale / unavailable
 |---|---|---|---|
 | 1 | `polymarket-macro-map` | 已完成 | Gamma seed-first，已接入 Redis + SQLite snapshot |
 | 2 | `cpi-release-calendar` | 已完成 | BLS / BEA / Fed 官方日历 + Polymarket implied baseline；BLS server 403 时使用当前年度官方 schedule fallback |
-| 3 | `energy-gasoline-shock` | 待开发 | EIA daily / weekly oil、gasoline、diesel、inventories |
+| 3 | `energy-gasoline-shock` | 已完成 | EIA public XLS seed-first；WTI / gasoline / diesel headline CPI impulse |
 | 4 | `food-retail-basket-pressure` | 待开发 | Retail basket / public food pressure fallback |
 | 5 | `supply-tariff-import-watch` | 待开发 | Federal Register / Treasury / BLS import prices |
 | 6 | `shelter-rent-oer-pressure` | 待开发 | BLS/FRED/Zillow shelter pressure |

@@ -348,6 +348,7 @@ def test_runtime_route_clamps_limit_to_max():
         "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
         "get_crypto_funding_watch_snapshot": lambda limit=16: {"limit": limit},
         "get_cpi_release_calendar_snapshot": lambda limit=8: {"limit": limit},
+        "get_energy_gasoline_shock_snapshot": lambda limit=6: {"limit": limit},
         "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},

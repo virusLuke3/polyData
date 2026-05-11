@@ -13,6 +13,7 @@ import type {
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
   RuntimeCpiReleaseCalendarPayload,
+  RuntimeEnergyGasolineShockPayload,
   RuntimeGeoSanctionsShockPayload,
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
@@ -175,6 +176,10 @@ export function fetchRuntimePolymarketMacroMap(limit = 12) {
 
 export function fetchRuntimeCpiReleaseCalendar(limit = 8) {
   return apiGet<RuntimeCpiReleaseCalendarPayload>(`/runtime/macro/cpi-release-calendar?limit=${limit}`);
+}
+
+export function fetchRuntimeEnergyGasolineShock(limit = 6) {
+  return apiGet<RuntimeEnergyGasolineShockPayload>(`/runtime/macro/energy-gasoline-shock?limit=${limit}`);
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 6) {

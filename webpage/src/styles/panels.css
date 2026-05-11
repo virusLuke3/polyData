@@ -4309,6 +4309,121 @@
   background: #181818;
 }
 
+.wm-energy-shock-panel .wm-panel-body {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-x: hidden;
+}
+
+.wm-energy-hero {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #252525;
+  border-top: 2px solid #6b6d56;
+  background: #171717;
+  display: grid;
+  gap: 5px;
+}
+
+.wm-energy-hero.hot {
+  border-top-color: #a95c41;
+}
+
+.wm-energy-hero.cool {
+  border-top-color: #4f8d72;
+}
+
+.wm-energy-hero span,
+.wm-energy-hero em,
+.wm-energy-row span,
+.wm-energy-row em,
+.wm-energy-links,
+.wm-energy-footer {
+  color: #858a86;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wm-energy-hero strong {
+  color: #f2f4f2;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.wm-energy-hero em {
+  font-style: normal;
+}
+
+.wm-energy-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.wm-energy-row {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #252525;
+  border-left: 3px solid #5d6f75;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 62px;
+  gap: 8px;
+  align-items: center;
+}
+
+.wm-energy-row.hot {
+  border-left-color: #a95c41;
+}
+
+.wm-energy-row.cool {
+  border-left-color: #4f8d72;
+}
+
+.wm-energy-row div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.wm-energy-row strong {
+  min-width: 0;
+  color: #f0f3f0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-energy-row div strong {
+  font-size: 12px;
+}
+
+.wm-energy-row em {
+  font-style: normal;
+  text-align: right;
+}
+
+.wm-energy-links,
+.wm-energy-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.wm-energy-links span,
+.wm-energy-footer span {
+  padding: 2px 6px;
+  border: 1px solid #252525;
+  background: #181818;
+}
+
 @media (max-width: 980px) {
   .wm-tape-row {
     grid-template-columns: 48px minmax(0, 1fr) 74px 80px;
@@ -4346,6 +4461,10 @@
   .wm-cpi-calendar-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
+  }
+
+  .wm-energy-row {
+    grid-template-columns: minmax(0, 1fr) 72px;
   }
 
   .wm-cpi-calendar-row > em {
