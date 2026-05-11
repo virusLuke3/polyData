@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
+from unittest.mock import patch
 
 from flask import Flask
 
@@ -15,6 +17,8 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.services import polymarket_macro_map_service
+from runtime import polymarket_macro_map_watcher
+from runtime.snapshot_store import SnapshotStore
 
 
 class FakeLogger:
@@ -30,6 +34,26 @@ class FakeLogger:
 
 class FakeApp:
     logger = FakeLogger()
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.expiries: dict[str, int] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.values[key] = value
+        if ex is not None:
+            self.expiries[key] = ex
+
+    def setex(self, key: str, ttl: int, value: str) -> None:
+        self.set(key, value, ex=ttl)
 
 
 def macro_event(event_id: str = "evt-cpi") -> Dict[str, Any]:
@@ -59,7 +83,20 @@ def macro_event(event_id: str = "evt-cpi") -> Dict[str, Any]:
     }
 
 
-def make_context(*, http_json_get=None, get_snapshot_payload=None, search_terms=()) -> Dict[str, Any]:
+def make_settings(snapshot_path: str = "", *, search_terms=()) -> SimpleNamespace:
+    return SimpleNamespace(
+        redis_url="redis://test/0",
+        redis_prefix="polydata:",
+        snapshot_sqlite_path=snapshot_path,
+        gamma_api_base="https://gamma.example",
+        polymarket_macro_map_source_url="https://gamma.example",
+        polymarket_macro_map_ttl_seconds=180,
+        polymarket_macro_map_search_terms=search_terms,
+    )
+
+
+def make_context(*, http_json_get=None, search_terms=(), snapshot_store=None, cached=None) -> Dict[str, Any]:
+    cached = cached if cached is not None else {}
     settings = SimpleNamespace(
         gamma_api_base="https://gamma.example",
         polymarket_macro_map_source_url="https://gamma.example",
@@ -71,7 +108,9 @@ def make_context(*, http_json_get=None, get_snapshot_payload=None, search_terms=
         "app": FakeApp(),
         "utc_now_iso": lambda: "2026-05-11T00:00:00Z",
         "http_json_get": http_json_get or (lambda *args, **kwargs: {"events": [macro_event()]}),
-        "get_snapshot_payload": get_snapshot_payload or (lambda namespace, cache_key, builder, ttl_seconds: builder()),
+        "SNAPSHOT_STORE": snapshot_store,
+        "get_cached_json": lambda namespace, key: cached.get((namespace, key)),
+        "set_cached_json": lambda namespace, key, payload, ttl: cached.__setitem__((namespace, key), payload),
     }
 
 
@@ -174,12 +213,108 @@ def test_stale_snapshot_can_be_returned_by_cache_layer():
         "items": [{"eventId": "stale", "title": "Stale CPI market"}],
         "cacheMode": "stale-seed",
     }
-    ctx = make_context(get_snapshot_payload=lambda namespace, cache_key, builder, ttl_seconds: stale)
+
+    class StaleOnlyStore:
+        def get(self, namespace, cache_key):
+            return None
+
+        def get_stale(self, namespace, cache_key):
+            return stale
+
+        def set(self, *args, **kwargs):
+            return None
+
+    store = StaleOnlyStore()
+    ctx = make_context(snapshot_store=store)
 
     payload = polymarket_macro_map_service.get_polymarket_macro_map_snapshot(ctx, limit=8)
 
     assert payload["cacheMode"] == "stale-seed"
     assert payload["items"][0]["eventId"] == "stale"
+
+
+def test_api_reads_seeded_sqlite_snapshot_without_live_fetch(tmp_path):
+    seeded = {
+        "generatedAt": "2026-05-11T00:00:00Z",
+        "status": "ok",
+        "sources": {"gammaEvents": "ok"},
+        "summary": {"activeCount": 1, "topCategory": "CPI / Inflation", "signal": "CPI CLUSTER ACTIVE"},
+        "categories": [],
+        "items": [{"eventId": "seeded", "title": "Seeded CPI market"}],
+        "cacheMode": "seeded",
+    }
+    store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
+    store.set(polymarket_macro_map_service.MACRO_MAP_SNAPSHOT_NAMESPACE, polymarket_macro_map_service.MACRO_MAP_CACHE_KEY, seeded, 300)
+    ctx = make_context(snapshot_store=store, http_json_get=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")))
+
+    payload = polymarket_macro_map_service.get_polymarket_macro_map_snapshot(ctx, limit=8)
+
+    assert payload["cacheMode"] == "sqlite-seed"
+    assert payload["items"][0]["eventId"] == "seeded"
+
+
+def make_watcher(tmp_path) -> tuple[polymarket_macro_map_watcher.PolymarketMacroMapWatcher, FakeRedis]:
+    fake_redis = FakeRedis()
+    settings = make_settings(str(tmp_path / "snapshots.sqlite3"))
+    redis_module = SimpleNamespace(from_url=lambda *args, **kwargs: fake_redis)
+    requests_module = SimpleNamespace(Session=lambda: SimpleNamespace(headers={}, get=lambda *args, **kwargs: None))
+    with patch.object(polymarket_macro_map_watcher, "redis", redis_module), patch.object(polymarket_macro_map_watcher, "requests", requests_module):
+        watcher = polymarket_macro_map_watcher.PolymarketMacroMapWatcher(
+            redis_url=settings.redis_url,
+            redis_prefix=settings.redis_prefix,
+            snapshot_sqlite_path=settings.snapshot_sqlite_path,
+            settings=settings,
+            interval_seconds=180,
+        )
+    return watcher, fake_redis
+
+
+def sample_payload(item_id: str = "macro-1") -> Dict[str, Any]:
+    return {
+        "generatedAt": "2026-05-11T00:00:00Z",
+        "source": "Polymarket Gamma API",
+        "sourceUrl": "https://gamma.example",
+        "status": "ok",
+        "sources": {"gammaEvents": "ok"},
+        "summary": {"activeCount": 1, "topCategory": "CPI / Inflation", "signal": "CPI CLUSTER ACTIVE"},
+        "categories": [],
+        "items": [{"eventId": item_id, "title": "May CPI market"}],
+    }
+
+
+def test_watcher_stores_payload_snapshot_and_seed_meta(tmp_path):
+    watcher, fake_redis = make_watcher(tmp_path)
+
+    with patch.object(polymarket_macro_map_service, "build_polymarket_macro_map_payload", return_value=sample_payload()):
+        result = watcher.run_once()
+
+    assert result["status"] == "stored"
+    stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
+    assert stored["cacheMode"] == "seeded"
+    assert stored["items"][0]["eventId"] == "macro-1"
+    snapshot = watcher.snapshot_store.get_stale(watcher.namespace(), watcher.cache_key())
+    assert snapshot["items"][0]["eventId"] == "macro-1"
+    meta = json.loads(fake_redis.get("polydata:seed-meta:macro:polymarket-macro-map") or "{}")
+    assert meta["status"] == "ok"
+    assert meta["recordCount"] == 1
+    assert meta["serviceName"] == "polydata-polymarket-macro-map-seed.service"
+
+
+def test_watcher_preserves_previous_snapshot_when_new_payload_is_empty(tmp_path):
+    watcher, fake_redis = make_watcher(tmp_path)
+    previous = {**sample_payload("old-macro"), "cacheMode": "seeded"}
+    watcher.store_payload(previous)
+
+    empty_payload = {**sample_payload("empty"), "status": "empty", "items": [], "summary": {"activeCount": 0}}
+    with patch.object(polymarket_macro_map_service, "build_polymarket_macro_map_payload", return_value=empty_payload):
+        result = watcher.run_once()
+
+    assert result["status"] == "preserved"
+    stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
+    assert stored["items"][0]["eventId"] == "old-macro"
+    meta = json.loads(fake_redis.get("polydata:seed-meta:macro:polymarket-macro-map") or "{}")
+    assert meta["status"] == "preserved"
+    assert "Preserved previous snapshot" in meta["errorSummary"]
 
 
 def test_runtime_route_clamps_limit_to_max():

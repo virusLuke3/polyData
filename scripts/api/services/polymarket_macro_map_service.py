@@ -414,6 +414,49 @@ def normalize_polymarket_macro_map_payload(payload: Any, *, ctx: dict, limit: in
     return result
 
 
+def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
+    return {**payload, "cacheMode": str(cache_mode)}
+
+
+def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        redis_payload = reader(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
+        if isinstance(redis_payload, dict):
+            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            if snapshot_store is not None:
+                snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, redis_payload, ttl_seconds)
+            return _with_cache_mode(redis_payload, "redis-seed")
+
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is None:
+        return None
+
+    sqlite_payload = snapshot_store.get(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
+    if isinstance(sqlite_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, sqlite_payload, ttl_seconds)
+        return _with_cache_mode(sqlite_payload, "sqlite-seed")
+
+    stale_payload = snapshot_store.get_stale(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
+    if isinstance(stale_payload, dict):
+        setter = ctx.get("set_cached_json")
+        if callable(setter):
+            setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, stale_payload, min(15, ttl_seconds))
+        return _with_cache_mode(stale_payload, "stale-seed")
+    return None
+
+
+def _store_live_build_snapshot(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is not None:
+        snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
+
+
 def build_polymarket_macro_map_payload(ctx: dict) -> Dict[str, Any]:
     errors: Dict[str, str] = {}
     event_batches: List[List[Dict[str, Any]]] = []
@@ -459,16 +502,11 @@ def build_polymarket_macro_map_payload(ctx: dict) -> Dict[str, Any]:
 
 def get_polymarket_macro_map_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     ttl_seconds = max(60, int(getattr(ctx["SETTINGS"], "polymarket_macro_map_ttl_seconds", 180) or 180))
+    seeded_payload = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+    if seeded_payload is not None:
+        return normalize_polymarket_macro_map_payload(seeded_payload, ctx=ctx, limit=limit)
 
-    def _builder() -> Dict[str, Any]:
-        return build_polymarket_macro_map_payload(ctx)
-
-    if "get_snapshot_payload" in ctx:
-        payload = ctx["get_snapshot_payload"](
-            MACRO_MAP_SNAPSHOT_NAMESPACE,
-            MACRO_MAP_CACHE_KEY,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-        return normalize_polymarket_macro_map_payload(payload, ctx=ctx, limit=limit)
-    return normalize_polymarket_macro_map_payload(_builder(), ctx=ctx, limit=limit)
+    payload = _with_cache_mode(build_polymarket_macro_map_payload(ctx), "live-build")
+    if payload.get("items"):
+        _store_live_build_snapshot(ctx, payload, ttl_seconds=ttl_seconds)
+    return normalize_polymarket_macro_map_payload(payload, ctx=ctx, limit=limit)

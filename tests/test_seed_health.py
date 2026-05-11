@@ -115,6 +115,15 @@ class SeedHealthTestCase(unittest.TestCase):
                 "cacheMode": "seeded",
                 "payloadStatus": "ok",
             },
+            ("seed-meta:macro", "polymarket-macro-map"): {
+                "status": "ok",
+                "lastAttemptAt": "2999-05-03T08:29:18Z",
+                "lastSuccessAt": "2999-05-03T08:29:18Z",
+                "recordCount": 12,
+                "sourceStates": {"gammaEvents": "ok"},
+                "cacheMode": "seeded",
+                "payloadStatus": "ok",
+            },
             ("seed-meta:signals", "alpha-signal"): {
                 "status": "ok",
                 "lastAttemptAt": "2999-05-03T08:29:15Z",
@@ -155,7 +164,7 @@ class SeedHealthTestCase(unittest.TestCase):
         payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
 
         self.assertEqual("error", payload["status"])
-        self.assertEqual(13, payload["summary"]["watcherCount"])
+        self.assertEqual(14, payload["summary"]["watcherCount"])
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("ok", geo["status"])
         self.assertEqual("fresh", geo["freshness"])

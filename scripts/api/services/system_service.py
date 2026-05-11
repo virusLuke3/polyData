@@ -80,6 +80,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 1800,
     },
     {
+        "panelId": "polymarket-macro-map",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "polymarket-macro-map",
+        "serviceName": "polydata-polymarket-macro-map-seed.service",
+        "intervalEnv": "POLYDATA_MACRO_MARKET_MAP_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 180,
+    },
+    {
         "panelId": "alpha-signal",
         "namespace": "seed-meta:signals",
         "cacheKey": "alpha-signal",

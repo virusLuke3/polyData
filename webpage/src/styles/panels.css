@@ -3873,6 +3873,7 @@
   display: grid;
   align-content: start;
   gap: 8px;
+  overflow-x: hidden;
 }
 
 .wm-macro-map-summary {
@@ -3921,14 +3922,14 @@
 
 .wm-macro-map-category-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .wm-macro-map-category {
   min-width: 0;
-  min-height: 58px;
-  padding: 7px 8px;
+  min-height: 48px;
+  padding: 7px;
   border: 1px solid #262626;
   background: rgba(255, 255, 255, 0.02);
   display: grid;
@@ -3946,6 +3947,8 @@
 .wm-macro-map-category span {
   min-width: 0;
   color: #a5aaa6;
+  font-size: 9px;
+  letter-spacing: 0.4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3954,7 +3957,7 @@
 .wm-macro-map-category strong {
   color: #f2f4f2;
   font-family: var(--font-mono);
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 900;
 }
 
@@ -4015,6 +4018,7 @@
 .wm-macro-map-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   color: #8f948f;

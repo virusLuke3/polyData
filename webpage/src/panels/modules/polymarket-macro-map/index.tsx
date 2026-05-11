@@ -47,13 +47,35 @@ function categoryTone(index: number) {
   return ['green', 'amber', 'blue', 'violet', 'red'][index % 5];
 }
 
+function shortCategoryLabel(category?: RuntimePolymarketMacroMapCategory | null) {
+  const id = String(category?.id || '').toLowerCase();
+  if (id === 'cpi') return 'CPI';
+  if (id === 'fed') return 'FED';
+  if (id === 'growth') return 'GROWTH';
+  if (id === 'labor') return 'LABOR';
+  if (id === 'energy') return 'ENERGY';
+  return (String(category?.label || 'MACRO').split('/')[0] || 'MACRO').trim().toUpperCase();
+}
+
+function signalLabel(value?: string | null) {
+  return String(value || 'WARMING')
+    .replace(/oil\s*\/\s*energy/gi, 'ENERGY')
+    .replace(/cpi\s*\/\s*inflation/gi, 'CPI')
+    .replace(/growth\s*\/\s*recession/gi, 'GROWTH')
+    .replace(/fed\s*\/\s*rates/gi, 'FED');
+}
+
+function clusterLabel(value?: string | null) {
+  return signalLabel(value).replace(' CLUSTER ACTIVE', '');
+}
+
 function MacroCategoryMatrix({ categories }: { categories: RuntimePolymarketMacroMapCategory[] }) {
   return (
     <div className="wm-macro-map-category-grid">
       {categories.map((category, index) => (
         <div key={category.id || category.label || index} className={`wm-macro-map-category ${categoryTone(index)}`}>
           <div>
-            <span>{category.label || 'Macro'}</span>
+            <span>{shortCategoryLabel(category)}</span>
             <strong>{category.activeCount ?? 0}</strong>
           </div>
           <em>{category.marketType || 'Market cluster'}</em>
@@ -140,7 +162,7 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
       <div className="wm-macro-map-summary">
         <div>
           <span>Signal</span>
-          <strong>{summary?.signal || 'WARMING'}</strong>
+          <strong>{signalLabel(summary?.signal)}</strong>
         </div>
         <div>
           <span>Top Catalyst</span>
@@ -148,7 +170,7 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
         </div>
         <div>
           <span>Top Cluster</span>
-          <strong>{summary?.topCategory || 'Macro'}</strong>
+          <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
       </div>
       <MacroCategoryMatrix categories={categories} />
