@@ -13,6 +13,11 @@ from db import DEFAULT_DB_PATH
 from data_sources import (
     CLEVELAND_FED_NOWCAST_URL,
     COINGECKO_BASE_URL,
+    CPI_CALENDAR_BEA_SCHEDULE_URL,
+    CPI_CALENDAR_BLS_CPI_URL,
+    CPI_CALENDAR_BLS_EMPLOYMENT_URL,
+    CPI_CALENDAR_FOMC_URL,
+    CPI_CALENDAR_SOURCE_URL,
     CRYPTO_FUNDING_WATCH_API_URL,
     CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
     CRYPTO_FUNDING_WATCH_SOURCE_URL,
@@ -135,6 +140,12 @@ class ApiSettings:
     nba_lineups_base_url: str
     nba_official_base_url: str
     cleveland_fed_nowcast_url: str
+    cpi_calendar_bls_cpi_url: str
+    cpi_calendar_bls_employment_url: str
+    cpi_calendar_bea_schedule_url: str
+    cpi_calendar_fomc_url: str
+    cpi_calendar_source_url: str
+    cpi_calendar_ttl_seconds: int
     geo_shock_ofac_sdn_url: str
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
@@ -227,6 +238,27 @@ def load_api_settings() -> ApiSettings:
         nba_lineups_base_url=_get_str("POLYDATA_NBA_LINEUPS_BASE_URL", NBA_LINEUPS_BASE_URL),
         nba_official_base_url=_get_str("POLYDATA_NBA_OFFICIAL_BASE_URL", NBA_OFFICIAL_BASE_URL),
         cleveland_fed_nowcast_url=_get_str("POLYDATA_CLEVELAND_FED_NOWCAST_URL", CLEVELAND_FED_NOWCAST_URL),
+        cpi_calendar_bls_cpi_url=_get_str(
+            "POLYDATA_CPI_CALENDAR_BLS_CPI_URL",
+            CPI_CALENDAR_BLS_CPI_URL or "https://www.bls.gov/schedule/news_release/cpi.htm?lv=true",
+        ),
+        cpi_calendar_bls_employment_url=_get_str(
+            "POLYDATA_CPI_CALENDAR_BLS_EMPLOYMENT_URL",
+            CPI_CALENDAR_BLS_EMPLOYMENT_URL or "https://www.bls.gov/schedule/news_release/empsit.htm?lv=true",
+        ),
+        cpi_calendar_bea_schedule_url=_get_str(
+            "POLYDATA_CPI_CALENDAR_BEA_SCHEDULE_URL",
+            CPI_CALENDAR_BEA_SCHEDULE_URL or "https://www.bea.gov/news/schedule",
+        ),
+        cpi_calendar_fomc_url=_get_str(
+            "POLYDATA_CPI_CALENDAR_FOMC_URL",
+            CPI_CALENDAR_FOMC_URL or "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+        ),
+        cpi_calendar_source_url=_get_str(
+            "POLYDATA_CPI_CALENDAR_SOURCE_URL",
+            CPI_CALENDAR_SOURCE_URL or "https://www.bls.gov/schedule/news_release/cpi.htm?lv=true",
+        ),
+        cpi_calendar_ttl_seconds=_get_int("POLYDATA_CPI_CALENDAR_TTL_SECONDS", 3600),
         geo_shock_ofac_sdn_url=_get_str(
             "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
             GEO_SHOCK_OFAC_SDN_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",

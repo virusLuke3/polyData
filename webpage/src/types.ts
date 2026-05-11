@@ -631,6 +631,54 @@ export type RuntimePolymarketMacroMapPayload = {
   items?: RuntimePolymarketMacroMapItem[];
 };
 
+export type RuntimeCpiCalendarItem = {
+  id?: string | null;
+  kind?: 'cpi' | 'pce' | 'nfp' | 'fomc' | string;
+  title?: string | null;
+  referencePeriod?: string | null;
+  releaseAt?: string | null;
+  releaseTimeEt?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  marketRelevance?: string | null;
+};
+
+export type RuntimeCpiCalendarBaseline = {
+  status?: string | null;
+  label?: string | null;
+  probability?: number | string | null;
+  marketTitle?: string | null;
+  marketSlug?: string | null;
+  source?: string | null;
+};
+
+export type RuntimeCpiCalendarSummary = {
+  nextEvent?: RuntimeCpiCalendarItem | null;
+  nextCpi?: RuntimeCpiCalendarItem | null;
+  nextPce?: RuntimeCpiCalendarItem | null;
+  nextNfp?: RuntimeCpiCalendarItem | null;
+  nextFomc?: RuntimeCpiCalendarItem | null;
+  signal?: string | null;
+  risk?: string | null;
+  hoursToEvent?: number | string | null;
+  baselineLabel?: string | null;
+  baselineProbability?: number | string | null;
+  consensusStatus?: string | null;
+};
+
+export type RuntimeCpiReleaseCalendarPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeCpiCalendarSummary | null;
+  baseline?: RuntimeCpiCalendarBaseline | null;
+  consensus?: RuntimeCpiCalendarBaseline | null;
+  items?: RuntimeCpiCalendarItem[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

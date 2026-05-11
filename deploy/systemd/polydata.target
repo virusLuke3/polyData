@@ -1,6 +1,6 @@
 [Unit]
 Description=polyData local production services
-Wants=polydata-api.service polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-new-market-signal.service polydata-geo-sanctions-shock.service polydata-jin10-seed.service polydata-f1-seed.service polydata-nba-seed.service polydata-market-group-seed.service polydata-crypto-funding-seed.service polydata-inflation-nowcast-seed.service polydata-polymarket-macro-map-seed.service polydata-alpha-signal-seed.service polydata-whale-trades-seed.service polydata-suspicious-trades-seed.service polydata-bootstrap-seed.service
+Wants=polydata-api.service polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-new-market-signal.service polydata-geo-sanctions-shock.service polydata-jin10-seed.service polydata-f1-seed.service polydata-nba-seed.service polydata-market-group-seed.service polydata-crypto-funding-seed.service polydata-inflation-nowcast-seed.service polydata-polymarket-macro-map-seed.service polydata-cpi-release-calendar-seed.service polydata-alpha-signal-seed.service polydata-whale-trades-seed.service polydata-suspicious-trades-seed.service polydata-bootstrap-seed.service
 After=network-online.target
 
 [Install]

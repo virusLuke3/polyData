@@ -9,12 +9,13 @@ type PanelProps = {
   controls?: ComponentChildren;
   headerOverlay?: ComponentChildren;
   className?: string;
+  dataPanelId?: string;
   children: ComponentChildren;
 };
 
-export function Panel({ title, badge, count, status = 'live', titleControls, controls, headerOverlay, className, children }: PanelProps) {
+export function Panel({ title, badge, count, status = 'live', titleControls, controls, headerOverlay, className, dataPanelId, children }: PanelProps) {
   return (
-    <section className={`wm-panel${className ? ` ${className}` : ''}`}>
+    <section className={`wm-panel${className ? ` ${className}` : ''}`} data-panel-id={dataPanelId}>
       <header className="wm-panel-header">
         <div className="wm-panel-title-wrap">
           <h3 className="wm-panel-title">{title}</h3>

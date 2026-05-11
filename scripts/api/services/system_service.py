@@ -88,6 +88,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 180,
     },
     {
+        "panelId": "cpi-release-calendar",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "cpi-release-calendar",
+        "serviceName": "polydata-cpi-release-calendar-seed.service",
+        "intervalEnv": "POLYDATA_CPI_CALENDAR_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 3600,
+    },
+    {
         "panelId": "alpha-signal",
         "namespace": "seed-meta:signals",
         "cacheKey": "alpha-signal",
