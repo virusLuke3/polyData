@@ -133,13 +133,15 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
 
 def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
     """Fallback when raw recent trades are unavailable over the remote DB tunnel."""
-    try:
-        payload = ctx["get_active_markets_snapshot"](page_size=max(12, limit * 2))
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("whale rows active market fallback failed")
-        return []
+    payload = _read_bootstrap_activity_payload(ctx)
+    if payload is None:
+        try:
+            payload = ctx["get_active_markets_snapshot"](page_size=max(12, limit * 2))
+        except Exception:
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("whale rows active market fallback failed")
+            return []
 
     rows: List[Dict[str, Any]] = []
     for market in (payload or {}).get("items") or []:
@@ -166,6 +168,25 @@ def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
         )
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
     return rows[: max(limit * 2, limit)]
+
+
+def _read_bootstrap_activity_payload(ctx: dict) -> Optional[Dict[str, Any]]:
+    payload: Optional[Dict[str, Any]] = None
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        cached = reader("bootstrap", "workspace-default-v9")
+        if isinstance(cached, dict):
+            payload = cached
+    if payload is None:
+        snapshot_store = ctx.get("SNAPSHOT_STORE")
+        if snapshot_store is not None:
+            cached = snapshot_store.get_stale("snapshot:bootstrap", "workspace-default-v9")
+            if isinstance(cached, dict):
+                payload = cached
+    items = (payload or {}).get("activeMarketsPreview")
+    if isinstance(items, list):
+        return {"items": items}
+    return None
 
 
 def _store_runtime_snapshot(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
