@@ -262,7 +262,128 @@ cd webpage && npm run build
 - API 读取 seeded snapshot 时不触发外部 live fetch
 - route limit clamp
 
-## 7. GitHub 与 GCP 交付要求
+## 7. 截图 / 视觉验收要求
+
+前端 panel 不能只依赖 `npm run build` 判断完成。每个新增或改动过 UI 的 panel，都必须做截图与 DOM 级视觉验收。
+
+### 7.1 本地截图验收
+
+本地 frontend build 通过后，必须启动本地预览或 dev server，并用 Playwright / Chromium 对包含该 panel 的页面截图。
+
+推荐流程：
+
+```bash
+cd webpage
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173
+```
+
+然后使用 Playwright 打开页面并保存截图：
+
+```text
+artifacts/panel-screenshots/{panel_id}/local-desktop.png
+artifacts/panel-screenshots/{panel_id}/local-narrow.png
+```
+
+至少覆盖两个 viewport：
+
+```text
+desktop: 1440x900
+narrow: 390x844
+```
+
+如果项目已有 Playwright 测试脚本，优先复用脚本；如果没有脚本，必须使用 Playwright 临时脚本或浏览器自动化完成等价检查，不要只靠人工想象。
+
+### 7.2 DOM 视觉检查
+
+截图之外，还必须在浏览器上下文中检查该 panel 的 DOM。至少检查：
+
+- panel 根节点存在，并且可见
+- panel body 不出现横向滚动：`scrollWidth <= clientWidth + 1`
+- panel 内没有全局横向 scrollbar
+- header title、badge、count、action button 不互相重叠
+- 主要文本容器没有明显溢出父容器
+- 固定高度 panel 没有被内容撑高破坏 grid
+- empty / loading / degraded / stale 状态能正常渲染
+
+如果实现了 Playwright 断言，建议检查类似：
+
+```ts
+const panel = page.locator('[data-panel-id="{panel_id}"], .wm-{panel_id}-panel').first();
+await expect(panel).toBeVisible();
+const overflow = await panel.evaluate((node) => {
+  const body = node.querySelector('.wm-panel-body') as HTMLElement | null;
+  return body ? body.scrollWidth - body.clientWidth : 0;
+});
+expect(overflow).toBeLessThanOrEqual(1);
+```
+
+如果当前 panel 根节点没有稳定 selector，应在实现时增加稳定 className，必要时增加 `data-panel-id`，方便截图验收。
+
+### 7.3 截图判读要求
+
+截图完成后必须主动打开或检查截图，判断 UI 是否合理。重点看：
+
+- 是否有文字重叠、截断到不可读、挤压成一团
+- 是否出现横向滚动条
+- 是否出现亮白默认 scrollbar
+- panel header 是否被按钮/徽章挤压
+- 数据密度是否过低或过高
+- 是否符合固定高度 dashboard module，而不是 landing page / 大卡片页面
+- mobile/narrow viewport 下是否仍能阅读和滚动
+
+如果截图或 DOM 检查发现问题，必须自动修改 UI 并重新执行：
+
+```text
+修改 CSS / layout
+-> npm run build
+-> 本地截图
+-> DOM 检查
+```
+
+不能只在最终回答里报告“可能有 UI 问题”。
+
+### 7.4 GCP 公网截图验收
+
+完成 GitHub push、GCP 拉取、静态文件发布、API 重启后，必须对公网地址再做一次截图验收：
+
+```text
+artifacts/panel-screenshots/{panel_id}/gcp-desktop.png
+artifacts/panel-screenshots/{panel_id}/gcp-narrow.png
+```
+
+公网验收必须使用真实线上地址：
+
+```text
+http://34.143.254.155/
+```
+
+同时验证公网 runtime endpoint：
+
+```bash
+curl -sS "http://34.143.254.155{runtime_route}?limit=5"
+```
+
+只有当公网截图、DOM 检查、runtime endpoint 都通过，才算视觉验收完成。
+
+如果公网截图失败：
+
+- 先检查静态文件是否 rsync
+- 再检查 API runtime payload 是否返回
+- 再检查浏览器 console error
+- 修复后重新 build / deploy / 截图
+
+### 7.5 最终汇报要求
+
+最终回答必须说明：
+
+- 本地截图保存路径
+- GCP 公网截图保存路径
+- DOM 检查是否通过
+- 是否发现并修复过 UI 挤压、横向滚动、文字重叠
+- 如果无法截图，必须说明具体 blocker 和已完成的替代检查
+
+## 8. GitHub 与 GCP 交付要求
 
 完成本机开发后，必须把代码推到 GitHub，再由 GCP 拉取同一 commit。
 
@@ -307,9 +428,11 @@ curl -sS "http://34.143.254.155{runtime_route}?limit=5"
 curl -I http://34.143.254.155/
 ```
 
+公网验收还必须执行第 7 节的 GCP 公网截图验收。
+
 如果远端 `git pull --ff-only` 失败，不要强制 reset；先检查远端工作树状态并报告风险。
 
-## 8. 安全要求
+## 9. 安全要求
 
 禁止：
 
@@ -320,7 +443,7 @@ curl -I http://34.143.254.155/
 
 如果需要检查远端 env，只能检查变量是否存在，不要打印值。
 
-## 9. 完成标准
+## 10. 完成标准
 
 只有满足以下条件，才算完成：
 
@@ -329,16 +452,20 @@ curl -I http://34.143.254.155/
 3. 前端样式与现有 panel 系统一致
 4. panel 可缓存、可降级、可处理网络波动
 5. 本机测试通过
-6. GitHub 已 push
-7. GCP 已拉取同一 commit
-8. 远端服务已更新
-9. 公网 endpoint 已验收
+6. 本地截图和 DOM 视觉检查通过
+7. GitHub 已 push
+8. GCP 已拉取同一 commit
+9. 远端服务已更新
+10. 公网 endpoint 已验收
+11. GCP 公网截图和 DOM 视觉检查通过
 
 最终回答必须说明：
 
 - 改了哪些文件
 - 本机验证结果
+- 本地截图 / DOM 验收结果
 - GitHub push 结果
 - GCP 更新结果
 - 公网验收结果
+- GCP 截图 / DOM 验收结果
 - 未完成项或风险
