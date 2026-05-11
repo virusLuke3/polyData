@@ -1,0 +1,183 @@
+import { useState } from 'preact/hooks';
+import { Panel } from '@/components/Panel';
+import { fetchRuntimePolymarketMacroMap } from '@/services/api';
+import type {
+  RuntimePolymarketMacroMapCategory,
+  RuntimePolymarketMacroMapItem,
+  RuntimePolymarketMacroMapPayload,
+} from '@/types';
+import { formatRelative } from '../../shared/formatters';
+import type { PanelRenderMap } from '../../types';
+import { runtimePanelFromRenderer } from '../helpers';
+
+function badgeLabel(status?: string | null) {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'ok') return 'LIVE';
+  if (normalized === 'degraded') return 'PARTIAL';
+  if (normalized === 'empty') return 'EMPTY';
+  return 'STALE';
+}
+
+function panelTone(status?: string | null): 'live' | 'muted' {
+  return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
+}
+
+function numberLabel(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  if (Math.abs(numeric) >= 1000) {
+    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(numeric);
+  }
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(numeric);
+}
+
+function probabilityLabel(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${Math.round(numeric * 100)}%`;
+}
+
+function catalystLabel(payload?: RuntimePolymarketMacroMapPayload | null) {
+  const catalyst = payload?.summary?.topCatalyst;
+  if (!catalyst?.endDate) return 'No dated catalyst';
+  return formatRelative(catalyst.endDate);
+}
+
+function categoryTone(index: number) {
+  return ['green', 'amber', 'blue', 'violet', 'red'][index % 5];
+}
+
+function MacroCategoryMatrix({ categories }: { categories: RuntimePolymarketMacroMapCategory[] }) {
+  return (
+    <div className="wm-macro-map-category-grid">
+      {categories.map((category, index) => (
+        <div key={category.id || category.label || index} className={`wm-macro-map-category ${categoryTone(index)}`}>
+          <div>
+            <span>{category.label || 'Macro'}</span>
+            <strong>{category.activeCount ?? 0}</strong>
+          </div>
+          <em>{category.marketType || 'Market cluster'}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
+  const topOutcome = item.topOutcomes?.[0];
+  const category = item.categoryLabels?.[0] || 'Macro';
+  return (
+    <div className="wm-macro-map-row">
+      <div className="wm-macro-map-row-main">
+        <div className="wm-macro-map-meta">
+          <span>{category.toUpperCase()}</span>
+          <span>/</span>
+          <span>{item.endDate ? formatRelative(item.endDate) : 'OPEN'}</span>
+          <span>/</span>
+          <span>VOL {numberLabel(item.volume24h)}</span>
+        </div>
+        <strong>{item.title || 'Untitled macro market'}</strong>
+        <div className="wm-macro-map-subline">
+          {(item.marketTypes || []).slice(0, 2).join(' / ') || 'Polymarket macro route'}
+        </div>
+      </div>
+      <div className="wm-macro-map-prob">
+        <span>{probabilityLabel(topOutcome?.yesPrice)}</span>
+        <em>{topOutcome?.label || 'TOP YES'}</em>
+      </div>
+    </div>
+  );
+}
+
+function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) {
+  if (!items.length) {
+    return (
+      <div className="wm-empty-state">
+        <strong>No macro market cluster found.</strong>
+        <em>Gamma feed is available, but no active CPI/Fed/GDP/oil markets matched the current terms.</em>
+      </div>
+    );
+  }
+  return (
+    <div className="wm-macro-map-list">
+      {items.map((item, index) => (
+        <MacroMarketRow key={`${item.eventId || item.slug || 'macro'}-${index}`} item={item} />
+      ))}
+    </div>
+  );
+}
+
+function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacroMapPayload | null }) {
+  const [showHelp, setShowHelp] = useState(false);
+  const categories = payload?.categories || [];
+  const items = payload?.items || [];
+  const summary = payload?.summary;
+  return (
+    <Panel
+      title="PMKT MACRO MAP"
+      titleControls={(
+        <button
+          type="button"
+          className="wm-panel-help-button"
+          aria-label="Explain macro market map"
+          aria-expanded={showHelp}
+          onClick={() => setShowHelp((current) => !current)}
+        >
+          ?
+        </button>
+      )}
+      badge={badgeLabel(payload?.status)}
+      status={panelTone(payload?.status)}
+      count={summary?.activeCount ?? items.length}
+      headerOverlay={showHelp ? (
+        <div className="wm-panel-help-popover">
+          <strong>Macro Market Map</strong>
+          <p>Routes active Polymarket events into CPI, Fed, growth, labor, and energy clusters so macro signals can be tied back to tradable markets.</p>
+        </div>
+      ) : null}
+      className="wm-market-panel wm-macro-map-panel"
+    >
+      <div className="wm-macro-map-summary">
+        <div>
+          <span>Signal</span>
+          <strong>{summary?.signal || 'WARMING'}</strong>
+        </div>
+        <div>
+          <span>Top Catalyst</span>
+          <strong>{catalystLabel(payload)}</strong>
+        </div>
+        <div>
+          <span>Top Cluster</span>
+          <strong>{summary?.topCategory || 'Macro'}</strong>
+        </div>
+      </div>
+      <MacroCategoryMatrix categories={categories} />
+      <MacroMarketList items={items} />
+      <div className="wm-macro-map-footer">
+        <span>{(payload?.sources?.gammaEvents || payload?.status || 'warming').toUpperCase()}</span>
+        <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
+        <span>{formatRelative(payload?.generatedAt)}</span>
+      </div>
+    </Panel>
+  );
+}
+
+const renderers: PanelRenderMap = {
+  'polymarket-macro-map': {
+    render: (ctx) => {
+      const payload = ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined;
+      return <PolymarketMacroMapPanel payload={payload} />;
+    },
+  },
+};
+
+export const panel = runtimePanelFromRenderer(renderers, {
+  id: 'polymarket-macro-map',
+  title: 'Polymarket Macro Market Map',
+  eyebrow: 'macro',
+  description: 'Active CPI, Fed, growth, labor, and energy market clusters from Polymarket.',
+  defaultEnabled: true,
+}, {
+  tier: 'slow',
+  fetchData: () => fetchRuntimePolymarketMacroMap(12),
+});

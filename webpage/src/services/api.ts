@@ -20,6 +20,7 @@ import type {
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeNewMarketSignalsPayload,
+  RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
   SystemHealth,
   TradeRow,
@@ -165,6 +166,10 @@ export function fetchRuntimeNbaMatchupPredictor(limit = 8) {
 
 export function fetchRuntimeInflationNowcast() {
   return apiGet<RuntimeInflationNowcastPayload>('/runtime/macro/inflation-nowcast');
+}
+
+export function fetchRuntimePolymarketMacroMap(limit = 12) {
+  return apiGet<RuntimePolymarketMacroMapPayload>(`/runtime/macro/polymarket-map?limit=${limit}`);
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 6) {

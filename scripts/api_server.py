@@ -74,7 +74,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, crypto_funding_service, f1_runtime_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, market_group_service, market_service, new_market_signal_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, crypto_funding_service, f1_runtime_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -248,6 +248,7 @@ def build_route_helpers() -> Dict[str, Any]:
             page_size=page_size,
             sort=sort,
         ),
+        "get_polymarket_macro_map_snapshot": get_polymarket_macro_map_snapshot,
         "get_market_group_detail_payload": lambda event_id: market_group_service.get_market_group_detail_payload(
             build_service_context(),
             event_id,
@@ -383,6 +384,7 @@ def build_service_context() -> Dict[str, Any]:
             page_size=page_size,
             sort=sort,
         ),
+        "get_polymarket_macro_map_snapshot": lambda limit=12: polymarket_macro_map_service.get_polymarket_macro_map_snapshot(build_service_context(), limit=limit),
         "get_market_group_detail_payload": lambda event_id: market_group_service.get_market_group_detail_payload(
             build_service_context(),
             event_id,
@@ -783,6 +785,10 @@ def get_inflation_nowcast_snapshot() -> Dict[str, Any]:
 
 def get_geo_sanctions_shock_snapshot(limit: int = 6) -> Dict[str, Any]:
     return geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit)
+
+
+def get_polymarket_macro_map_snapshot(limit: int = 12) -> Dict[str, Any]:
+    return polymarket_macro_map_service.get_polymarket_macro_map_snapshot(build_service_context(), limit=limit)
 
 
 def get_jin10_panel_snapshot(limit: int = 24) -> Dict[str, Any]:

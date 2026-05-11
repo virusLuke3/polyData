@@ -39,6 +39,7 @@ from data_sources import (
     NBA_OFFICIAL_BASE_URL,
     POLYMARKET_CLOB_API_BASE,
     POLYMARKET_GAMMA_API_BASE,
+    POLYMARKET_MACRO_MAP_SOURCE_URL,
     YAHOO_CHART_BASE_URL,
 )
 
@@ -112,6 +113,9 @@ class ApiSettings:
     snapshot_prewarm_enabled: bool
     gamma_api_base: str
     clob_api_base: str
+    polymarket_macro_map_source_url: str
+    polymarket_macro_map_ttl_seconds: int
+    polymarket_macro_map_search_terms: tuple[str, ...]
     clob_timeout_seconds: int
     clob_price_cache_ttl_seconds: int
     finance_runtime_ttl_seconds: int
@@ -176,6 +180,12 @@ def load_api_settings() -> ApiSettings:
         snapshot_prewarm_enabled=_get_bool("POLYDATA_SNAPSHOT_PREWARM", True),
         gamma_api_base=_get_str("POLYDATA_GAMMA_API_BASE", POLYMARKET_GAMMA_API_BASE),
         clob_api_base=_get_str("POLYDATA_CLOB_API_BASE", POLYMARKET_CLOB_API_BASE),
+        polymarket_macro_map_source_url=_get_str(
+            "POLYDATA_MACRO_MARKET_MAP_SOURCE_URL",
+            POLYMARKET_MACRO_MAP_SOURCE_URL or _get_str("POLYDATA_GAMMA_API_BASE", POLYMARKET_GAMMA_API_BASE),
+        ),
+        polymarket_macro_map_ttl_seconds=_get_int("POLYDATA_MACRO_MARKET_MAP_TTL_SECONDS", 180),
+        polymarket_macro_map_search_terms=_get_csv("POLYDATA_MACRO_MARKET_MAP_SEARCH_TERMS", ()),
         clob_timeout_seconds=_get_int("POLYDATA_CLOB_TIMEOUT_SECONDS", 12),
         clob_price_cache_ttl_seconds=_get_int("POLYDATA_CLOB_PRICE_CACHE_TTL_SECONDS", 45),
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),

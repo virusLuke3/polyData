@@ -569,6 +569,68 @@ export type RuntimeGeoSanctionsShockPayload = {
   publishDates?: string[];
 };
 
+export type RuntimePolymarketMacroMapOutcome = {
+  outcomeKey?: string | null;
+  gammaMarketId?: string | number | null;
+  label?: string | null;
+  title?: string | null;
+  yesPrice?: number | string | null;
+  noPrice?: number | string | null;
+  volume24h?: number | string | null;
+  conditionId?: string | null;
+  slug?: string | null;
+};
+
+export type RuntimePolymarketMacroMapItem = {
+  eventId?: string | number | null;
+  slug?: string | null;
+  title?: string | null;
+  categoryIds?: string[];
+  categoryLabels?: string[];
+  marketTypes?: string[];
+  endDate?: string | null;
+  createdAt?: string | null;
+  volume24h?: number | string | null;
+  liquidity?: number | string | null;
+  outcomeCount?: number | null;
+  topOutcomes?: RuntimePolymarketMacroMapOutcome[];
+};
+
+export type RuntimePolymarketMacroMapCategory = {
+  id?: string | null;
+  label?: string | null;
+  marketType?: string | null;
+  activeCount?: number | null;
+  topTitle?: string | null;
+  volume24h?: number | string | null;
+};
+
+export type RuntimePolymarketMacroMapSummary = {
+  activeCount?: number | null;
+  categoryCount?: number | null;
+  topCategory?: string | null;
+  signal?: string | null;
+  topCatalyst?: {
+    title?: string | null;
+    eventId?: string | number | null;
+    slug?: string | null;
+    endDate?: string | null;
+    categoryLabels?: string[];
+  } | null;
+};
+
+export type RuntimePolymarketMacroMapPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimePolymarketMacroMapSummary | null;
+  categories?: RuntimePolymarketMacroMapCategory[];
+  items?: RuntimePolymarketMacroMapItem[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

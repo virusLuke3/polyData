@@ -30,6 +30,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "COMMODITY_SYMBOLS": [],
         "CRYPTO_SYMBOLS": [],
         "get_market_group_snapshot": lambda symbols, kind: {"kind": kind, "items": symbols},
+        "get_polymarket_macro_map_snapshot": lambda limit=12: {"limit": limit},
         "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
         "get_geo_sanctions_shock_snapshot": lambda limit=6: {"limit": limit},
         "get_jin10_panel_snapshot": lambda limit=24: {"limit": limit},
@@ -57,5 +58,6 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert "active-markets" in panel_ids
     assert "espn-matchup-predictor" in panel_ids
     assert "crypto-funding-watch" in panel_ids
+    assert "polymarket-macro-map" in panel_ids
     assert "f1-trackside" in panel_ids
     assert len(panel_ids) == len(set(panel_ids))

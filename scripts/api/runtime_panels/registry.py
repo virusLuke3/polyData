@@ -16,6 +16,7 @@ from .modules import (
     new_market_signals,
     nba_intel,
     nba_scoreboard,
+    polymarket_macro_map,
     suspicious_flow,
     whale_tracker,
 )
@@ -33,6 +34,7 @@ _MODULES: List[ModuleType] = [
     nba_intel,
     espn_matchup_predictor,
     geo_sanctions_shock,
+    polymarket_macro_map,
     inflation_nowcast,
     alpha_signal,
     whale_tracker,
@@ -61,6 +63,7 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "featured-market",
     "world-brief",
     "geo-sanctions-shock",
+    "polymarket-macro-map",
     "price-implications",
     "price-chart",
     "sample-chain-trades",
