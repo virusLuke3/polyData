@@ -32,6 +32,7 @@ DEFAULT_INTERVAL_SECONDS = 45
 DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
+DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
 SEED_META_NAMESPACE = "seed-meta:signals"
 
 
@@ -263,6 +264,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_arg_parser().parse_args()
+    db_read_timeout = max(3, int(os.environ.get("POLYDATA_SIGNAL_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
+    current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
+    if current_read_timeout > db_read_timeout:
+        os.environ["POLYMARKET_MYSQL_READ_TIMEOUT"] = str(db_read_timeout)
     settings = load_api_settings()
     spec = COMPONENTS[args.component]
     limit = args.limit or int(os.environ.get(str(spec["limit_env"]), spec["default_limit"]))

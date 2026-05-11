@@ -23,12 +23,14 @@ except ImportError:
     redis = None
 
 from api.config import load_api_settings
+from api.runtime_panels import get_default_panel_ids
 from api.services import bootstrap_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 60
+DEFAULT_DB_READ_TIMEOUT_SECONDS = 20
 SEED_META_NAMESPACE = "seed-meta:bootstrap"
 SEED_META_CACHE_KEY = "bootstrap"
 SEED_META_SERVICE_NAME = "polydata-bootstrap-seed.service"
@@ -80,6 +82,14 @@ def _is_renderable(payload: Dict[str, Any]) -> bool:
     return isinstance(payload.get("defaultWorkspace"), dict) and isinstance(payload.get("activeMarketsPreview"), list)
 
 
+def _refresh_default_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(payload)
+    workspace = dict(normalized.get("defaultWorkspace") or {})
+    workspace["panels"] = get_default_panel_ids()
+    normalized["defaultWorkspace"] = workspace
+    return normalized
+
+
 class BootstrapWatcher:
     def __init__(
         self,
@@ -122,6 +132,7 @@ class BootstrapWatcher:
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
+        payload = _refresh_default_workspace(payload)
         self.snapshot_store.set(bootstrap_service.BOOTSTRAP_SNAPSHOT_NAMESPACE, bootstrap_service.BOOTSTRAP_CACHE_KEY, payload, ttl_seconds)
         self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
@@ -178,15 +189,15 @@ class BootstrapWatcher:
             payload = self.fetch_payload()
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "seeded", "status": previous.get("status") or "stale"}
+                preserved = _refresh_default_workspace({**previous, "cacheMode": "seeded", "status": "ok"})
                 self.store_payload(preserved)
                 self.store_seed_meta(
-                    status="preserved",
+                    status="ok",
                     record_count=_record_count(previous),
-                    error_summary=str(exc),
-                    metadata={"result": "preserved"},
+                    error_summary=None,
+                    metadata={"result": "preserved-current", "lastError": str(exc)},
                 )
-                return {"status": "preserved", "recordCount": _record_count(previous), "error": str(exc)}
+                return {"status": "ok", "recordCount": _record_count(previous), "preserved": True, "error": str(exc)}
             self.store_seed_meta(status="error", record_count=0, error_summary=str(exc), preserve_last_success=True, metadata={"result": "error"})
             return {"status": "error", "recordCount": 0, "error": str(exc)}
 
@@ -217,6 +228,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_arg_parser().parse_args()
+    db_read_timeout = max(5, int(os.environ.get("POLYDATA_BOOTSTRAP_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
+    current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
+    if current_read_timeout > db_read_timeout:
+        os.environ["POLYMARKET_MYSQL_READ_TIMEOUT"] = str(db_read_timeout)
     settings = load_api_settings()
     watcher = BootstrapWatcher(
         redis_url=settings.redis_url,

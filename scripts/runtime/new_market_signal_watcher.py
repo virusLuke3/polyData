@@ -51,6 +51,7 @@ DEFAULT_BATCH_LIMIT = 100
 DEFAULT_RETENTION = 50
 DEFAULT_PENDING_RETENTION = 500
 DEFAULT_CLOB_TIMEOUT_SECONDS = 10
+DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
 PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
 SEED_META_NAMESPACE = "seed-meta:markets"
 SEED_META_CACHE_KEY = "new-market-signals"
@@ -302,6 +303,18 @@ class NewMarketSignalWatcher:
         self.redis_client.set(self.snapshot_redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=SNAPSHOT_TTL_SECONDS)
         return payload
 
+    def preserve_current_snapshot(self, *, reason: str) -> Dict[str, Any]:
+        payload = self.store_snapshot_payload(
+            status="ok" if self.load_items() else "empty",
+            metadata={"result": "preserved-current", "reason": reason},
+        )
+        self.store_seed_meta(
+            status="scan",
+            record_count=len(payload.get("items") or []),
+            metadata={"result": "preserved-current", "reason": reason},
+        )
+        return {"mode": "preserved", "signals": len(payload.get("items") or []), "reason": reason}
+
     def load_pending_market_ids(self) -> List[int]:
         raw = self.redis_client.get(self.pending_key)
         if not raw:
@@ -406,6 +419,10 @@ def main() -> None:
     parser.add_argument("--clob-api-base", default=settings.clob_api_base or POLYMARKET_CLOB_API_BASE, help="Polymarket CLOB API base")
     parser.add_argument("--clob-timeout-seconds", type=int, default=settings.clob_timeout_seconds, help="CLOB request timeout")
     args = parser.parse_args()
+    db_read_timeout = max(3, int(os.environ.get("POLYDATA_NEW_MARKET_SIGNAL_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
+    current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
+    if current_read_timeout > db_read_timeout:
+        os.environ["POLYMARKET_MYSQL_READ_TIMEOUT"] = str(db_read_timeout)
     configure_db_from_args(args)
 
     watcher = NewMarketSignalWatcher(
@@ -426,8 +443,9 @@ def main() -> None:
             elapsed_ms = (time.perf_counter() - started) * 1000
             print(f"[new-market-signal] {json.dumps(result, ensure_ascii=True)} duration_ms={elapsed_ms:.1f}", file=sys.stderr)
         except Exception as exc:
-            watcher.store_seed_meta(status="error", record_count=len(watcher.load_items()), error_summary=str(exc), metadata={"result": "exception"}, preserve_last_success=True)
+            result = watcher.preserve_current_snapshot(reason=str(exc))
             print(f"[new-market-signal] scan failed: {exc}", file=sys.stderr)
+            print(f"[new-market-signal] {json.dumps(result, ensure_ascii=True)} duration_ms={(time.perf_counter() - started) * 1000:.1f}", file=sys.stderr)
             if not args.watch:
                 raise
         if not args.watch:

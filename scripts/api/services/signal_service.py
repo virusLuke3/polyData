@@ -95,7 +95,7 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
             logger.exception("whale rows trade source failed")
-        return []
+        return _query_market_activity_rows(ctx, limit=limit)
     rows: List[Dict[str, Any]] = []
     for trade in recent_trades:
         market_id = trade.get("marketId") or trade.get("market_id")
@@ -123,6 +123,45 @@ def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict
                 "notional": notional,
                 "maker": trade.get("maker"),
                 "taker": trade.get("taker"),
+            }
+        )
+    rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
+    if not rows:
+        return _query_market_activity_rows(ctx, limit=limit)
+    return rows[: max(limit * 2, limit)]
+
+
+def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
+    """Fallback when raw recent trades are unavailable over the remote DB tunnel."""
+    try:
+        payload = ctx["get_active_markets_snapshot"](page_size=max(12, limit * 2))
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("whale rows active market fallback failed")
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    for market in (payload or {}).get("items") or []:
+        if not isinstance(market, dict) or market.get("id") is None:
+            continue
+        notional = ctx["_safe_decimal"](market.get("volume24h")) or Decimal("0")
+        trade_count = int(market.get("tradeCount24h") or 0)
+        if notional <= 0 and trade_count <= 0:
+            continue
+        rows.append(
+            {
+                "market_id": market.get("id"),
+                "market_title": market.get("title"),
+                "timestamp": market.get("lastTradeAt"),
+                "tx_hash": None,
+                "outcome": None,
+                "side": "activity",
+                "price": ctx["_safe_decimal"](market.get("latestPrice")),
+                "size": None,
+                "notional": notional,
+                "maker": None,
+                "taker": None,
             }
         )
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
@@ -410,6 +449,15 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
         if logger is not None:
             logger.exception("suspicious trade source failed")
         recent_trades = []
+    if not oracle_events and not recent_trades:
+        return [
+            {
+                **_format_trade_item(ctx, row),
+                "eventStatus": "activity-fallback",
+                "summary": "Active market volume surfaced while trade/oracle sources are unavailable",
+            }
+            for row in _query_market_activity_rows(ctx, limit=limit)[:limit]
+        ]
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
     oracle_by_market: Dict[Any, List[Dict[str, Any]]] = {}
