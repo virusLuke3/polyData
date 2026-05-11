@@ -25,6 +25,8 @@ def is_mysql_protocol_error(exc: BaseException) -> bool:
 
 
 def exit_worker_on_mysql_protocol_error(ctx: dict, exc: BaseException, operation: str) -> None:
+    if ctx.get("MYSQL_PROTOCOL_EXIT_DISABLED"):
+        return
     if not is_mysql_protocol_error(exc):
         return
     ctx["app"].logger.critical(

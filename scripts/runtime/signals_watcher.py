@@ -198,6 +198,7 @@ class SignalsWatcher:
 
         ctx = api_server.build_service_context()
         ctx["app"] = _AppAdapter()
+        ctx["MYSQL_PROTOCOL_EXIT_DISABLED"] = True
         return ctx
 
     def fetch_payload(self) -> Dict[str, Any]:

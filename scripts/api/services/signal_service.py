@@ -166,6 +166,8 @@ def _query_market_activity_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]
                 "taker": None,
             }
         )
+    if not rows:
+        rows.extend(_query_bootstrap_trade_rows(ctx, limit=limit))
     rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
     return rows[: max(limit * 2, limit)]
 
@@ -186,6 +188,56 @@ def _read_bootstrap_activity_payload(ctx: dict) -> Optional[Dict[str, Any]]:
     items = (payload or {}).get("activeMarketsPreview")
     if isinstance(items, list):
         return {"items": items}
+    return None
+
+
+def _query_bootstrap_trade_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
+    payload = _read_bootstrap_payload(ctx)
+    trades = (payload or {}).get("globalTradesPreview")
+    if not isinstance(trades, list):
+        return []
+    rows: List[Dict[str, Any]] = []
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        market_id = trade.get("marketId") or trade.get("market_id")
+        if market_id is None:
+            continue
+        price = ctx["_safe_decimal"](trade.get("price"))
+        size = ctx["_safe_decimal"](trade.get("size"))
+        notional = ctx["_safe_decimal"](trade.get("notional"))
+        if notional is None and price is not None and size is not None:
+            notional = price * size
+        rows.append(
+            {
+                "market_id": market_id,
+                "market_title": trade.get("marketTitle") or trade.get("market_title"),
+                "timestamp": trade.get("timestamp"),
+                "tx_hash": trade.get("txHash") or trade.get("tx_hash"),
+                "outcome": trade.get("outcome"),
+                "side": trade.get("side"),
+                "price": price,
+                "size": size,
+                "notional": notional,
+                "maker": trade.get("maker"),
+                "taker": trade.get("taker"),
+            }
+        )
+    rows.sort(key=lambda row: (ctx["_safe_decimal"](row.get("notional")) or Decimal("0")), reverse=True)
+    return rows[: max(limit * 2, limit)]
+
+
+def _read_bootstrap_payload(ctx: dict) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        cached = reader("bootstrap", "workspace-default-v9")
+        if isinstance(cached, dict):
+            return cached
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is not None:
+        cached = snapshot_store.get_stale("snapshot:bootstrap", "workspace-default-v9")
+        if isinstance(cached, dict):
+            return cached
     return None
 
 
