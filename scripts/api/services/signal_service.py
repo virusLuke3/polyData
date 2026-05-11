@@ -16,6 +16,10 @@ ELEVATED_NOTIONAL = Decimal("1000")
 SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
 SIGNAL_SNAPSHOT_NAMESPACE_WHALES = "snapshot:signals:whales"
 SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
+DEFAULT_ALPHA_SIGNAL_LIMIT = 8
+DEFAULT_WHALE_TRADES_LIMIT = 14
+DEFAULT_SUSPICIOUS_TRADES_LIMIT = 12
+DEFAULT_WHALE_TRADES_LOOKBACK_DAYS = 7
 _SIGNAL_REFRESH_LOCK = threading.Lock()
 _SIGNAL_REFRESH_STATE: Dict[str, bool] = {}
 
@@ -40,6 +44,12 @@ def normalize_signal_payload(payload: Dict[str, Any], *, generated_at: str, sour
     normalized.setdefault("source", source)
     normalized.setdefault("status", "ok" if normalized["items"] else "empty")
     normalized.setdefault("cacheMode", "live-build")
+    return normalized
+
+
+def _limit_signal_payload(ctx: dict, payload: Dict[str, Any], *, limit: int) -> Dict[str, Any]:
+    normalized = normalize_signal_payload(payload, generated_at=ctx["utc_now_iso"]())
+    normalized["items"] = [item for item in normalized.get("items", []) if isinstance(item, dict)][: max(0, int(limit))]
     return normalized
 
 
@@ -259,6 +269,41 @@ def _get_stale_first_runtime_snapshot(
     raise RuntimeError(f"{label} snapshot refresh failed")
 
 
+def _set_runtime_payload_if_possible(ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+    setter = ctx.get("set_cached_runtime_payload")
+    if callable(setter):
+        return setter(namespace, cache_key, payload, ttl_seconds)
+    return payload
+
+
+def _read_cached_signal_snapshot(ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    runtime_reader = ctx.get("get_cached_runtime_payload")
+    if callable(runtime_reader):
+        cached = runtime_reader(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+
+    redis_reader = ctx.get("get_cached_json")
+    if callable(redis_reader):
+        redis_payload = redis_reader(namespace, cache_key)
+        if isinstance(redis_payload, dict):
+            snapshot_store = ctx.get("SNAPSHOT_STORE")
+            if snapshot_store is not None:
+                snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
+            return _set_runtime_payload_if_possible(ctx, namespace, cache_key, redis_payload, ttl_seconds)
+
+    snapshot_store = ctx.get("SNAPSHOT_STORE")
+    if snapshot_store is None:
+        return None
+    fresh_payload = snapshot_store.get(namespace, cache_key)
+    if isinstance(fresh_payload, dict):
+        return _set_runtime_payload_if_possible(ctx, namespace, cache_key, fresh_payload, ttl_seconds)
+    stale_payload = snapshot_store.get_stale(namespace, cache_key)
+    if isinstance(stale_payload, dict):
+        return _set_runtime_payload_if_possible(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds))
+    return None
+
+
 def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
     rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
     items: List[Dict[str, Any]] = []
@@ -282,8 +327,17 @@ def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: i
     )
 
 
-def get_whale_trades_snapshot(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+def get_whale_trades_snapshot(ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT, lookback_days: int = DEFAULT_WHALE_TRADES_LOOKBACK_DAYS) -> Dict[str, Any]:
     cache_key = build_whale_trades_cache_key(limit=limit, lookback_days=lookback_days)
+    if int(limit or 0) != DEFAULT_WHALE_TRADES_LIMIT and int(lookback_days or 0) == DEFAULT_WHALE_TRADES_LOOKBACK_DAYS:
+        default_payload = _read_cached_signal_snapshot(
+            ctx,
+            namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
+            cache_key=build_whale_trades_cache_key(limit=DEFAULT_WHALE_TRADES_LIMIT, lookback_days=DEFAULT_WHALE_TRADES_LOOKBACK_DAYS),
+            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        )
+        if default_payload is not None:
+            return _limit_signal_payload(ctx, default_payload, limit=limit)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
@@ -318,8 +372,17 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
     return filtered[: max(limit, 8)]
 
 
-def get_suspicious_trades_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any]:
+def get_suspicious_trades_snapshot(ctx: dict, limit: int = DEFAULT_SUSPICIOUS_TRADES_LIMIT) -> Dict[str, Any]:
     cache_key = build_suspicious_trades_cache_key(limit=limit)
+    if int(limit or 0) != DEFAULT_SUSPICIOUS_TRADES_LIMIT:
+        default_payload = _read_cached_signal_snapshot(
+            ctx,
+            namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
+            cache_key=build_suspicious_trades_cache_key(limit=DEFAULT_SUSPICIOUS_TRADES_LIMIT),
+            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        )
+        if default_payload is not None:
+            return _limit_signal_payload(ctx, default_payload, limit=limit)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
@@ -666,8 +729,17 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]
     )
 
 
-def get_alpha_signal_snapshot(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT) -> Dict[str, Any]:
     cache_key = build_alpha_signal_cache_key(limit=limit)
+    if int(limit or 0) != DEFAULT_ALPHA_SIGNAL_LIMIT:
+        default_payload = _read_cached_signal_snapshot(
+            ctx,
+            namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
+            cache_key=build_alpha_signal_cache_key(limit=DEFAULT_ALPHA_SIGNAL_LIMIT),
+            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
+        )
+        if default_payload is not None:
+            return _limit_signal_payload(ctx, default_payload, limit=limit)
     return _get_stale_first_runtime_snapshot(
         ctx,
         namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,

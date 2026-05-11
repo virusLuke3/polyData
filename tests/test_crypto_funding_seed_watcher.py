@@ -111,6 +111,35 @@ class CryptoFundingSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("sqlite-seed", payload["cacheMode"])
         self.assertEqual("BTC", payload["assets"][0]["asset"])
 
+    def test_api_trims_default_seed_for_smaller_limit_without_live_fetch(self):
+        with tempfile.TemporaryDirectory() as snapshot_dir:
+            settings = make_settings(str(Path(snapshot_dir) / "snapshots.sqlite3"))
+            store = SnapshotStore(settings.snapshot_sqlite_path)
+            default_cache_key = crypto_funding_service.build_crypto_funding_cache_key(
+                settings,
+                limit=crypto_funding_service.DEFAULT_CRYPTO_FUNDING_LIMIT,
+            )
+            seeded = {
+                **sample_payload(),
+                "assets": [
+                    {"id": "BTC", "asset": "BTC", "quotes": []},
+                    {"id": "ETH", "asset": "ETH", "quotes": []},
+                ],
+            }
+            store.set(crypto_funding_service.CRYPTO_FUNDING_NAMESPACE, default_cache_key, seeded, 60)
+            ctx = {
+                "SETTINGS": settings,
+                "SNAPSHOT_STORE": store,
+                "get_cached_json": lambda namespace, key: None,
+                "set_cached_json": lambda namespace, key, payload, ttl: None,
+                "http_json_get": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")),
+                "utc_now_iso": lambda: "2026-05-03T00:00:00Z",
+            }
+            payload = crypto_funding_service.get_crypto_funding_watch_snapshot(ctx, limit=1)
+
+        self.assertEqual("sqlite-seed", payload["cacheMode"])
+        self.assertEqual(["BTC"], [item["asset"] for item in payload["assets"]])
+
 
 if __name__ == "__main__":
     unittest.main()

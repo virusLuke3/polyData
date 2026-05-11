@@ -139,6 +139,7 @@ def _url_fingerprint(*urls: str) -> str:
 
 
 CRYPTO_FUNDING_NAMESPACE = "snapshot:crypto:funding-watch"
+DEFAULT_CRYPTO_FUNDING_LIMIT = 18
 
 
 def _filter_symbols(items: Iterable[Dict[str, Any]], symbols: set[str]) -> List[Dict[str, Any]]:
@@ -303,7 +304,7 @@ def build_crypto_funding_cache_key(settings: Any, *, limit: int = 16) -> str:
     )
 
 
-def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int = 16, generated_at: str | None = None) -> Dict[str, Any]:
+def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT, generated_at: str | None = None) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {
             "generatedAt": str(generated_at or ""),
@@ -371,7 +372,7 @@ def _store_seed_fallback(ctx: dict, *, namespace: str, cache_key: str, payload: 
     return payload
 
 
-def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = 16) -> Dict[str, Any]:
+def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> Dict[str, Any]:
     settings = ctx["SETTINGS"]
     symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
     symbol_set = set(symbols)
@@ -428,11 +429,18 @@ def fetch_live_crypto_funding_watch_payload(ctx: dict, limit: int = 16) -> Dict[
     )
 
 
-def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = 16) -> Dict[str, Any]:
+def get_crypto_funding_watch_snapshot(ctx: dict, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> Dict[str, Any]:
     settings = ctx["SETTINGS"]
     ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
     cache_key = build_crypto_funding_cache_key(settings, limit=limit)
     seeded_payload = _read_seeded_snapshot(ctx, namespace=CRYPTO_FUNDING_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if seeded_payload is None and int(limit or 0) != DEFAULT_CRYPTO_FUNDING_LIMIT:
+        seeded_payload = _read_seeded_snapshot(
+            ctx,
+            namespace=CRYPTO_FUNDING_NAMESPACE,
+            cache_key=build_crypto_funding_cache_key(settings, limit=DEFAULT_CRYPTO_FUNDING_LIMIT),
+            ttl_seconds=ttl_seconds,
+        )
     if seeded_payload is not None:
         return normalize_crypto_funding_payload(seeded_payload, settings=settings, limit=limit, generated_at=ctx["utc_now_iso"]())
 

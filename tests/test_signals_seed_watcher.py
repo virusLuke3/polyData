@@ -102,6 +102,50 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("seeded", payload["cacheMode"])
         self.assertEqual("Seeded alpha", payload["items"][0]["title"])
 
+    def test_api_trims_default_signal_seeds_for_smaller_limits_without_live_build(self):
+        seeded_payloads = {
+            (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, signal_service.build_alpha_signal_cache_key(limit=8)): {
+                "items": [{"title": "Alpha 1"}, {"title": "Alpha 2"}],
+                "generatedAt": "seed",
+                "cacheMode": "seeded",
+            },
+            (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_WHALES, signal_service.build_whale_trades_cache_key(limit=14)): {
+                "items": [{"title": "Whale 1"}, {"title": "Whale 2"}],
+                "generatedAt": "seed",
+                "cacheMode": "seeded",
+            },
+            (signal_service.SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, signal_service.build_suspicious_trades_cache_key(limit=12)): {
+                "items": [{"title": "Suspicious 1"}, {"title": "Suspicious 2"}],
+                "generatedAt": "seed",
+                "cacheMode": "seeded",
+            },
+        }
+        ctx = {
+            "SIGNAL_RUNTIME_TTL_SECONDS": 45,
+            "SNAPSHOT_STORE": None,
+            "get_cached_runtime_payload": lambda namespace, key: None,
+            "set_cached_runtime_payload": lambda namespace, key, payload, ttl: payload,
+            "get_cached_json": lambda namespace, key: seeded_payloads.get((namespace, key)),
+            "threading": SimpleNamespace(Thread=object),
+            "app": SimpleNamespace(logger=SimpleNamespace(info=lambda *args, **kwargs: None, exception=lambda *args, **kwargs: None)),
+            "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
+        }
+        with patch.object(signal_service, "fetch_live_alpha_signal_payload", side_effect=AssertionError("live alpha should not run")), patch.object(
+            signal_service,
+            "fetch_live_whale_trades_payload",
+            side_effect=AssertionError("live whales should not run"),
+        ), patch.object(signal_service, "fetch_live_suspicious_trades_payload", side_effect=AssertionError("live suspicious should not run")):
+            alpha = signal_service.get_alpha_signal_snapshot(ctx, limit=1)
+            whales = signal_service.get_whale_trades_snapshot(ctx, limit=1)
+            suspicious = signal_service.get_suspicious_trades_snapshot(ctx, limit=1)
+
+        self.assertEqual(["Alpha 1"], [item["title"] for item in alpha["items"]])
+        self.assertEqual(["Whale 1"], [item["title"] for item in whales["items"]])
+        self.assertEqual(["Suspicious 1"], [item["title"] for item in suspicious["items"]])
+        self.assertEqual("seeded", alpha["cacheMode"])
+        self.assertEqual("seeded", whales["cacheMode"])
+        self.assertEqual("seeded", suspicious["cacheMode"])
+
     def test_alpha_live_payload_degrades_when_database_sources_fail(self):
         ctx = {
             "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
