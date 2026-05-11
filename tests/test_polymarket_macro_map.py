@@ -203,6 +203,20 @@ def test_missing_fields_do_not_break_normalization():
     assert payload["items"][0]["topOutcomes"] == []
 
 
+def test_short_macro_terms_do_not_match_inside_unrelated_words():
+    oilers_event = {
+        "id": "evt-nhl",
+        "title": "Will the Edmonton Oilers win the Stanley Cup?",
+        "markets": [{"question": "Will the Edmonton Oilers win the Stanley Cup?", "active": True}],
+    }
+    ctx = make_context(http_json_get=lambda *args, **kwargs: {"events": [oilers_event]})
+
+    payload = polymarket_macro_map_service.get_polymarket_macro_map_snapshot(ctx, limit=8)
+
+    assert payload["status"] == "empty"
+    assert payload["items"] == []
+
+
 def test_stale_snapshot_can_be_returned_by_cache_layer():
     stale = {
         "generatedAt": "2026-05-10T00:00:00Z",

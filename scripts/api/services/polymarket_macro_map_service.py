@@ -143,11 +143,19 @@ def _event_haystack(event: Dict[str, Any]) -> str:
     )
 
 
+def _matches_term(haystack: str, term: str) -> bool:
+    normalized = str(term or "").strip().lower()
+    if not normalized:
+        return False
+    pattern = r"(?<![a-z0-9])" + r"\s+".join(re.escape(part) for part in normalized.split()) + r"(?![a-z0-9])"
+    return re.search(pattern, haystack) is not None
+
+
 def _classify_event(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     haystack = _event_haystack(event)
     hits: List[Dict[str, Any]] = []
     for category in MACRO_CATEGORIES:
-        if any(term in haystack for term in category["terms"]):
+        if any(_matches_term(haystack, term) for term in category["terms"]):
             hits.append({key: category[key] for key in ("id", "label", "marketType")})
     return hits
 
@@ -262,7 +270,7 @@ def _search_terms(ctx: dict) -> tuple[str, ...]:
 
 def _event_matches_terms(event: Dict[str, Any], terms: tuple[str, ...]) -> bool:
     haystack = _event_haystack(event)
-    return any(term in haystack for term in terms)
+    return any(_matches_term(haystack, term) for term in terms)
 
 
 def _normalize_event(event: Dict[str, Any], categories: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
