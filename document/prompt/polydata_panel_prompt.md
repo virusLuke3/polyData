@@ -81,9 +81,9 @@
 必须遵守：
 
 1. 复用现有 `<Panel />` shell，不要另造外壳。
-2. panel 是固定高度的 dashboard module，不允许内容把 panel 撑高。
+2. panel 是固定高度的 dashboard module，不允许内容把 panel 撑高，也不允许为了容纳新增内容擅自把 `PanelDefinition.size` 改成 `tall` / `wide`；除非用户明确要求改版式尺寸，否则新增信息必须通过内部布局压缩、body 滚动、分组折叠或减少重复模块解决。
 3. body 独立滚动，优先使用细的深色 scrollbar。
-4. 信息密度要高，但层级要清楚；不能只是一段白字加几个绿数字。
+4. 信息密度要高，但层级要清楚；不能只是一段白字加几个绿数字。信息型 panel 的首屏必须有至少一个语义 icon / glyph / source mark 作为视觉锚点，icon 要服务于数据含义，例如 sanction shield、macro radar、calendar、oil drop、food basket，而不是装饰性图形。
 5. 先判断这个 panel 属于哪一类信息结构，再决定内部布局，例如：
    - feed / news list
    - signal / alert list

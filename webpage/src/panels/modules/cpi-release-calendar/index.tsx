@@ -5,7 +5,7 @@ import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimeP
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -116,9 +116,12 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
       dataPanelId="cpi-release-calendar"
     >
       <div className={`wm-intel-signal-band ${riskTone}`}>
-        <div>
-          <span>Event Risk</span>
-          <strong>{summary?.signal || 'CALENDAR WARMING'}</strong>
+        <div className="wm-intel-signal-main">
+          <PanelGlyph icon="calendar" tone={riskTone} />
+          <div className="wm-intel-signal-copy">
+            <span>Event Risk</span>
+            <strong>{summary?.signal || 'CALENDAR WARMING'}</strong>
+          </div>
         </div>
         <em>BLS / BEA / Fed calendar linked to PMKT baseline</em>
       </div>
@@ -187,7 +190,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Official CPI, PCE, NFP, and FOMC release timing with Polymarket implied CPI baseline.',
   defaultEnabled: true,
-  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeCpiReleaseCalendar(8),

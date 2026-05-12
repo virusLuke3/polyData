@@ -9,7 +9,7 @@ import type {
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { MarketImplicationStrip, SourceStack, signalToneClass } from '../macro-intel';
+import { MarketImplicationStrip, PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -164,9 +164,12 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
       dataPanelId="polymarket-macro-map"
     >
       <div className={`wm-intel-signal-band ${signalToneClass(summary?.signal)}`}>
-        <div>
-          <span>Signal</span>
-          <strong>{signalLabel(summary?.signal)}</strong>
+        <div className="wm-intel-signal-main">
+          <PanelGlyph icon="radar" tone={signalToneClass(summary?.signal)} />
+          <div className="wm-intel-signal-copy">
+            <span>Signal</span>
+            <strong>{signalLabel(summary?.signal)}</strong>
+          </div>
         </div>
         <em>Polymarket macro route / {summary?.activeCount ?? items.length} active</em>
       </div>
@@ -212,7 +215,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Active CPI, Fed, growth, labor, and energy market clusters from Polymarket.',
   defaultEnabled: true,
-  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimePolymarketMacroMap(12),

@@ -4,7 +4,7 @@ import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, Runtime
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 
 function badge(status?: string | null) {
   return String(status || '').toLowerCase() === 'ok' ? 'EIA' : 'PARTIAL';
@@ -56,9 +56,12 @@ function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: Runtime
       dataPanelId="energy-gasoline-shock"
     >
       <div className={`wm-intel-signal-band ${signalTone}`}>
-        <div>
-          <span>Headline CPI Driver</span>
-          <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
+        <div className="wm-intel-signal-main">
+          <PanelGlyph icon="energy" tone={signalTone} />
+          <div className="wm-intel-signal-copy">
+            <span>Headline CPI Driver</span>
+            <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
+          </div>
         </div>
         <em>EIA petroleum stack / CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
       </div>
@@ -105,7 +108,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',
   defaultEnabled: true,
-  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeEnergyGasolineShock(6),

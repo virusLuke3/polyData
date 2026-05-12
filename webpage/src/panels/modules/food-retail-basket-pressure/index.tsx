@@ -5,7 +5,7 @@ import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePoly
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -95,9 +95,12 @@ function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoo
       dataPanelId="food-retail-basket-pressure"
     >
       <div className={`wm-intel-signal-band ${signalTone}`}>
-        <div>
-          <span>Food CPI Driver</span>
-          <strong>{summary?.signal || 'FOOD WARMING'}</strong>
+        <div className="wm-intel-signal-main">
+          <PanelGlyph icon="basket" tone={signalTone} />
+          <div className="wm-intel-signal-copy">
+            <span>Food CPI Driver</span>
+            <strong>{summary?.signal || 'FOOD WARMING'}</strong>
+          </div>
         </div>
         <em>Official FRED/BLS food components / retail proxy optional</em>
       </div>
@@ -159,7 +162,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Official CPI food-component pressure for inflation market positioning.',
   defaultEnabled: true,
-  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeFoodRetailBasket(8),

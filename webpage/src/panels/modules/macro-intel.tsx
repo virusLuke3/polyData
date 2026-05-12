@@ -1,6 +1,8 @@
 import type { RuntimePolymarketMacroMapItem, RuntimePolymarketMacroMapPayload } from '@/types';
 import { formatRelative } from '../shared/formatters';
 
+type PanelGlyphName = 'geo' | 'radar' | 'calendar' | 'energy' | 'basket' | 'market';
+
 function numberLabel(value?: string | number | null) {
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
@@ -31,6 +33,59 @@ export function sourceStateTone(value?: string | null) {
   if (text === 'fallback' || text === 'partial' || text === 'degraded') return 'watch';
   if (text === 'error' || text === 'stale' || text === 'warming') return 'bad';
   return 'neutral';
+}
+
+export function PanelGlyph({ icon, tone = 'neutral' }: { icon: PanelGlyphName; tone?: string }) {
+  const common = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    strokeWidth: 1.8,
+  };
+  return (
+    <span className={`wm-intel-glyph ${tone}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        {icon === 'geo' ? (
+          <>
+            <path {...common} d="M12 3l7 3v5c0 4.6-2.7 7.8-7 10-4.3-2.2-7-5.4-7-10V6l7-3z" />
+            <path {...common} d="M8 11h8M12 7v8" />
+          </>
+        ) : null}
+        {icon === 'radar' ? (
+          <>
+            <circle {...common} cx="12" cy="12" r="7" />
+            <circle {...common} cx="12" cy="12" r="2" />
+            <path {...common} d="M12 12l5-5M4 20h16" />
+          </>
+        ) : null}
+        {icon === 'calendar' ? (
+          <>
+            <rect {...common} x="5" y="6" width="14" height="13" rx="2" />
+            <path {...common} d="M8 4v4M16 4v4M5 10h14M9 14h1M14 14h1" />
+          </>
+        ) : null}
+        {icon === 'energy' ? (
+          <>
+            <path {...common} d="M13 3C9 7.7 7 11.1 7 14a5 5 0 0010 0c0-2.9-1.5-5.4-4-11z" />
+            <path {...common} d="M11 17c1.8-.5 2.8-1.7 3-3.6" />
+          </>
+        ) : null}
+        {icon === 'basket' ? (
+          <>
+            <path {...common} d="M6 10h12l-1.4 9H7.4L6 10z" />
+            <path {...common} d="M9 10l3-5 3 5M8 14h8M9 17h6" />
+          </>
+        ) : null}
+        {icon === 'market' ? (
+          <>
+            <path {...common} d="M5 18V8M12 18V5M19 18v-7" />
+            <path {...common} d="M4 18h16M7 11l5-4 5 3" />
+          </>
+        ) : null}
+      </svg>
+    </span>
+  );
 }
 
 export function SourceStack({ sources, labels }: { sources?: Record<string, string>; labels?: Record<string, string> }) {

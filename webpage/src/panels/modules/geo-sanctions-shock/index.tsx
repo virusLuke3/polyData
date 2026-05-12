@@ -3,7 +3,7 @@ import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { MarketImplicationStrip, SourceStack, signalToneClass } from '../macro-intel';
+import { MarketImplicationStrip, PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -139,9 +139,12 @@ function GeoShockPanel({ payload }: {
     >
       <div className="wm-geo-shock-layout">
         <div className={`wm-intel-signal-band ${geoSignalTone(payload)}`}>
-          <div>
-            <span>World shock driver</span>
-            <strong>{signal}</strong>
+          <div className="wm-intel-signal-main">
+            <PanelGlyph icon="geo" tone={geoSignalTone(payload)} />
+            <div className="wm-intel-signal-copy">
+              <span>World shock driver</span>
+              <strong>{signal}</strong>
+            </div>
           </div>
           <em>OFAC / Federal Register / conflict fallback linked to macro risk</em>
         </div>
@@ -257,7 +260,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'world',
   description: 'Geopolitical shocks, sanctions changes, and linked macro-risk markets.',
   defaultEnabled: true,
-  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeGeoSanctionsShock(6),

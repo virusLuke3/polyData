@@ -3910,6 +3910,60 @@
   gap: 3px;
 }
 
+.wm-intel-signal-main {
+  display: grid !important;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px !important;
+}
+
+.wm-intel-signal-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.wm-intel-glyph {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(142, 151, 146, 0.28);
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.08), transparent 58%),
+    #141414;
+  color: #98a3ad;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wm-intel-glyph svg {
+  width: 20px;
+  height: 20px;
+}
+
+.wm-intel-glyph.hot {
+  border-color: rgba(215, 107, 79, 0.58);
+  color: #ee8a6c;
+  background: radial-gradient(circle at 50% 50%, rgba(215, 107, 79, 0.2), transparent 62%), #171312;
+}
+
+.wm-intel-glyph.watch {
+  border-color: rgba(209, 164, 68, 0.58);
+  color: #d6b65b;
+  background: radial-gradient(circle at 50% 50%, rgba(209, 164, 68, 0.18), transparent 62%), #171510;
+}
+
+.wm-intel-glyph.cool {
+  border-color: rgba(79, 169, 135, 0.58);
+  color: #76c7a4;
+  background: radial-gradient(circle at 50% 50%, rgba(79, 169, 135, 0.18), transparent 62%), #111716;
+}
+
+.wm-intel-glyph.neutral {
+  border-color: rgba(102, 124, 154, 0.48);
+  color: #8da4c6;
+}
+
 .wm-intel-signal-band span,
 .wm-intel-signal-band em,
 .wm-macro-source-stack,
