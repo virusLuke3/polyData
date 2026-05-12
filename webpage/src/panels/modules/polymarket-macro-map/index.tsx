@@ -9,7 +9,8 @@ import type {
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { MarketImplicationStrip, PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
+import { MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, signalToneClass } from '../macro-intel';
+import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -58,6 +59,16 @@ function shortCategoryLabel(category?: RuntimePolymarketMacroMapCategory | null)
   return (String(category?.label || 'MACRO').split('/')[0] || 'MACRO').trim().toUpperCase();
 }
 
+function categoryIcon(value?: string | null): PanelGlyphName {
+  const text = String(value || '').toLowerCase();
+  if (text.includes('energy') || text.includes('oil')) return 'energy';
+  if (text.includes('fed') || text.includes('rate')) return 'fed';
+  if (text.includes('cpi') || text.includes('inflation')) return 'cpi';
+  if (text.includes('growth') || text.includes('recession')) return 'growth';
+  if (text.includes('labor') || text.includes('jobs')) return 'labor';
+  return 'market';
+}
+
 function signalLabel(value?: string | null) {
   return String(value || 'WARMING')
     .replace(/oil\s*\/\s*energy/gi, 'ENERGY')
@@ -75,6 +86,7 @@ function MacroCategoryMatrix({ categories }: { categories: RuntimePolymarketMacr
     <div className="wm-macro-map-category-grid">
       {categories.map((category, index) => (
         <div key={category.id || category.label || index} className={`wm-macro-map-category ${categoryTone(index)}`}>
+          <RowGlyph icon={categoryIcon(category.label || category.id)} tone={signalToneClass(category.label || category.id)} label={shortCategoryLabel(category)} />
           <div>
             <span>{shortCategoryLabel(category)}</span>
             <strong>{category.activeCount ?? 0}</strong>
@@ -90,8 +102,10 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
   const topOutcome = item.topOutcomes?.[0];
   const category = item.categoryLabels?.[0] || 'Macro';
   const outcomeLabel = String(topOutcome?.label || '').trim();
+  const tone = signalToneClass(category);
   return (
-    <div className={`wm-macro-map-row ${signalToneClass(category)}`}>
+    <div className={`wm-macro-map-row ${tone}`}>
+      <RowGlyph icon={categoryIcon(category)} tone={tone} label={category} />
       <div className="wm-macro-map-row-main">
         <div className="wm-macro-map-meta">
           <span>{category.toUpperCase()}</span>
@@ -106,8 +120,8 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
         </div>
       </div>
       <div className="wm-macro-map-prob">
-        <span>{probabilityLabel(topOutcome?.yesPrice)}</span>
-        <em>{outcomeLabel && outcomeLabel.length <= 14 ? outcomeLabel : 'TOP YES'}</em>
+        <StatusBadge tone="market">{probabilityLabel(topOutcome?.yesPrice)}</StatusBadge>
+        <em>{outcomeLabel && outcomeLabel.length <= 14 ? outcomeLabel : 'YES'}</em>
       </div>
     </div>
   );
@@ -116,7 +130,7 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
 function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) {
   if (!items.length) {
     return (
-      <div className="wm-empty-state">
+      <div className="wm-empty-state wm-registry-empty">
         <strong>No macro market cluster found.</strong>
         <em>Gamma feed is available, but no active CPI/Fed/GDP/oil markets matched the current terms.</em>
       </div>
@@ -175,20 +189,20 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
       </div>
       <div className="wm-macro-map-summary">
         <div>
-          <span>PMKT Coverage</span>
+          <span><i>◎</i> PMKT Coverage</span>
           <strong>{summary?.activeCount ?? items.length}</strong>
         </div>
         <div>
-          <span>Top Catalyst</span>
+          <span><i>◷</i> Top Catalyst</span>
           <strong>{catalystLabel(payload)}</strong>
         </div>
         <div>
-          <span>Top Cluster</span>
+          <span><i>◎</i> Top Cluster</span>
           <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
       </div>
-      <MarketImplicationStrip items={topMarkets.length ? topMarkets : ['CPI', 'Fed', 'Growth']} />
       <MacroCategoryMatrix categories={categories} />
+      <MarketImplicationStrip items={topMarkets.length ? topMarkets : ['CPI', 'Fed', 'Growth']} />
       <MacroMarketList items={items} />
       <SourceStack sources={payload?.sources} labels={{ gammaEvents: 'Gamma', gammaSearch: 'Search' }} />
       <div className="wm-macro-map-footer">

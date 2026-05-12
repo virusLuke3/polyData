@@ -201,6 +201,327 @@ PMKT markets
 
 已经完成的前 4 个 panel 可以先保留当前 MVP，但后续要按这个矩阵逐个视觉和数据源升级。
 
+### 3.2 10 个 Panel 的前端视觉单独分析
+
+这一节只讨论前端呈现。目标不是把 panel 做得更花，而是让用户一眼抓住：
+
+```text
+这是什么信号？
+严重不严重？
+来源可信吗？
+和哪个 Polymarket 市场有关？
+下一步应该点哪里看细节？
+```
+
+WorldMonitor 的核心经验是：**小字号 mono 体系 + 暗底细边框 + 行级语义 icon + 右侧状态 badge + 表格化 registry + 少量职责明确的颜色**。下面 10 个 panel 都应遵守固定 panel 尺寸，不允许为了内容多就改成 tall / wide；新增信息优先通过内部滚动、表格列、drawer 和分组 chip 解决。
+
+#### 3.2.1 `polymarket-macro-map`
+
+前端定位：宏观市场路由器，不是指标面板。它应该像 WorldMonitor 的 registry 一样，让用户快速扫到当前有哪些可交易主题。
+
+推荐布局：
+
+```text
+HEADER: PMKT MACRO MAP        ?   LIVE   17
+
+[radar icon tile] SIGNAL
+                  ENERGY / FED CLUSTER ACTIVE
+                  PMKT ROUTE / 17 ACTIVE
+
+chips: CPI / FED / ENERGY / LABOR / GROWTH
+
+registry rows:
+  icon  market title / category        vol / close      odds badge
+  icon  top catalyst                   time-to-event    move badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | title 11px uppercase；row title 11-12px semibold；meta 9px uppercase dim |
+| icon | 使用 macro radar / market route / category glyph；每一行都要有 category icon |
+| 颜色 | purple 只给 PMKT odds / market gap；amber 给 event risk；red/green 给 odds move |
+| 边框 | hero signal 用一条左侧蓝紫色边框；market rows 用极淡分割线 |
+| 分布 | 上方一条 signal strip，下方是 registry table；不要堆 4 个大 KPI 卡片 |
+| 重点 | 右侧固定放 odds / volume / time-to-close，用户扫右列即可判断下注价值 |
+
+#### 3.2.2 `cpi-release-calendar`
+
+前端定位：事件时钟 + 官方 release registry。它应该参考 WorldMonitor 的 Economic Calendar，而不是普通日期卡片。
+
+推荐布局：
+
+```text
+HEADER: CPI CALENDAR          ?   OFFICIAL   8
+
+[calendar icon tile] EVENT RISK HIGH
+                     NEXT CPI / 12H / PMKT BASELINE 0.34
+
+tabs/chips: CPI / PCE / NFP / FOMC
+
+timeline table:
+  flag/source icon  event name          date/time       impact dot
+  PMKT icon         linked market       baseline        odds badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | 日期数字可稍大 13-14px；event title 11-12px；source/meta 9px |
+| icon | calendar、BLS、BEA、Fed source mark；行首可用 official source glyph |
+| 颜色 | blue=official source；amber=event risk / imminent；purple=PMKT baseline |
+| 边框 | timeline 行只用底部分割线；即将发生事件左侧加 amber accent border |
+| 分布 | 不要四个大日期卡片平铺；改成 timeline registry，日期列固定靠右 |
+| 重点 | countdown / impact dot / PMKT baseline 必须在稳定位置出现 |
+
+#### 3.2.3 `energy-gasoline-shock`
+
+前端定位：headline CPI energy driver，不是 EIA 数据表。它应该像 Fuel Prices + Energy Disruptions 的混合体。
+
+推荐布局：
+
+```text
+HEADER: ENERGY / GAS          ?   EIA   5
+
+[oil drop icon tile] HEADLINE CPI HOTTER
+                     EIA PETROLEUM STACK / CPI IMPULSE +0.035PP
+
+driver rows:
+  oil icon       WTI crude        109.76      +9.87W badge
+  gas pump icon  US gasoline      4.581       +0.32W badge
+  diesel icon    US diesel        5.640       +0.29W badge
+
+event/source log:
+  source badge   EIA PUBLIC XLS / DAILY       fresh badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | 价格使用 tabular nums 16-18px；商品名 11px；来源 9px uppercase |
+| icon | oil drop、gas pump、diesel / barrel；每个能源品种必须有独立 glyph |
+| 颜色 | coral/red=headline inflation impulse；green=energy cooling；blue=EIA official |
+| 边框 | hero strip 左侧使用 energy coral border；行分割保持很淡 |
+| 分布 | 第一屏显示 3-5 个关键能源 driver，不要把全部描述塞进 hero |
+| 重点 | CPI impulse 和 weekly delta 是重点，不能藏在副标题里 |
+
+#### 3.2.4 `food-retail-basket-pressure`
+
+前端定位：food CPI component pressure。它应该参考 WorldMonitor Consumer Prices 的 overview / categories / movers / health，但保持固定 panel 高度。
+
+推荐布局：
+
+```text
+HEADER: FOOD / RETAIL         ?   FRED/BLS   5
+
+[basket icon tile] FOOD PRESSURE STABLE
+                   OFFICIAL FOOD CPI COMPONENTS / COVERAGE 5/5
+
+tabs/chips: overview / movers / health
+
+mover rows:
+  food icon      eggs / meat / fruit       MoM badge       YoY
+  source icon    FRED/BLS series           fresh badge     updated
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | component name 11px；MoM/YoY 数值 tabular nums；source 9px dim |
+| icon | basket、egg/meat/fruit/grain 等 component glyph；source health glyph |
+| 颜色 | red=food pressure；green=disinflation；gray=retail proxy missing/stale |
+| 边框 | category mover 行使用细分割线；coverage / freshness 用小 badge，不用大卡片 |
+| 分布 | top movers 比 summary 更重要；summary 放 hero，列表承载细节 |
+| 重点 | 明确 official layer 和 retail proxy layer，不能让用户误以为零售 proxy 等于 CPI |
+
+#### 3.2.5 `supply-tariff-import-watch`
+
+前端定位：policy event log + goods inflation pass-through。它应该像 Global Fuel Shortage Registry：事件、来源、证据、严重性一行扫完。
+
+推荐布局：
+
+```text
+HEADER: SUPPLY / TARIFF       ?   POLICY   9
+
+[tariff icon tile] GOODS PRESSURE RISING
+                   FR / USTR / IMPORT PRICE LINKED
+
+filter chips: tariff / import prices / supply / China
+
+event registry:
+  policy icon    Section 301 notice        date       severity chip
+  import icon    import price MoM          value      pressure badge
+  PMKT icon      tariff market             odds       gap badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | event title 11px semibold；legal/source meta 9px uppercase |
+| icon | tariff shield、ship/container、Federal Register/source mark、PMKT mark |
+| 颜色 | red=tariff/goods pressure；blue=official notice；purple=PMKT trade market |
+| 边框 | policy events 用左侧 red/amber border 表达 severity |
+| 分布 | 不要只列新闻标题；必须有 event type、source、date、severity 列 |
+| 重点 | policy action 和 price pass-through 是两条不同视觉轨道 |
+
+#### 3.2.6 `shelter-rent-oer-pressure`
+
+前端定位：core CPI sticky detector。它不应该做成 housing 数据卡，而应该突出 official CPI shelter 与 leading rent 的滞后桥。
+
+推荐布局：
+
+```text
+HEADER: SHELTER / RENT        ?   OFFICIAL+LEAD   6
+
+[home icon tile] CORE STICKY
+                 OER / RENT LAG BRIDGE / LEADING RENT COOLING
+
+bridge rows:
+  official icon   OER / rent CPI        YoY / MoM       sticky badge
+  leading icon    Zillow / FHFA         latest          lead badge
+  PMKT icon       core CPI / Fed link   odds            gap badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | OER/Rent 数值 15-16px；bridge label 9px uppercase |
+| icon | house、rent receipt、lag arrow、official/leading source mark |
+| 颜色 | red=core sticky；green=shelter cooling；amber=lag uncertainty |
+| 边框 | official data 与 leading proxy 使用不同左边框颜色，避免混淆口径 |
+| 分布 | 做成 lag bridge list，而不是 metric grid；每行说明 official/proxy |
+| 重点 | `official CPI shelter` 和 `leading rent proxy` 必须视觉分层 |
+
+#### 3.2.7 `labor-wage-services-pressure`
+
+前端定位：services inflation + Fed reaction pressure。它应该像 compact status matrix，而不是就业数据汇总。
+
+推荐布局：
+
+```text
+HEADER: LABOR / WAGES         ?   BLS/DOL   7
+
+[labor icon tile] FED HAWKISH
+                  WAGE / SERVICES PRESSURE ACTIVE
+
+matrix rows:
+  payroll icon   NFP              actual / trend      strength badge
+  wage icon      AHE / ECI         MoM/QoQ             sticky badge
+  claims icon    initial claims    level / delta       cooling badge
+  PMKT icon      Fed / unemployment market             odds gap
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | key labor prints 13-15px tabular nums；row meta 9px |
+| icon | worker/payroll、wage, claims, services, Fed |
+| 颜色 | red=hawkish wage pressure；green=labor cooling；amber=mixed |
+| 边框 | wage/services rows 可用 red accent，claims cooling 用 green accent |
+| 分布 | 使用两列 compact matrix 或 table；不要做大段解释文字 |
+| 重点 | 输出 `services sticky` / `Fed hawkish`，不是只报 NFP 数字 |
+
+#### 3.2.8 `growth-demand-recession-tracker`
+
+前端定位：demand pressure and recession odds validator。它应该把 growth 数据翻译成 soft landing / slowdown / overheating。
+
+推荐布局：
+
+```text
+HEADER: GROWTH / DEMAND       ?   NOWCAST   6
+
+[pulse icon tile] SOFT LANDING
+                  GDPNow / RETAIL SALES / RECESSION SCORE
+
+demand registry:
+  GDP icon       GDPNow            SAAR       revision badge
+  retail icon    retail sales      MoM        demand badge
+  factory icon   industrial prod   MoM        slowdown badge
+  PMKT icon      recession/GDP     odds       gap badge
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | GDPNow/recession score 15-16px；component rows 11px |
+| icon | GDP pulse, retail cart, factory, recession warning, PMKT |
+| 颜色 | green=soft landing；red=overheating；amber=slowdown/mixed；purple=PMKT odds |
+| 边框 | signal strip 用 green/amber/red 随状态变化 |
+| 分布 | score + registry，不要只做 GDPNow 一个大数字 |
+| 重点 | 让用户知道这个 panel 主要影响 recession/GDP/Fed，不是直接预测 CPI bucket |
+
+#### 3.2.9 `inflation-nowcast`
+
+前端定位：CPI/PCE bucket bridge。它是整条链的核心，必须最像 trading terminal。
+
+推荐布局：
+
+```text
+HEADER: INFLATION NOWCAST     ?   FED/MODEL   8
+
+[gauge icon tile] HOT HEADLINE / CORE STABLE
+                  UPDATED / NEXT CPI / CONFIDENCE
+
+threshold ladder:
+  CPI MoM       nowcast       PMKT threshold       gap badge
+  Core CPI      nowcast       PMKT threshold       gap badge
+  PCE           nowcast       PMKT threshold       gap badge
+
+driver strip:
+  energy / food / shelter / labor contribution chips
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | nowcast values 16-18px tabular nums；threshold labels 9px uppercase |
+| icon | gauge / thermometer、headline/core split、PMKT bucket mark |
+| 颜色 | red=hot bucket；green=cool bucket；purple=market gap；blue=model/source |
+| 边框 | threshold rows 用 left border 表示 hot/cool；PMKT gap 用 purple chip |
+| 分布 | 不要普通 KPI grid；用 threshold ladder 显示 “是否跨 bucket” |
+| 重点 | `nowcast vs PMKT threshold` 必须是第一屏焦点 |
+
+#### 3.2.10 `fed-rates-polymarket-gap`
+
+前端定位：macro signal vs Polymarket price gap。它应该像 market discrepancy registry，而不是 rates quote 面板。
+
+推荐布局：
+
+```text
+HEADER: FED / PMKT GAP        ?   MARKET   10
+
+[Fed icon tile] FED CUT RICH
+                MACRO SIGNAL VS PMKT ODDS
+
+gap registry:
+  Fed icon      June decision      PMKT odds      model signal      gap badge
+  CPI icon      hot CPI bucket     PMKT odds      nowcast           gap badge
+  growth icon   recession market   PMKT odds      growth score      gap badge
+
+rates strip:
+  2Y / 10Y / curve / SOFR small quote row
+```
+
+视觉要求：
+
+| 元素 | 设计 |
+|---|---|
+| 字体 | odds/gap 15-17px tabular nums；market title 11px |
+| icon | Fed building, rates curve, PMKT, CPI, recession |
+| 颜色 | purple=PMKT gap；red=hawkish/hot；green=dovish/cool；amber=uncertain |
+| 边框 | gap rows 用 purple left border；宏观方向用 row badge，不要整块变色 |
+| 分布 | gap registry 在上，rates quote strip 在下；rates 不应喧宾夺主 |
+| 重点 | 显示 “PMKT rich/cheap/inline”，而不是只显示收益率 |
+
 ---
 
 ## Panel 1: Polymarket Macro Market Map

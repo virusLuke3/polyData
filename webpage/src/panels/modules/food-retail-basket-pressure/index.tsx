@@ -5,7 +5,8 @@ import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePoly
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -48,14 +49,22 @@ function componentCode(item: RuntimeFoodBasketItem) {
   return String(item.seriesId || 'CPI').slice(0, 8).toUpperCase();
 }
 
+function componentIcon(item: RuntimeFoodBasketItem): PanelGlyphName {
+  const key = String(item.key || item.label || '').toLowerCase();
+  if (key.includes('egg') || key.includes('meat') || key.includes('fruit') || key.includes('food')) return 'food';
+  return 'basket';
+}
+
 function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
+  const tone = toneClass(item.momPct);
   return (
-    <div className={`wm-food-basket-row ${toneClass(item.momPct)}`}>
+    <div className={`wm-food-basket-row ${tone}`}>
+      <RowGlyph icon={componentIcon(item)} tone={tone === 'flat' ? 'neutral' : tone} label={item.label || 'Food component'} />
       <div>
         <span>{componentCode(item)}</span>
         <strong>{item.label || 'Food CPI component'}</strong>
       </div>
-      <strong>{pctLabel(item.momPct)}</strong>
+      <StatusBadge tone={tone === 'flat' ? 'neutral' : tone}>{pctLabel(item.momPct)}</StatusBadge>
       <em>{pctLabel(item.yoyPct)} Y</em>
     </div>
   );
@@ -104,24 +113,10 @@ function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoo
         </div>
         <em>Official FRED/BLS food components / retail proxy optional</em>
       </div>
-      <div className={`wm-food-basket-hero ${summary?.bias || 'neutral'}`}>
-        <div>
-          <span>Signal</span>
-          <strong>{summary?.signal || 'FOOD WARMING'}</strong>
-        </div>
-        <div>
-          <span>Pressure</span>
-          <strong>{pctLabel(summary?.pressureScore)}</strong>
-        </div>
-        <div>
-          <span>Coverage</span>
-          <strong>{summary?.coverage ?? items.length}</strong>
-        </div>
-      </div>
-      <div className="wm-food-basket-top">
-        <span>Top mover</span>
-        <strong>{topMover?.label || 'Awaiting CPI component data'}</strong>
-        <em>{topMover ? `${pctLabel(topMover.momPct)} MoM / ${indexLabel(topMover.value)} idx` : '--'}</em>
+      <div className="wm-food-basket-metrics">
+        <StatusBadge tone={signalTone}>{summary?.signal || 'FOOD WARMING'}</StatusBadge>
+        <StatusBadge tone={Number(summary?.pressureScore) > 0 ? 'hot' : Number(summary?.pressureScore) < 0 ? 'cool' : 'neutral'}>{`PRESSURE ${pctLabel(summary?.pressureScore)}`}</StatusBadge>
+        <StatusBadge tone="official">{`COVERAGE ${summary?.coverage ?? items.length}`}</StatusBadge>
       </div>
       {items.length ? (
         <div className="wm-food-basket-grid">
@@ -133,6 +128,11 @@ function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoo
           <em>FRED/BLS component data has not been seeded yet.</em>
         </div>
       )}
+      <div className="wm-food-basket-top">
+        <span>Top mover</span>
+        <strong>{topMover?.label || 'Awaiting CPI component data'}</strong>
+        <em>{topMover ? `${pctLabel(topMover.momPct)} MoM / ${indexLabel(topMover.value)} idx` : '--'}</em>
+      </div>
       <div className="wm-food-basket-proxy-note">
         <span>Source Stack</span>
         <strong>Official CPI food components active</strong>

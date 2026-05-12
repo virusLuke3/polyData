@@ -5,7 +5,8 @@ import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimeP
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -26,6 +27,14 @@ function eventKindLabel(kind?: string | null) {
   if (value === 'nfp') return 'NFP';
   if (value === 'fomc') return 'FOMC';
   return 'MACRO';
+}
+
+function eventIcon(kind?: string | null): PanelGlyphName {
+  const value = String(kind || '').toLowerCase();
+  if (value === 'cpi' || value === 'pce') return 'cpi';
+  if (value === 'fomc') return 'fed';
+  if (value === 'nfp') return 'labor';
+  return 'calendar';
 }
 
 function dateShortLabel(value?: string | null) {
@@ -64,10 +73,12 @@ function EventMini({ label, item }: { label: string; item?: RuntimeCpiCalendarIt
 }
 
 function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
+  const kind = String(item.kind || '').toLowerCase();
   return (
-    <div className={`wm-cpi-calendar-row ${String(item.kind || '').toLowerCase()}`}>
+    <div className={`wm-cpi-calendar-row ${kind}`}>
+      <RowGlyph icon={eventIcon(item.kind)} tone={kind === 'fomc' ? 'watch' : kind === 'cpi' ? 'cool' : 'neutral'} label={eventKindLabel(item.kind)} />
       <div className="wm-cpi-calendar-row-time">
-        <span>{eventKindLabel(item.kind)}</span>
+        <StatusBadge tone={kind === 'cpi' ? 'official' : 'neutral'}>{eventKindLabel(item.kind)}</StatusBadge>
         <strong>{dateShortLabel(item.releaseAt)}</strong>
       </div>
       <div className="wm-cpi-calendar-row-main">
@@ -78,7 +89,7 @@ function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
           <span>{item.marketRelevance || 'Macro market relevance'}</span>
         </div>
       </div>
-      <em>{formatRelative(item.releaseAt)}</em>
+      <StatusBadge tone={kind === 'fomc' ? 'watch' : 'official'}>{formatRelative(item.releaseAt)}</StatusBadge>
     </div>
   );
 }
@@ -125,11 +136,7 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
         </div>
         <em>BLS / BEA / Fed calendar linked to PMKT baseline</em>
       </div>
-      <div className={`wm-cpi-calendar-hero ${summary?.risk || 'unknown'}`}>
-        <div>
-          <span>Signal</span>
-          <strong>{summary?.signal || 'CALENDAR WARMING'}</strong>
-        </div>
+      <div className={`wm-cpi-calendar-hero compact ${summary?.risk || 'unknown'}`}>
         <div>
           <span>Time To Event</span>
           <strong>{compactHours(summary?.hoursToEvent)}</strong>
@@ -139,18 +146,6 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
           <strong>{probabilityLabel(summary?.baselineProbability)}</strong>
         </div>
       </div>
-      <div className="wm-cpi-calendar-mini-grid">
-        <EventMini label="Next CPI" item={summary?.nextCpi} />
-        <EventMini label="Next PCE" item={summary?.nextPce} />
-        <EventMini label="NFP" item={summary?.nextNfp} />
-        <EventMini label="FOMC" item={summary?.nextFomc} />
-      </div>
-      <div className="wm-cpi-calendar-baseline">
-        <span>CONSENSUS</span>
-        <strong>{payload?.consensus?.status === 'optional-unavailable' ? 'Optional / paid-grade source not configured' : payload?.consensus?.label || 'Unavailable'}</strong>
-        <em>{payload?.baseline?.label || 'No active CPI Polymarket baseline'}</em>
-      </div>
-      <MarketImplicationStrip items={['CPI bucket', 'PCE/Core PCE', 'Fed decision', `${probabilityLabel(summary?.baselineProbability)} PMKT baseline`]} />
       {items.length ? (
         <div className="wm-cpi-calendar-list">
           {items.map((item, index) => (
@@ -163,6 +158,18 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
           <em>Official release sources are configured, but no upcoming CPI/PCE/FOMC/NFP rows are cached yet.</em>
         </div>
       )}
+      <MarketImplicationStrip items={['CPI bucket', 'PCE/Core PCE', 'Fed decision', `${probabilityLabel(summary?.baselineProbability)} PMKT baseline`]} />
+      <div className="wm-cpi-calendar-mini-grid">
+        <EventMini label="Next CPI" item={summary?.nextCpi} />
+        <EventMini label="Next PCE" item={summary?.nextPce} />
+        <EventMini label="NFP" item={summary?.nextNfp} />
+        <EventMini label="FOMC" item={summary?.nextFomc} />
+      </div>
+      <div className="wm-cpi-calendar-baseline">
+        <span>CONSENSUS</span>
+        <strong>{payload?.consensus?.status === 'optional-unavailable' ? 'Optional / paid-grade source not configured' : payload?.consensus?.label || 'Unavailable'}</strong>
+        <em>{payload?.baseline?.label || 'No active CPI Polymarket baseline'}</em>
+      </div>
       <LinkedMarketRegistry title="PMKT release markets" items={linkedMarkets} emptyLabel="Awaiting macro map" />
       <SourceStack sources={payload?.sources} labels={{ blsCpi: 'BLS CPI', blsEmployment: 'BLS NFP', bea: 'BEA', fomc: 'Fed' }} />
       <div className="wm-cpi-calendar-footer">

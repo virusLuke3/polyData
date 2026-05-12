@@ -164,6 +164,220 @@
 - 亮白默认 scrollbar
 - 因固定列宽导致文字错位、重叠、横向滚动
 
+### 4.2 WorldMonitor 风格可复用视觉系统
+
+新增或改动 panel 时，必须先参考 WorldMonitor 的真实前端实现方式，但不要照抄某个具体业务 panel。要吸收的是它的视觉系统：
+
+```text
+小字号 mono 体系
+暗底细边框
+行级语义 icon
+右侧状态 badge
+表格化 / registry 化扫描结构
+少量但职责明确的颜色
+点击 row 后用 drawer 承载细节
+```
+
+#### 4.2.1 字体层级
+
+panel 内字体必须有明确层级，不允许所有文字都使用同样大小和字重。
+
+推荐层级：
+
+| 用途 | 建议 |
+|---|---|
+| panel title | 11-12px, uppercase, 600-700, letter-spacing 0.08em 左右 |
+| hero signal | 13-16px, 700, 只给最重要的一句话 |
+| row title | 11-12px, 600, 可读但不夸张 |
+| row meta / source | 9-10px, uppercase, dim color, letter-spacing 0.04-0.08em |
+| numeric value | 14-18px, tabular-nums, 600-700 |
+| badge / chip | 8-10px, uppercase, 700 |
+| table header | 9px, uppercase, dim color |
+
+要求：
+
+- 数值必须使用 `font-variant-numeric: tabular-nums`，保证扫描稳定。
+- 不要把正文、meta、badge 全部做成粗体。
+- 不要用 hero 级字号塞进 compact row 或 chip。
+- 中文界面也要保留清晰层级，不要因为中文更占宽就加大字号。
+
+#### 4.2.2 Panel 边框和容器
+
+panel shell 必须克制，像情报终端而不是 landing card。
+
+推荐风格：
+
+```text
+panel background: 深色 surface
+outer border: 1px solid subtle border
+header background: 极轻 overlay
+header bottom border: 1px solid subtle border
+body padding: 6-10px
+row divider: rgba(255,255,255,0.04-0.08)
+hover: rgba(255,255,255,0.03-0.06)
+border radius: 0-6px，避免大圆角
+scrollbar: 4px 深色细滚动条
+```
+
+要求：
+
+- 边框用于分隔信息，不用于装饰堆叠。
+- 不要卡片套卡片。只有 feed item、modal、drawer、可重复实体项才适合局部卡片。
+- hero signal 可以使用左侧或顶部 accent border，但不要整块铺高饱和背景。
+- panel 内容超出固定高度时，body 内部滚动，不改变 panel 尺寸。
+
+#### 4.2.3 Icon / Glyph 规则
+
+icon 不是装饰，必须成为分类编码。每个 panel 至少定义一套稳定的语义 icon/glyph 映射。
+
+推荐做法：
+
+| 类型 | 示例 |
+|---|---|
+| source icon | BLS, BEA, Fed, EIA, FRED, Treasury, Federal Register, PMKT |
+| event icon | calendar, release, policy notice, shock, sanction, Fed meeting |
+| category icon | CPI, core, food, energy, shelter, labor, growth, rates |
+| market icon | PMKT odds, orderbook, volume, expiry |
+| status icon | official, live, cached, stale, degraded, watch |
+
+要求：
+
+- hero 区需要一个明显 icon tile，作为第一眼视觉锚点。
+- registry/list/table 的每一行也应该有 row-level icon，帮助快速分类。
+- icon 与颜色要绑定语义，例如 EIA/official 用蓝色，PMKT 用紫色，hot/risk 用红或橙。
+- 不要只在标题旁放一个 icon 后，正文继续变成纯文字墙。
+- icon 尺寸要克制，通常 14-18px 足够；hero icon tile 可略大但不要喧宾夺主。
+- 优先使用项目已有 icon / lucide / 现有 glyph 风格；不要临时混用多个视觉体系。
+
+#### 4.2.4 颜色语义
+
+颜色必须表达状态，不是装饰。
+
+统一语义：
+
+| 颜色职责 | 含义 |
+|---|---|
+| red / coral | hot CPI, inflation up, hawkish, critical risk, upside shock |
+| green / teal | cool CPI, disinflation, dovish, ok, positive freshness |
+| amber / yellow | watch, mixed, event risk, uncertainty, stale warning |
+| blue | official, verified source, model/info |
+| purple | Polymarket odds, market gap, trading layer |
+| gray | degraded, stale, fallback, unavailable, neutral meta |
+
+要求：
+
+- 一个 panel 不能只靠绿色表达所有状态。
+- 不要大面积使用高饱和背景；高饱和色只用于 badge、delta、accent border、icon glow。
+- 同一语义在不同 panel 内保持一致，比如 PMKT 永远偏 purple，official 永远偏 blue。
+- 数据缺失 / degraded 只能用 gray / amber，不能用 red 伪装成真实风险信号。
+- trend delta 要有方向色：hot/upside 与 cool/downside 分开表达。
+
+#### 4.2.5 信息分布模型
+
+实现前必须先判断 panel 的主体结构，不允许所有 panel 默认做成厚卡片。
+
+常用结构：
+
+| 场景 | 首选结构 |
+|---|---|
+| 多个市场 / 事件 / source / entity | registry table / compact list |
+| 价格、odds、spread、delta | quote row / market row |
+| release / event | timeline / calendar list |
+| source 状态 | health matrix |
+| 少量核心 driver | driver strip + ranked rows |
+| 需要解释细节 | row click drawer |
+
+推荐固定骨架：
+
+```text
+HEADER: title + ? + data badge + count/action
+
+HERO SIGNAL STRIP:
+  icon tile + primary signal + source/confidence/market implication
+
+FILTER / CATEGORY CHIPS:
+  3-6 个以内，横向可滚动但不能产生页面横向滚动
+
+REGISTRY / TABLE:
+  icon + title/meta | value/date/source | status/odds badge
+
+DETAIL DRAWER:
+  点击 row 后覆盖 panel body，展示 source、method、timeline、evidence
+```
+
+要求：
+
+- 单个 panel 必须有一个第一眼焦点，不能所有模块同等重要。
+- 右侧列应稳定放数值、odds、delta、status，让用户能扫右列。
+- 列表行比 KPI 卡片更适合高密度情报。
+- 细节文字放 drawer，不要塞进主视图。
+- 如果必须用 grid，grid 中每个 cell 应有不同职责，不要只是平均展示几个大数字。
+
+#### 4.2.6 Badge / Chip / 状态件
+
+所有状态必须尽量状态件化，而不是裸文字。
+
+必须设计的状态件：
+
+```text
+severity badge: HOT / COOL / WATCH / NEUTRAL / CRITICAL
+source badge: BLS / BEA / FED / EIA / FRED / PMKT / FR
+freshness badge: LIVE / SEEDED / CACHED / STALE / DEGRADED
+market badge: odds / spread / volume / close time
+evidence badge: OFFICIAL / PROXY / FALLBACK / OPTIONAL
+```
+
+设计约束：
+
+- badge 高度要小，通常 padding 1-3px 6-8px。
+- badge 字号 8-10px，uppercase，semibold/bold。
+- 圆角 2-10px，避免过大的 pill 破坏密度。
+- 不要每行塞太多 badge；通常 1 个主状态 + 1 个来源足够。
+- badge 颜色必须来自语义，不要随机配色。
+
+#### 4.2.7 Macro / CPI Panel 专用视觉映射
+
+开发 CPI macro panel 时，必须固定以下视觉语言：
+
+| 主题 | icon/glyph 方向 | 主色 |
+|---|---|---|
+| CPI / inflation | gauge / thermometer / CPI mark | red/green by hot/cool |
+| Core / services | core ring / service mark | red/amber |
+| Energy | oil drop / gas pump / barrel | coral/red or green |
+| Food | basket / food component glyph | amber/red/green |
+| Shelter | home / rent receipt / lag arrow | red/green/amber |
+| Labor | worker / wage / claims / services | red/green/amber |
+| Growth | pulse / retail cart / factory | green/red/amber |
+| Fed / rates | Fed building / curve / rate ladder | red/green/blue |
+| Policy / tariff | shield / document / container ship | red/blue/amber |
+| Polymarket | PMKT / market route / odds chip | purple |
+
+每个 CPI macro panel 的主视图至少包含：
+
+```text
+1 个 hero semantic icon
+1 条 primary signal
+2-5 条 ranked/registry rows
+1 个 source/freshness 状态
+1 个 PMKT 关联位，如果该 panel 已接入 market layer
+```
+
+#### 4.2.8 WorldMonitor 级视觉验收口径
+
+截图验收时，除了检查 overflow，还必须人工或自动判断：
+
+- 第一眼是否能看出 panel 的主要信号。
+- 是否存在 row-level icon，而不是只有标题 icon。
+- 是否至少有 2-3 种语义颜色承担不同职责。
+- 是否存在明确的 status badge / source badge。
+- 是否有稳定扫描路径：左侧对象，中间 meta，右侧数值或状态。
+- 是否有过多同级文字导致视觉疲劳。
+- 是否把细节解释放进 drawer / 展开区，而不是主视图文字墙。
+- 是否保持固定 panel 尺寸，没有因为内容变多改 `PanelDefinition.size`。
+- 是否符合暗底、细边框、紧凑间距、低圆角的 dashboard module 风格。
+
+如果截图看起来仍然是“黑底白字文字墙”，即使 build 和 DOM overflow 都通过，也不能算完成。
+
 ## 5. 数据源与配置要求
 
 先确认 `{data_source}`：

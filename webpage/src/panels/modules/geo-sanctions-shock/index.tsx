@@ -52,6 +52,14 @@ function kindLabel(kind?: string | null) {
   return 'SIGNAL';
 }
 
+function kindGlyph(kind?: string | null) {
+  const normalized = String(kind || '').toLowerCase();
+  if (normalized === 'sanction') return 'S';
+  if (normalized === 'notice') return 'N';
+  if (normalized === 'conflict') return '!';
+  return 'G';
+}
+
 function formatAge(value?: string | null) {
   const text = String(value || '').trim();
   if (!text) return '--';
@@ -149,52 +157,30 @@ function GeoShockPanel({ payload }: {
           <em>OFAC / Federal Register / conflict fallback linked to macro risk</em>
         </div>
 
-        <section className="wm-geo-shock-summary-grid">
-          <article className="wm-geo-shock-metric">
-            <span>HOTSPOTS</span>
-            <strong>{summary?.hotspotCount ?? 0}</strong>
-          </article>
-          <article className="wm-geo-shock-metric">
-            <span>NEW SANCTIONS</span>
-            <strong>{summary?.newSanctionsCount ?? 0}</strong>
-          </article>
-          <article className="wm-geo-shock-metric wide">
-            <span>TARGETS</span>
-            <strong>{upperMetric(summary?.targetSummary || 'MONITORING')}</strong>
-          </article>
-          <article className="wm-geo-shock-metric tone-critical">
-            <span>NUCLEAR RISK</span>
-            <strong>{upperMetric(toneLabel(summary?.nuclearRisk))}</strong>
-          </article>
-          <article className="wm-geo-shock-metric tone-warning">
-            <span>MILITARY FEED</span>
-            <strong>{upperMetric(summary?.militaryFeed || 'standby')}</strong>
-          </article>
-        </section>
-
-        <MarketImplicationStrip items={['Sanctions', 'Energy risk', 'Safe-haven flow', 'CPI tail risk']} />
-
-        <section className="wm-geo-shock-section">
+        <section className="wm-geo-shock-section compact">
           <header className="wm-geo-shock-section-header">
             <span>LATEST SHOCKS</span>
           </header>
           <div className="wm-geo-shock-feed">
-            {items.length ? items.slice(0, 5).map((item) => {
+            {items.length ? items.slice(0, 3).map((item) => {
               const sevClass = severityClass(item.severity);
               const targetLabel = upperMetric(item.targetLabels?.[0] || item.country || '');
               return (
                 <article key={item.id || `${item.headline}-${item.occurredAt}`} className={`wm-geo-shock-row ${sevClass}`}>
-                  <div className="wm-geo-shock-row-top">
-                    <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
-                    <span className="wm-geo-shock-source">{kindLabel(item.kind)} / {upperMetric(item.source || 'SOURCE')}</span>
-                    <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
-                  </div>
-                  <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
-                  <div className="wm-geo-shock-row-bottom">
-                    <span className="wm-geo-shock-summary">{item.summary || 'No detail yet.'}</span>
-                    {targetLabel && targetLabel !== '--' ? (
-                      <span className="wm-geo-shock-target-mini">{targetLabel}</span>
-                    ) : null}
+                  <span className={`wm-row-glyph ${sevClass}`}>{kindGlyph(item.kind)}</span>
+                  <div className="wm-geo-shock-row-main">
+                    <div className="wm-geo-shock-row-top">
+                      <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
+                      <span className="wm-geo-shock-source">{kindLabel(item.kind)} / {upperMetric(item.source || 'SOURCE')}</span>
+                      <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
+                    </div>
+                    <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
+                    <div className="wm-geo-shock-row-bottom">
+                      <span className="wm-geo-shock-summary">{item.summary || 'No detail yet.'}</span>
+                      {targetLabel && targetLabel !== '--' ? (
+                        <span className="wm-geo-shock-target-mini">{targetLabel}</span>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               );
@@ -203,6 +189,31 @@ function GeoShockPanel({ payload }: {
             )}
           </div>
         </section>
+
+        <section className="wm-geo-shock-summary-grid compact">
+          <article className="wm-geo-shock-metric">
+            <span><i>!</i> HOTSPOTS</span>
+            <strong>{summary?.hotspotCount ?? 0}</strong>
+          </article>
+          <article className="wm-geo-shock-metric">
+            <span><i>S</i> NEW SANCTIONS</span>
+            <strong>{summary?.newSanctionsCount ?? 0}</strong>
+          </article>
+          <article className="wm-geo-shock-metric wide">
+            <span><i>◎</i> TARGETS</span>
+            <strong>{upperMetric(summary?.targetSummary || 'MONITORING')}</strong>
+          </article>
+          <article className="wm-geo-shock-metric tone-critical">
+            <span><i>☢</i> NUCLEAR RISK</span>
+            <strong>{upperMetric(toneLabel(summary?.nuclearRisk))}</strong>
+          </article>
+          <article className="wm-geo-shock-metric tone-warning">
+            <span><i>▦</i> MILITARY FEED</span>
+            <strong>{upperMetric(summary?.militaryFeed || 'standby')}</strong>
+          </article>
+        </section>
+
+        <MarketImplicationStrip items={['Sanctions', 'Energy risk', 'Safe-haven flow', 'CPI tail risk']} />
 
         <section className="wm-geo-shock-section">
           <header className="wm-geo-shock-section-header">
