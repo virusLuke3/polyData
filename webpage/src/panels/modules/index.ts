@@ -39,6 +39,8 @@ import { panel as fedRatesPolymarketGap } from './fed-rates-polymarket-gap';
 import { panel as nbaScoreboard } from './nba-scoreboard';
 import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
+import { panel as esportsIntel } from './esports-intel';
+import { panel as sportsOdds } from './sports-odds';
 import { panel as inflationNowcast } from './inflation-nowcast';
 import { panel as jin10Flash } from './jin10-flash';
 import { panel as newMarketSignals } from './new-market-signals';
@@ -89,6 +91,8 @@ export const PANEL_MODULES: PanelModule[] = [
   nbaScoreboard,
   nbaIntel,
   espnMatchupPredictor,
+  esportsIntel,
+  sportsOdds,
   jin10Flash,
   newMarketSignals,
   lobDepth,

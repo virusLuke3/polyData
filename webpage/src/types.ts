@@ -499,6 +499,107 @@ export type RuntimeNbaMatchupPredictorPayload = {
   source?: string;
 };
 
+export type RuntimeGridEsportsTeamMetric = {
+  won?: boolean;
+  score?: number | string | null;
+  kills?: number | string | null;
+  deaths?: number | string | null;
+};
+
+export type RuntimeGridEsportsPmContext = {
+  status?: string | null;
+  marketId?: string | number | null;
+  title?: string | null;
+  probability?: number | string | null;
+  delta?: number | string | null;
+  signal?: string | null;
+  matchQuality?: string | null;
+};
+
+export type RuntimeGridEsportsItem = {
+  id: string;
+  gameTitle?: string | null;
+  tournament?: string | null;
+  series?: string | null;
+  teamA?: string | null;
+  teamB?: string | null;
+  format?: string | null;
+  startTime?: string | null;
+  startedAt?: string | null;
+  state?: 'live' | 'upcoming' | 'finished' | 'pending-state' | 'scheduled' | string | null;
+  score?: string | null;
+  currentMap?: string | null;
+  liveContext?: string | null;
+  momentum?: number | string | null;
+  contextTags?: string[];
+  teamMetrics?: RuntimeGridEsportsTeamMetric[];
+  pm?: RuntimeGridEsportsPmContext | null;
+};
+
+export type RuntimeGridEsportsPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  status?: string | null;
+  cacheMode?: string | null;
+  sources?: Record<string, string>;
+  window?: {
+    gte?: string | null;
+    lte?: string | null;
+  } | null;
+  summary?: {
+    totalSeries?: number | string | null;
+    visibleSeries?: number | string | null;
+    liveSeries?: number | string | null;
+    officialSnapshots?: number | string | null;
+    pmLinked?: number | string | null;
+  } | null;
+  items: RuntimeGridEsportsItem[];
+};
+
+export type RuntimeSportsOddsQuote = {
+  name?: string | null;
+  bestPrice?: number | string | null;
+  consensusProbability?: number | string | null;
+  dispersion?: number | string | null;
+  bookCount?: number | string | null;
+};
+
+export type RuntimeSportsOddsItem = {
+  id: string;
+  sportKey?: string | null;
+  sportTitle?: string | null;
+  commenceTime?: string | null;
+  homeTeam?: string | null;
+  awayTeam?: string | null;
+  event?: string | null;
+  marketType?: string | null;
+  bookmakerCount?: number | string | null;
+  bestPrice?: number | string | null;
+  consensusProbability?: number | string | null;
+  dispersion?: number | string | null;
+  signal?: string | null;
+  lastUpdate?: string | null;
+  quotes?: RuntimeSportsOddsQuote[];
+  pm?: RuntimeGridEsportsPmContext | null;
+};
+
+export type RuntimeSportsOddsPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  status?: string | null;
+  cacheMode?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    eventCount?: number | string | null;
+    bookmakerCount?: number | string | null;
+    pmLinked?: number | string | null;
+    wideCount?: number | string | null;
+  } | null;
+  items: RuntimeSportsOddsItem[];
+};
+
 export type RuntimeInflationNowcastRow = {
   [key: string]: string | undefined;
 };

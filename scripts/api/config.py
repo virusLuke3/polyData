@@ -31,6 +31,12 @@ from data_sources import (
     ESPN_NBA_BASE_URL,
     F1_BWENEWS_RSS_URL,
     F1_BWENEWS_SOURCE_URL,
+    GRID_CENTRAL_DATA_GRAPHQL_URL,
+    GRID_OPEN_ACCESS_BASE_URL,
+    GRID_SERIES_STATE_GRAPHQL_URL,
+    GRID_SOURCE_URL,
+    THE_ODDS_API_BASE_URL,
+    THE_ODDS_SOURCE_URL,
     GEO_SHOCK_ACLED_API_URL,
     GEO_SHOCK_ACLED_EMAIL,
     GEO_SHOCK_ACLED_PASSWORD,
@@ -136,6 +142,23 @@ class ApiSettings:
     finance_runtime_ttl_seconds: int
     sports_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
+    grid_open_access_base_url: str
+    grid_central_data_graphql_url: str
+    grid_series_state_graphql_url: str
+    grid_api_key: str
+    grid_source_url: str
+    grid_esports_ttl_seconds: int
+    grid_esports_lookback_days: int
+    grid_esports_lookahead_days: int
+    grid_esports_pm_search_enabled: bool
+    the_odds_api_base_url: str
+    the_odds_api_key: str
+    the_odds_source_url: str
+    sports_odds_ttl_seconds: int
+    sports_odds_sport_key: str
+    sports_odds_regions: str
+    sports_odds_markets: str
+    sports_odds_pm_search_enabled: bool
     crypto_funding_watch_api_url: str
     crypto_funding_watch_bybit_api_url: str
     crypto_funding_watch_api_key: str
@@ -230,6 +253,32 @@ def load_api_settings() -> ApiSettings:
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
+        grid_open_access_base_url=_get_str(
+            "POLYDATA_GRID_OPEN_ACCESS_BASE_URL",
+            GRID_OPEN_ACCESS_BASE_URL or "https://api-op.grid.gg",
+        ),
+        grid_central_data_graphql_url=_get_str(
+            "POLYDATA_GRID_CENTRAL_DATA_GRAPHQL_URL",
+            GRID_CENTRAL_DATA_GRAPHQL_URL or "https://api-op.grid.gg/central-data/graphql",
+        ),
+        grid_series_state_graphql_url=_get_str(
+            "POLYDATA_GRID_SERIES_STATE_GRAPHQL_URL",
+            GRID_SERIES_STATE_GRAPHQL_URL or "https://api-op.grid.gg/live-data-feed/series-state/graphql",
+        ),
+        grid_api_key=_get_str("POLYDATA_GRID_API_KEY", _get_str("grid_api_key", _get_str("GRID_API_KEY", ""))),
+        grid_source_url=_get_str("POLYDATA_GRID_SOURCE_URL", GRID_SOURCE_URL or "https://grid.gg/open-access/"),
+        grid_esports_ttl_seconds=_get_int("POLYDATA_GRID_ESPORTS_TTL_SECONDS", 120),
+        grid_esports_lookback_days=_get_int("POLYDATA_GRID_ESPORTS_LOOKBACK_DAYS", 2),
+        grid_esports_lookahead_days=_get_int("POLYDATA_GRID_ESPORTS_LOOKAHEAD_DAYS", 14),
+        grid_esports_pm_search_enabled=_get_bool("POLYDATA_GRID_ESPORTS_PM_SEARCH_ENABLED", False),
+        the_odds_api_base_url=_get_str("POLYDATA_THE_ODDS_API_BASE_URL", THE_ODDS_API_BASE_URL or "https://api.the-odds-api.com"),
+        the_odds_api_key=_get_str("POLYDATA_THE_ODDS_API_KEY", _get_str("THE_ODDS_API_KEY", "")),
+        the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", THE_ODDS_SOURCE_URL or "https://the-odds-api.com/"),
+        sports_odds_ttl_seconds=_get_int("POLYDATA_SPORTS_ODDS_TTL_SECONDS", 180),
+        sports_odds_sport_key=_get_str("POLYDATA_SPORTS_ODDS_SPORT_KEY", "upcoming"),
+        sports_odds_regions=_get_str("POLYDATA_SPORTS_ODDS_REGIONS", "us"),
+        sports_odds_markets=_get_str("POLYDATA_SPORTS_ODDS_MARKETS", "h2h"),
+        sports_odds_pm_search_enabled=_get_bool("POLYDATA_SPORTS_ODDS_PM_SEARCH_ENABLED", False),
         crypto_funding_watch_api_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_API_URL", CRYPTO_FUNDING_WATCH_API_URL),
         crypto_funding_watch_bybit_api_url=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_BYBIT_API_URL", CRYPTO_FUNDING_WATCH_BYBIT_API_URL),
         crypto_funding_watch_api_key=_get_str("POLYDATA_CRYPTO_FUNDING_WATCH_API_KEY", ""),

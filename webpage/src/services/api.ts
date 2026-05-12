@@ -15,6 +15,7 @@ import type {
   RuntimeCpiReleaseCalendarPayload,
   RuntimeEnergyGasolineShockPayload,
   RuntimeGlobalWeatherMapPayload,
+  RuntimeGridEsportsPayload,
   RuntimeFoodRetailBasketPayload,
   RuntimeGeoSanctionsShockPayload,
   RuntimeInflationNowcastPayload,
@@ -28,6 +29,7 @@ import type {
   RuntimeNewMarketSignalsPayload,
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
+  RuntimeSportsOddsPayload,
   RuntimeWeatherNewsPayload,
   SystemHealth,
   TradeRow,
@@ -169,6 +171,14 @@ export function fetchRuntimeNbaIntel(limit = 12) {
 
 export function fetchRuntimeNbaMatchupPredictor(limit = 8) {
   return apiGet<RuntimeNbaMatchupPredictorPayload>(`/runtime/sports/nba-matchup-predictor?limit=${limit}`);
+}
+
+export function fetchRuntimeGridEsports(limit = 10) {
+  return apiGet<RuntimeGridEsportsPayload>(`/runtime/esports/grid-intel?limit=${limit}`);
+}
+
+export function fetchRuntimeSportsOdds(limit = 8) {
+  return apiGet<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`);
 }
 
 export function fetchRuntimeInflationNowcast() {

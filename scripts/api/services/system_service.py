@@ -72,6 +72,22 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 30,
     },
     {
+        "panelId": "esports-intel",
+        "namespace": "seed-meta:esports",
+        "cacheKey": "esports-intel",
+        "serviceName": "polydata-grid-esports-seed.service",
+        "intervalEnv": "POLYDATA_GRID_ESPORTS_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 120,
+    },
+    {
+        "panelId": "sports-odds",
+        "namespace": "seed-meta:sports",
+        "cacheKey": "sports-odds",
+        "serviceName": "polydata-sports-odds-seed.service",
+        "intervalEnv": "POLYDATA_SPORTS_ODDS_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 180,
+    },
+    {
         "panelId": "inflation-nowcast",
         "namespace": "seed-meta:macro",
         "cacheKey": "inflation-nowcast",

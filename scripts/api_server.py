@@ -79,7 +79,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service, weather_news_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, weather_news_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -245,6 +245,8 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
         "get_global_weather_map_snapshot": get_global_weather_map_snapshot,
+        "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
+        "get_sports_odds_snapshot": lambda limit=8: sports_odds_service.get_sports_odds_snapshot(build_service_context(), limit=limit),
         "get_growth_demand_recession_tracker_snapshot": get_growth_demand_recession_tracker_snapshot,
         "get_goods_tariff_supply_watch_snapshot": get_goods_tariff_supply_watch_snapshot,
         "get_inflation_nowcast_snapshot": get_inflation_nowcast_snapshot,
@@ -392,6 +394,8 @@ def build_service_context() -> Dict[str, Any]:
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=6: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
         "get_global_weather_map_snapshot": lambda limit=34: global_weather_map_service.get_global_weather_map_snapshot(build_service_context(), limit=limit),
+        "get_grid_esports_snapshot": lambda limit=10: grid_esports_service.get_grid_esports_snapshot(build_service_context(), limit=limit),
+        "get_sports_odds_snapshot": lambda limit=8: sports_odds_service.get_sports_odds_snapshot(build_service_context(), limit=limit),
         "get_growth_demand_recession_tracker_snapshot": lambda limit=8: macro_cpi_panels_service.get_growth_demand_recession_tracker_snapshot(build_service_context(), limit=limit),
         "get_goods_tariff_supply_watch_snapshot": lambda limit=36: macro_cpi_registry_service.get_goods_tariff_supply_watch_snapshot(build_service_context(), limit=limit),
         "get_existing_trade_read_source": get_existing_trade_read_source,
