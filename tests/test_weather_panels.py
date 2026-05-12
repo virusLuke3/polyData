@@ -182,6 +182,7 @@ def test_weather_news_bad_xml_degrades_without_items():
 def test_weather_news_filters_sports_storm_false_positives():
     rss = """<?xml version="1.0"?><rss><channel>
       <item><title>Eels v Storm: Moses riding high</title><link>https://news.example/sports</link><source>NRL.com</source><pubDate>Tue, 12 May 2026 10:00:00 GMT</pubDate><description>NRL team news and picks.</description></item>
+      <item><title>Perth property bloodbath warning amid housing crash</title><link>https://news.example/property</link><source>PerthNow</source><pubDate>Tue, 12 May 2026 09:30:00 GMT</pubDate><description>Property market warning.</description></item>
       <item><title>Johannesburg severe storm disrupts flights</title><link>https://news.example/weather</link><source>Travel Desk</source><pubDate>Tue, 12 May 2026 09:00:00 GMT</pubDate><description>Severe storm and wind delays expected.</description></item>
     </channel></rss>"""
     ctx = make_ctx(http_text_get=lambda *args, **kwargs: rss)
@@ -190,6 +191,7 @@ def test_weather_news_filters_sports_storm_false_positives():
     titles = [item["title"] for item in payload["items"]]
     assert "Johannesburg severe storm disrupts flights" in titles
     assert all("Eels v Storm" not in title for title in titles)
+    assert all("property bloodbath" not in title for title in titles)
 
 
 def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):

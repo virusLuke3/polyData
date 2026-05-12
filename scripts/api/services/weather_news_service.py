@@ -18,8 +18,14 @@ WEATHER_NEWS_CACHE_KEY = "panel-v1"
 DEFAULT_NEWS_LIMIT = 24
 
 RELEVANCE_RE = re.compile(r"\b(weather|forecast|storm|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane)\b", re.I)
-WEATHER_CONTEXT_RE = re.compile(r"\b(weather|forecast|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane|severe storm|thunderstorm)\b", re.I)
-SPORTS_FALSE_POSITIVE_RE = re.compile(r"\b(nrl|nba|wnba|nfl|mlb|nhl|afl|eels|storm\s+v|v\s+storm|seattle storm|melbourne storm|realgm|odds|picks|fans|facebook|death claims|roster|fixture|score)\b", re.I)
+WEATHER_CONTEXT_RE = re.compile(
+    r"\b(weather|forecast|rain|heat|heatwave|cold|wind|snow|flood|temperature|typhoon|hurricane|tornado|freeze|severe storm|thunderstorm|storm damage|storm chance|storm threat|storm-hit|strong storm)\b",
+    re.I,
+)
+SPORTS_FALSE_POSITIVE_RE = re.compile(
+    r"\b(nrl|nba|wnba|nfl|mlb|nhl|afl|eels|tigers|storm\s+v|v\s+storm|seattle storm|melbourne storm|realgm|odds|picks|fans|facebook|death claims|roster|fixture|score|zero tackle|fox sports|wests tigers|losing streak|bellamy|origin teammate|full time|round \d+|injury update)\b",
+    re.I,
+)
 SEVERE_RE = re.compile(r"\b(heatwave|warning|storm|flood|extreme|alert|hurricane|typhoon|danger|record)\b", re.I)
 TAG_PATTERNS = {
     "heat": re.compile(r"\b(heat|heatwave|hot|temperature)\b", re.I),
@@ -110,6 +116,8 @@ def fetch_google_news_rss(ctx: dict, city: Dict[str, Any]) -> List[Dict[str, Any
         source = html.unescape(str(source_node.text or "").strip()) if source_node is not None else "Google News"
         combined = f"{title} {summary}"
         if not RELEVANCE_RE.search(combined):
+            continue
+        if not WEATHER_CONTEXT_RE.search(combined):
             continue
         if SPORTS_FALSE_POSITIVE_RE.search(combined) and not WEATHER_CONTEXT_RE.search(combined):
             continue
