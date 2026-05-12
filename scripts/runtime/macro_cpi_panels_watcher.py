@@ -144,7 +144,7 @@ class MacroCpiPanelsWatcher:
     def run_panel(self, panel_id: str) -> Dict[str, Any]:
         previous = self.previous(panel_id)
         try:
-            payload = macro_cpi_panels_service.build_macro_cpi_panel_payload(self.context(), panel_id, limit=macro_cpi_panels_service.DEFAULT_ITEM_LIMIT)
+            payload = macro_cpi_panels_service.build_macro_cpi_panel_payload(self.context(), panel_id, limit=macro_cpi_panels_service.MAX_ITEM_LIMIT)
         except Exception as exc:
             if previous:
                 self.store_payload(panel_id, previous)
