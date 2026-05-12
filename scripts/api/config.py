@@ -161,6 +161,7 @@ class ApiSettings:
     food_basket_source_url: str
     food_basket_ttl_seconds: int
     macro_cpi_panel_ttl_seconds: int
+    macro_cpi_registry_ttl_seconds: int
     geo_shock_ofac_sdn_url: str
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
@@ -301,6 +302,7 @@ def load_api_settings() -> ApiSettings:
         ),
         food_basket_ttl_seconds=_get_int("POLYDATA_FOOD_BASKET_TTL_SECONDS", 21600),
         macro_cpi_panel_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_PANEL_TTL_SECONDS", 21600),
+        macro_cpi_registry_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_TTL_SECONDS", 21600),
         geo_shock_ofac_sdn_url=_get_str(
             "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
             GEO_SHOCK_OFAC_SDN_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",

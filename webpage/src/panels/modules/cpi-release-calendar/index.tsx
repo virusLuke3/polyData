@@ -196,7 +196,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'CPI Release Calendar & Consensus Baseline',
   eyebrow: 'macro',
   description: 'Official CPI, PCE, NFP, and FOMC release timing with Polymarket implied CPI baseline.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeCpiReleaseCalendar(8),

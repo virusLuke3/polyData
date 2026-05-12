@@ -106,7 +106,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Inflation Nowcast',
   eyebrow: 'macro',
   description: 'Cleveland Fed CPI/PCE nowcasting panel.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: fetchRuntimeInflationNowcast,

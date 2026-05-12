@@ -786,6 +786,49 @@ export type RuntimeMacroDriverPayload = {
   items?: RuntimeMacroDriverItem[];
 };
 
+export type RuntimeMacroRegistryItem = {
+  key?: string | null;
+  type?: string | null;
+  group?: string | null;
+  label?: string | null;
+  value?: number | string | null;
+  unit?: string | null;
+  valueLabel?: string | null;
+  change?: number | string | null;
+  changeLabel?: string | null;
+  date?: string | null;
+  tone?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  implication?: string | null;
+};
+
+export type RuntimeMacroRegistrySummary = {
+  panelId?: string | null;
+  signal?: string | null;
+  signalLabel?: string | null;
+  bias?: string | null;
+  hotCount?: number | string | null;
+  coolCount?: number | string | null;
+  watchCount?: number | string | null;
+  rowCount?: number | string | null;
+  coverage?: number | string | null;
+  sourceCount?: number | string | null;
+  topMover?: RuntimeMacroRegistryItem | null;
+};
+
+export type RuntimeMacroRegistryPayload = {
+  generatedAt?: string;
+  panelId?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeMacroRegistrySummary | null;
+  items?: RuntimeMacroRegistryItem[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

@@ -175,11 +175,13 @@ def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None
         setter(ENERGY_SHOCK_SNAPSHOT_NAMESPACE, ENERGY_SHOCK_CACHE_KEY, payload, ttl_seconds)
 
 
-def get_energy_gasoline_shock_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_energy_gasoline_shock_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
     ttl_seconds = max(1800, int(getattr(ctx["SETTINGS"], "energy_shock_ttl_seconds", 21600) or 21600))
     seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
     if seeded is not None:
         return normalize_energy_gasoline_shock_payload(seeded, ctx=ctx, limit=limit)
+    if not allow_live_build:
+        return normalize_energy_gasoline_shock_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
     payload = _with_cache_mode(build_energy_gasoline_shock_payload(ctx), "live-build")
     if payload.get("items"):
         _store_live(ctx, payload, ttl_seconds=ttl_seconds)

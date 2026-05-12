@@ -349,8 +349,8 @@ export function App() {
     }
   }
 
-  function scheduleSlowRuntimePanels(excludedPanelIds = new Set<string>()) {
-    const panels = SLOW_RUNTIME_PANELS.filter((panel) => !excludedPanelIds.has(panel.id));
+  function scheduleSlowRuntimePanels(activePanelSet = new Set(activePanelIds), excludedPanelIds = new Set<string>()) {
+    const panels = SLOW_RUNTIME_PANELS.filter((panel) => activePanelSet.has(panel.id) && !excludedPanelIds.has(panel.id));
     if (!panels.length || slowRefreshCancelRef.current) return;
     slowRefreshCancelRef.current = scheduleIdleTask(() => {
       slowRefreshCancelRef.current = null;
@@ -370,7 +370,7 @@ export function App() {
         setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh visible runtime panels.'));
       });
     }
-    scheduleSlowRuntimePanels(new Set(visibleSlowPanels.map((panel) => panel.id)));
+    scheduleSlowRuntimePanels(activePanelSet, new Set(visibleSlowPanels.map((panel) => panel.id)));
     return fastResult;
   }
 

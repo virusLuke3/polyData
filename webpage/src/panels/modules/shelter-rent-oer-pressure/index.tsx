@@ -33,7 +33,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Shelter Rent OER Pressure',
   eyebrow: 'macro',
   description: 'Rent and OER pressure for core CPI markets.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeShelterRentOerPressure(8),

@@ -475,11 +475,13 @@ def _store_live_build_snapshot(ctx: dict, payload: Dict[str, Any], *, ttl_second
         setter(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY, payload, ttl_seconds)
 
 
-def get_cpi_release_calendar_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_cpi_release_calendar_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
     ttl_seconds = max(300, int(getattr(ctx["SETTINGS"], "cpi_calendar_ttl_seconds", 3600) or 3600))
     seeded_payload = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
     if seeded_payload is not None:
         return normalize_cpi_release_calendar_payload(seeded_payload, ctx=ctx, limit=limit)
+    if not allow_live_build:
+        return normalize_cpi_release_calendar_payload({"status": "warming", "cacheMode": "seed-miss", "sources": {}, "items": []}, ctx=ctx, limit=limit)
     payload = _with_cache_mode(build_cpi_release_calendar_payload(ctx), "live-build")
     if payload.get("items"):
         _store_live_build_snapshot(ctx, payload, ttl_seconds=ttl_seconds)

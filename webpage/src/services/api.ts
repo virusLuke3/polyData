@@ -20,6 +20,7 @@ import type {
   RuntimeF1Payload,
   RuntimeJin10Payload,
   RuntimeMacroDriverPayload,
+  RuntimeMacroRegistryPayload,
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
@@ -206,6 +207,26 @@ export function fetchRuntimeGrowthDemandRecessionTracker(limit = 8) {
 
 export function fetchRuntimeFedRatesPolymarketGap(limit = 8) {
   return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/fed-rates-polymarket-gap?limit=${limit}`);
+}
+
+export function fetchRuntimeCpiReleaseCommandCenter(limit = 36) {
+  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/cpi-release-command-center?limit=${limit}`);
+}
+
+export function fetchRuntimeCpiComponentsPressureRegistry(limit = 48) {
+  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/cpi-components-pressure-registry?limit=${limit}`);
+}
+
+export function fetchRuntimeGoodsTariffSupplyWatch(limit = 36) {
+  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/goods-tariff-supply-watch?limit=${limit}`);
+}
+
+export function fetchRuntimeLaborServicesInflationMonitor(limit = 36) {
+  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/labor-services-inflation-monitor?limit=${limit}`);
+}
+
+export function fetchRuntimeFedReactionGrowthRiskBoard(limit = 36) {
+  return apiGet<RuntimeMacroRegistryPayload>(`/runtime/macro/fed-reaction-growth-risk-board?limit=${limit}`);
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 6) {

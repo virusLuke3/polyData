@@ -118,7 +118,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Energy & Gasoline Shock',
   eyebrow: 'macro',
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeEnergyGasolineShock(6),

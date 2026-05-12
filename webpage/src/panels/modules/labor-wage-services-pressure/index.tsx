@@ -33,7 +33,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Labor Wage Services Pressure',
   eyebrow: 'macro',
   description: 'Labor-market and wage pressure for services CPI and Fed markets.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeLaborWageServicesPressure(8),

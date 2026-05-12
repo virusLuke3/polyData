@@ -1,0 +1,531 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional
+
+from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
+
+
+DEFAULT_ITEM_LIMIT = 36
+MAX_ITEM_LIMIT = 60
+SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro-registry:"
+CACHE_KEY = "panel-v1"
+
+
+PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "cpi-release-command-center": {
+        "source": "BLS / BEA / Fed / Cleveland Fed / FRED",
+        "signalLabel": "Release / nowcast command",
+        "emptySignal": "CPI RELEASE WARMING",
+    },
+    "cpi-components-pressure-registry": {
+        "source": "BLS / FRED / EIA",
+        "signalLabel": "CPI component pressure",
+        "emptySignal": "COMPONENTS WARMING",
+    },
+    "goods-tariff-supply-watch": {
+        "source": "FRED / Federal Register / public supply proxies",
+        "signalLabel": "Goods / tariff watch",
+        "emptySignal": "GOODS WATCH WARMING",
+    },
+    "labor-services-inflation-monitor": {
+        "source": "BLS / DOL / FRED",
+        "signalLabel": "Labor / services inflation",
+        "emptySignal": "LABOR SERVICES WARMING",
+    },
+    "fed-reaction-growth-risk-board": {
+        "source": "Fed / Treasury / BEA / FRED",
+        "signalLabel": "Fed reaction / growth risk",
+        "emptySignal": "FED GROWTH WARMING",
+    },
+}
+
+
+def _utc_now_iso(ctx: dict) -> str:
+    now = ctx.get("utc_now_iso")
+    if callable(now):
+        return now()
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _float(value: Any) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _limit(limit: int) -> int:
+    return max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))
+
+
+def _snapshot_namespace(panel_id: str) -> str:
+    return f"{SNAPSHOT_NAMESPACE_PREFIX}{panel_id}"
+
+
+def ttl_seconds(ctx: dict) -> int:
+    settings = ctx.get("SETTINGS")
+    return max(1800, int(getattr(settings, "macro_cpi_registry_ttl_seconds", 21600) or 21600))
+
+
+def _status_tone(value: Any) -> str:
+    text = str(value or "").lower()
+    if text in {"hot", "cool", "watch", "neutral"}:
+        return text
+    if any(term in text for term in ("hot", "rising", "hawk", "sticky", "pressure")):
+        return "hot"
+    if any(term in text for term in ("cool", "easing", "soft", "disinflation")):
+        return "cool"
+    if any(term in text for term in ("watch", "mixed", "event", "partial", "degraded", "warming")):
+        return "watch"
+    return "neutral"
+
+
+def _signed(value: Any, *, suffix: str = "", decimals: int = 2) -> str:
+    number = _float(value)
+    if number is None:
+        return "--"
+    return f"{number:+.{decimals}f}{suffix}"
+
+
+def _value_label(value: Any, unit: Any = None) -> str:
+    number = _float(value)
+    if number is None:
+        return "--"
+    unit_text = str(unit or "").strip()
+    if unit_text == "%":
+        return f"{number:.2f}%"
+    if unit_text in {"pp", "z"}:
+        return f"{number:.2f}{unit_text}"
+    if unit_text == "$":
+        return f"${number:.2f}"
+    if abs(number) >= 1000:
+        return f"{number / 1000:.1f}K"
+    return f"{number:.2f}" if abs(number) < 100 else f"{number:.1f}"
+
+
+def _row(
+    *,
+    key: str,
+    row_type: str,
+    group: str,
+    label: str,
+    value: Any = None,
+    unit: Any = None,
+    change: Any = None,
+    change_label: str | None = None,
+    date: Any = None,
+    tone: str = "neutral",
+    source: str = "",
+    source_url: str = "",
+    implication: str = "",
+) -> Dict[str, Any]:
+    return {
+        "key": key,
+        "type": row_type,
+        "group": group,
+        "label": label,
+        "value": value,
+        "unit": unit,
+        "valueLabel": _value_label(value, unit),
+        "change": change,
+        "changeLabel": change_label or _signed(change),
+        "date": date,
+        "tone": _status_tone(tone),
+        "source": source,
+        "sourceUrl": source_url,
+        "implication": implication,
+    }
+
+
+def _snapshot_status(payload: Dict[str, Any]) -> str:
+    return str(payload.get("status") or ("ok" if payload.get("items") else "warming"))
+
+
+def _merge_sources(sources: Dict[str, str], prefix: str, payload: Dict[str, Any]) -> None:
+    source_states = payload.get("sources") if isinstance(payload.get("sources"), dict) else {}
+    if not source_states:
+        sources[prefix] = _snapshot_status(payload)
+        return
+    for key, value in source_states.items():
+        sources[f"{prefix}.{key}"] = str(value)
+
+
+def _calendar_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for index, item in enumerate(payload.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "macro").upper()
+        rows.append(
+            _row(
+                key=f"calendar-{item.get('id') or index}",
+                row_type="release",
+                group=kind,
+                label=str(item.get("title") or "Macro release"),
+                value=item.get("releaseTimeEt") or item.get("releaseAt"),
+                unit=None,
+                change=item.get("hoursToEvent"),
+                change_label=str(item.get("releaseTimeEt") or item.get("referencePeriod") or "--"),
+                date=item.get("releaseAt"),
+                tone="watch" if kind in {"FOMC", "NFP"} else "neutral",
+                source=str(item.get("source") or "Official calendar"),
+                source_url=str(item.get("sourceUrl") or ""),
+                implication=str(item.get("marketRelevance") or "release timing"),
+            )
+        )
+    return rows
+
+
+def _nowcast_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for bucket_name in ("monthOverMonth", "yearOverYear"):
+        bucket = payload.get(bucket_name)
+        if not isinstance(bucket, dict):
+            continue
+        for key, value in bucket.items():
+            number = _float(value)
+            if number is None:
+                continue
+            tone = "hot" if number >= (0.35 if bucket_name == "monthOverMonth" else 3.2) else ("cool" if number <= (0.2 if bucket_name == "monthOverMonth" else 2.6) else "watch")
+            rows.append(
+                _row(
+                    key=f"nowcast-{bucket_name}-{key}",
+                    row_type="model",
+                    group="NOWCAST",
+                    label=str(key),
+                    value=number,
+                    unit="%",
+                    change=number,
+                    change_label=f"{number:.2f}%",
+                    date=payload.get("generatedAt"),
+                    tone=tone,
+                    source=str(payload.get("source") or "Cleveland Fed"),
+                    source_url=str(payload.get("url") or ""),
+                    implication="inflation bucket pressure",
+                )
+            )
+    for index, item in enumerate(payload.get("quarterly") or []):
+        if not isinstance(item, dict):
+            continue
+        label = str(next(iter(item.keys()), "Quarterly nowcast"))
+        value = next((value for value in item.values() if _float(value) is not None), None)
+        rows.append(
+            _row(
+                key=f"nowcast-quarterly-{index}",
+                row_type="model",
+                group="QTR",
+                label=label,
+                value=value,
+                unit="%",
+                change=value,
+                change_label=f"{_float(value):.2f}%" if _float(value) is not None else "--",
+                date=payload.get("generatedAt"),
+                tone=_status_tone("watch"),
+                source=str(payload.get("source") or "Cleveland Fed"),
+                source_url=str(payload.get("url") or ""),
+                implication="quarterly inflation run-rate",
+            )
+        )
+    return rows
+
+
+def _energy_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        change = _float(item.get("changeWeek"))
+        tone = "hot" if (change or 0) > 0 else ("cool" if (change or 0) < 0 else "neutral")
+        rows.append(
+            _row(
+                key=f"energy-{item.get('key') or item.get('label')}",
+                row_type="proxy",
+                group="ENERGY",
+                label=str(item.get("label") or "Energy series"),
+                value=item.get("value"),
+                unit=item.get("unit"),
+                change=change,
+                change_label=f"{_signed(change)}W",
+                date=item.get("date"),
+                tone=tone,
+                source=str(item.get("source") or "EIA"),
+                source_url=str(item.get("sourceUrl") or ""),
+                implication="headline CPI energy impulse",
+            )
+        )
+    return rows
+
+
+def _food_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        mom = _float(item.get("momPct"))
+        tone = "hot" if (mom or 0) >= 0.35 else ("cool" if (mom or 0) <= -0.2 else "watch")
+        rows.append(
+            _row(
+                key=f"food-{item.get('key') or item.get('seriesId')}",
+                row_type="component",
+                group="FOOD",
+                label=str(item.get("label") or "Food CPI component"),
+                value=item.get("value"),
+                unit="idx",
+                change=mom,
+                change_label=f"{_signed(mom, suffix='%')} MoM",
+                date=item.get("date"),
+                tone=tone,
+                source=str(item.get("source") or "FRED / BLS CPI"),
+                source_url=str(item.get("sourceUrl") or ""),
+                implication="headline CPI food component",
+            )
+        )
+    return rows
+
+
+def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implication: str) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        change = item.get("changePct") if _float(item.get("changePct")) is not None else item.get("change")
+        metric = "%" if _float(item.get("changePct")) is not None else ""
+        rows.append(
+            _row(
+                key=f"{default_group.lower()}-{item.get('key') or item.get('seriesId') or item.get('label')}",
+                row_type="series" if item.get("seriesId") else "event",
+                group=str(item.get("group") or default_group).upper(),
+                label=str(item.get("label") or "Macro driver"),
+                value=item.get("value"),
+                unit=item.get("unit"),
+                change=change,
+                change_label=f"{_signed(change, suffix=metric)}",
+                date=item.get("date"),
+                tone=str(item.get("tone") or "neutral"),
+                source=str(item.get("source") or payload.get("source") or "Public macro source"),
+                source_url=str(item.get("sourceUrl") or payload.get("sourceUrl") or ""),
+                implication=implication,
+            )
+        )
+    return rows
+
+
+def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str], config: Dict[str, Any]) -> Dict[str, Any]:
+    hot = sum(1 for row in rows if row.get("tone") == "hot")
+    cool = sum(1 for row in rows if row.get("tone") == "cool")
+    watch = sum(1 for row in rows if row.get("tone") == "watch")
+    if hot > cool and hot >= watch:
+        signal = "INFLATION PRESSURE HOT"
+        bias = "hot"
+    elif cool > hot and cool >= watch:
+        signal = "DISINFLATION PRESSURE"
+        bias = "cool"
+    elif rows:
+        signal = "MIXED MACRO WATCH"
+        bias = "watch"
+    else:
+        signal = str(config.get("emptySignal") or "REGISTRY WARMING")
+        bias = "unknown"
+    top = None
+    numeric = [row for row in rows if _float(row.get("change")) is not None]
+    if numeric:
+        top = max(numeric, key=lambda row: abs(_float(row.get("change")) or 0.0))
+    return {
+        "panelId": panel_id,
+        "signal": signal,
+        "signalLabel": config.get("signalLabel"),
+        "bias": bias,
+        "hotCount": hot,
+        "coolCount": cool,
+        "watchCount": watch,
+        "rowCount": len(rows),
+        "coverage": sum(1 for value in sources.values() if str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"}),
+        "sourceCount": len(sources),
+        "topMover": top,
+    }
+
+
+def _payload(ctx: dict, panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str], *, limit: int) -> Dict[str, Any]:
+    config = PANEL_CONFIGS[panel_id]
+    capped = rows[: _limit(limit)]
+    status = "ok" if capped and any(str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
+    return {
+        "generatedAt": _utc_now_iso(ctx),
+        "panelId": panel_id,
+        "source": config.get("source"),
+        "sourceUrl": "",
+        "status": status,
+        "cacheMode": "composed-seed",
+        "sources": sources,
+        "summary": _summarize(panel_id, capped, sources, config),
+        "items": capped,
+    }
+
+
+def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
+    return {**payload, "cacheMode": mode}
+
+
+def _read_seeded(ctx: dict, panel_id: str) -> Optional[Dict[str, Any]]:
+    namespace = _snapshot_namespace(panel_id)
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        payload = reader(namespace, CACHE_KEY)
+        if isinstance(payload, dict):
+            return _with_mode(payload, "redis-seed")
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is not None:
+        payload = store.get(namespace, CACHE_KEY)
+        if isinstance(payload, dict):
+            return _with_mode(payload, "sqlite-seed")
+        stale = store.get_stale(namespace, CACHE_KEY)
+        if isinstance(stale, dict):
+            return _with_mode(stale, "stale-seed")
+    return None
+
+
+def _snapshot(fn, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    try:
+        payload = fn(*args, **kwargs)
+    except Exception:
+        return {"status": "error", "items": [], "sources": {"snapshot": "error"}}
+    return payload if isinstance(payload, dict) else {"status": "invalid", "items": []}
+
+
+def _inflation_nowcast_seeded_snapshot(ctx: dict) -> Dict[str, Any]:
+    payload = None
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        payload = reader(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
+    if not isinstance(payload, dict):
+        store = ctx.get("SNAPSHOT_STORE")
+        if store is not None:
+            payload = store.get(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
+            if not isinstance(payload, dict):
+                payload = store.get_stale(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
+    if isinstance(payload, dict):
+        return runtime_service.normalize_inflation_nowcast_payload(payload, ctx=ctx, generated_at=_utc_now_iso(ctx))
+    return runtime_service.normalize_inflation_nowcast_payload({"status": "seed-miss"}, ctx=ctx, generated_at=_utc_now_iso(ctx))
+
+
+def build_cpi_release_command_center_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    calendar = _snapshot(cpi_release_calendar_service.get_cpi_release_calendar_snapshot, ctx, limit=20, allow_live_build=False)
+    nowcast = _snapshot(_inflation_nowcast_seeded_snapshot, ctx)
+    rows = _calendar_rows(calendar) + _nowcast_rows(nowcast)
+    sources: Dict[str, str] = {"calendar": _snapshot_status(calendar), "nowcast": _snapshot_status(nowcast)}
+    _merge_sources(sources, "calendar", calendar)
+    return _payload(ctx, "cpi-release-command-center", rows, sources, limit=limit)
+
+
+def build_cpi_components_pressure_registry_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    energy = _snapshot(energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot, ctx, limit=12, allow_live_build=False)
+    food = _snapshot(food_retail_basket_service.get_food_retail_basket_snapshot, ctx, limit=12, allow_live_build=False)
+    shelter = _snapshot(macro_cpi_panels_service.get_shelter_rent_oer_pressure_snapshot, ctx, limit=12)
+    goods = _snapshot(macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot, ctx, limit=16)
+    rows = (
+        _energy_rows(energy)
+        + _food_rows(food)
+        + _macro_driver_rows(shelter, default_group="SHELTER", implication="core CPI shelter stickiness")
+        + _macro_driver_rows(goods, default_group="GOODS", implication="core goods CPI pressure")
+    )
+    sources: Dict[str, str] = {"energy": _snapshot_status(energy), "food": _snapshot_status(food), "shelter": _snapshot_status(shelter), "goods": _snapshot_status(goods)}
+    _merge_sources(sources, "energy", energy)
+    _merge_sources(sources, "food", food)
+    _merge_sources(sources, "shelter", shelter)
+    _merge_sources(sources, "goods", goods)
+    return _payload(ctx, "cpi-components-pressure-registry", rows, sources, limit=limit)
+
+
+def build_goods_tariff_supply_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    supply = _snapshot(macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot, ctx, limit=30)
+    rows = _macro_driver_rows(supply, default_group="GOODS", implication="goods CPI / tariff pressure")
+    sources: Dict[str, str] = {"supply": _snapshot_status(supply)}
+    _merge_sources(sources, "supply", supply)
+    return _payload(ctx, "goods-tariff-supply-watch", rows, sources, limit=limit)
+
+
+def build_labor_services_inflation_monitor_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    labor = _snapshot(macro_cpi_panels_service.get_labor_wage_services_pressure_snapshot, ctx, limit=30)
+    rows = _macro_driver_rows(labor, default_group="LABOR", implication="services CPI / Fed wage pressure")
+    sources: Dict[str, str] = {"labor": _snapshot_status(labor)}
+    _merge_sources(sources, "labor", labor)
+    return _payload(ctx, "labor-services-inflation-monitor", rows, sources, limit=limit)
+
+
+def build_fed_reaction_growth_risk_board_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    fed = _snapshot(macro_cpi_panels_service.get_fed_rates_polymarket_gap_snapshot, ctx, limit=30)
+    growth = _snapshot(macro_cpi_panels_service.get_growth_demand_recession_tracker_snapshot, ctx, limit=30)
+    calendar = _snapshot(cpi_release_calendar_service.get_cpi_release_calendar_snapshot, ctx, limit=8, allow_live_build=False)
+    rows = (
+        _macro_driver_rows(fed, default_group="FED", implication="Fed reaction path")
+        + _macro_driver_rows(growth, default_group="GROWTH", implication="growth / recession risk")
+        + [row for row in _calendar_rows(calendar) if str(row.get("group")).upper() == "FOMC"]
+    )
+    sources: Dict[str, str] = {"fed": _snapshot_status(fed), "growth": _snapshot_status(growth), "calendar": _snapshot_status(calendar)}
+    _merge_sources(sources, "fed", fed)
+    _merge_sources(sources, "growth", growth)
+    _merge_sources(sources, "calendar", calendar)
+    return _payload(ctx, "fed-reaction-growth-risk-board", rows, sources, limit=limit)
+
+
+BUILDERS = {
+    "cpi-release-command-center": build_cpi_release_command_center_snapshot,
+    "cpi-components-pressure-registry": build_cpi_components_pressure_registry_snapshot,
+    "goods-tariff-supply-watch": build_goods_tariff_supply_watch_snapshot,
+    "labor-services-inflation-monitor": build_labor_services_inflation_monitor_snapshot,
+    "fed-reaction-growth-risk-board": build_fed_reaction_growth_risk_board_snapshot,
+}
+
+
+MACRO_CPI_REGISTRY_PANEL_IDS = tuple(BUILDERS.keys())
+
+
+def build_macro_cpi_registry_payload(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    builder = BUILDERS[panel_id]
+    return builder(ctx, limit=limit)
+
+
+def get_macro_cpi_registry_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    seeded = _read_seeded(ctx, panel_id)
+    if seeded is not None:
+        return normalize_macro_cpi_registry_payload(seeded, ctx=ctx, panel_id=panel_id, limit=limit)
+    return normalize_macro_cpi_registry_payload(build_macro_cpi_registry_payload(ctx, panel_id, limit=limit), ctx=ctx, panel_id=panel_id, limit=limit)
+
+
+def get_cpi_release_command_center_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    return get_macro_cpi_registry_snapshot(ctx, "cpi-release-command-center", limit=limit)
+
+
+def get_cpi_components_pressure_registry_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    return get_macro_cpi_registry_snapshot(ctx, "cpi-components-pressure-registry", limit=limit)
+
+
+def get_goods_tariff_supply_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    return get_macro_cpi_registry_snapshot(ctx, "goods-tariff-supply-watch", limit=limit)
+
+
+def get_labor_services_inflation_monitor_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    return get_macro_cpi_registry_snapshot(ctx, "labor-services-inflation-monitor", limit=limit)
+
+
+def get_fed_reaction_growth_risk_board_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    return get_macro_cpi_registry_snapshot(ctx, "fed-reaction-growth-risk-board", limit=limit)
+
+
+def normalize_macro_cpi_registry_payload(payload: Any, *, ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        payload = {}
+    result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    rows = [row for row in (result.get("items") or []) if isinstance(row, dict)]
+    result["items"] = rows[: _limit(limit)]
+    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["panelId"] = str(result.get("panelId") or panel_id)
+    result["status"] = str(result.get("status") or ("ok" if rows else "warming"))
+    result["cacheMode"] = str(result.get("cacheMode") or "composed-seed")
+    result["source"] = str(result.get("source") or PANEL_CONFIGS.get(panel_id, {}).get("source") or "Public macro sources")
+    result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
+    result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
+    return result

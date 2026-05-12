@@ -33,7 +33,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Growth Demand Recession Tracker',
   eyebrow: 'macro',
   description: 'Demand and recession indicators for macro market positioning.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeGrowthDemandRecessionTracker(8),

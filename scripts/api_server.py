@@ -79,7 +79,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, food_retail_basket_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, food_retail_basket_service, geo_sanctions_shock_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, system_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -236,15 +236,20 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_dashboard_payload_cached": get_dashboard_payload_cached,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_cpi_release_calendar_snapshot": get_cpi_release_calendar_snapshot,
+        "get_cpi_release_command_center_snapshot": get_cpi_release_command_center_snapshot,
+        "get_cpi_components_pressure_registry_snapshot": get_cpi_components_pressure_registry_snapshot,
         "get_energy_gasoline_shock_snapshot": get_energy_gasoline_shock_snapshot,
+        "get_fed_reaction_growth_risk_board_snapshot": get_fed_reaction_growth_risk_board_snapshot,
         "get_fed_rates_polymarket_gap_snapshot": get_fed_rates_polymarket_gap_snapshot,
         "get_food_retail_basket_snapshot": get_food_retail_basket_snapshot,
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
         "get_growth_demand_recession_tracker_snapshot": get_growth_demand_recession_tracker_snapshot,
+        "get_goods_tariff_supply_watch_snapshot": get_goods_tariff_supply_watch_snapshot,
         "get_inflation_nowcast_snapshot": get_inflation_nowcast_snapshot,
         "get_jin10_panel_snapshot": get_jin10_panel_snapshot,
         "get_labor_wage_services_pressure_snapshot": get_labor_wage_services_pressure_snapshot,
+        "get_labor_services_inflation_monitor_snapshot": get_labor_services_inflation_monitor_snapshot,
         "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
         "get_market_by_id": get_market_by_id,
         "get_market_by_slug": get_market_by_slug,
@@ -376,12 +381,16 @@ def build_service_context() -> Dict[str, Any]:
         "get_cached_runtime_payload": get_cached_runtime_payload,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_cpi_release_calendar_snapshot": lambda limit=8: cpi_release_calendar_service.get_cpi_release_calendar_snapshot(build_service_context(), limit=limit),
+        "get_cpi_release_command_center_snapshot": lambda limit=36: macro_cpi_registry_service.get_cpi_release_command_center_snapshot(build_service_context(), limit=limit),
+        "get_cpi_components_pressure_registry_snapshot": lambda limit=36: macro_cpi_registry_service.get_cpi_components_pressure_registry_snapshot(build_service_context(), limit=limit),
         "get_energy_gasoline_shock_snapshot": lambda limit=6: energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot(build_service_context(), limit=limit),
+        "get_fed_reaction_growth_risk_board_snapshot": lambda limit=36: macro_cpi_registry_service.get_fed_reaction_growth_risk_board_snapshot(build_service_context(), limit=limit),
         "get_fed_rates_polymarket_gap_snapshot": lambda limit=8: macro_cpi_panels_service.get_fed_rates_polymarket_gap_snapshot(build_service_context(), limit=limit),
         "get_food_retail_basket_snapshot": lambda limit=8: food_retail_basket_service.get_food_retail_basket_snapshot(build_service_context(), limit=limit),
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=6: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
         "get_growth_demand_recession_tracker_snapshot": lambda limit=8: macro_cpi_panels_service.get_growth_demand_recession_tracker_snapshot(build_service_context(), limit=limit),
+        "get_goods_tariff_supply_watch_snapshot": lambda limit=36: macro_cpi_registry_service.get_goods_tariff_supply_watch_snapshot(build_service_context(), limit=limit),
         "get_existing_trade_read_source": get_existing_trade_read_source,
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_latest_content_snapshot": get_latest_content_snapshot,
@@ -426,6 +435,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_inflation_nowcast_snapshot": lambda: runtime_service.get_inflation_nowcast_snapshot(build_service_context()),
         "get_jin10_panel_snapshot": lambda limit=24: jin10_runtime_service.get_jin10_panel_snapshot(build_service_context(), limit=limit),
         "get_labor_wage_services_pressure_snapshot": lambda limit=8: macro_cpi_panels_service.get_labor_wage_services_pressure_snapshot(build_service_context(), limit=limit),
+        "get_labor_services_inflation_monitor_snapshot": lambda limit=36: macro_cpi_registry_service.get_labor_services_inflation_monitor_snapshot(build_service_context(), limit=limit),
         "get_nba_intel_snapshot": lambda limit=12: runtime_service.get_nba_intel_snapshot(build_service_context(), limit=limit),
         "get_nba_matchup_predictor_snapshot": lambda limit=8: runtime_service.get_nba_matchup_predictor_snapshot(build_service_context(), limit=limit),
         "get_nba_scoreboard_snapshot": lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(build_service_context(), limit=limit),
@@ -833,6 +843,26 @@ def get_polymarket_macro_map_snapshot(limit: int = 12) -> Dict[str, Any]:
 
 def get_cpi_release_calendar_snapshot(limit: int = 8) -> Dict[str, Any]:
     return cpi_release_calendar_service.get_cpi_release_calendar_snapshot(build_service_context(), limit=limit)
+
+
+def get_cpi_release_command_center_snapshot(limit: int = 36) -> Dict[str, Any]:
+    return macro_cpi_registry_service.get_cpi_release_command_center_snapshot(build_service_context(), limit=limit)
+
+
+def get_cpi_components_pressure_registry_snapshot(limit: int = 36) -> Dict[str, Any]:
+    return macro_cpi_registry_service.get_cpi_components_pressure_registry_snapshot(build_service_context(), limit=limit)
+
+
+def get_goods_tariff_supply_watch_snapshot(limit: int = 36) -> Dict[str, Any]:
+    return macro_cpi_registry_service.get_goods_tariff_supply_watch_snapshot(build_service_context(), limit=limit)
+
+
+def get_labor_services_inflation_monitor_snapshot(limit: int = 36) -> Dict[str, Any]:
+    return macro_cpi_registry_service.get_labor_services_inflation_monitor_snapshot(build_service_context(), limit=limit)
+
+
+def get_fed_reaction_growth_risk_board_snapshot(limit: int = 36) -> Dict[str, Any]:
+    return macro_cpi_registry_service.get_fed_reaction_growth_risk_board_snapshot(build_service_context(), limit=limit)
 
 
 def get_energy_gasoline_shock_snapshot(limit: int = 6) -> Dict[str, Any]:

@@ -33,7 +33,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Fed Rates Polymarket Gap',
   eyebrow: 'macro',
   description: 'Rates tape and Polymarket Fed-market context.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeFedRatesPolymarketGap(8),

@@ -228,7 +228,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Polymarket Macro Market Map',
   eyebrow: 'macro',
   description: 'Active CPI, Fed, growth, labor, and energy market clusters from Polymarket.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimePolymarketMacroMap(12),

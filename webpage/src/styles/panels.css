@@ -3912,7 +3912,7 @@
 
 .wm-intel-signal-main {
   display: grid !important;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 6px minmax(0, 1fr);
   align-items: center;
   gap: 10px !important;
 }
@@ -3923,92 +3923,100 @@
   gap: 3px;
 }
 
-.wm-intel-glyph {
-  width: 30px;
+.wm-intel-mark {
+  width: 4px;
+  height: 34px;
+  color: #9aa4ac;
+  display: block;
+}
+
+.wm-intel-mark i {
+  width: 4px;
   height: 30px;
-  border: 1px solid rgba(142, 151, 146, 0.28);
-  background:
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.08), transparent 58%),
-    #141414;
-  color: #98a3ad;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  background: currentColor;
+  box-shadow: 0 0 12px rgba(154, 164, 172, 0.32);
+  display: block;
 }
 
-.wm-intel-glyph svg {
-  width: 20px;
-  height: 20px;
+.wm-intel-mark em {
+  display: none !important;
 }
 
-.wm-intel-glyph.hot {
-  border-color: rgba(215, 107, 79, 0.58);
+.wm-intel-mark.hot {
   color: #ee8a6c;
-  background: radial-gradient(circle at 50% 50%, rgba(215, 107, 79, 0.2), transparent 62%), #171312;
+  text-shadow: 0 0 12px rgba(238, 138, 108, 0.28);
 }
 
-.wm-intel-glyph.watch {
-  border-color: rgba(209, 164, 68, 0.58);
+.wm-intel-mark.watch {
   color: #d6b65b;
-  background: radial-gradient(circle at 50% 50%, rgba(209, 164, 68, 0.18), transparent 62%), #171510;
+  text-shadow: 0 0 12px rgba(214, 182, 91, 0.24);
 }
 
-.wm-intel-glyph.cool {
-  border-color: rgba(79, 169, 135, 0.58);
+.wm-intel-mark.cool {
   color: #76c7a4;
-  background: radial-gradient(circle at 50% 50%, rgba(79, 169, 135, 0.18), transparent 62%), #111716;
+  text-shadow: 0 0 12px rgba(118, 199, 164, 0.24);
 }
 
-.wm-intel-glyph.neutral {
-  border-color: rgba(102, 124, 154, 0.48);
+.wm-intel-mark.neutral {
   color: #8da4c6;
 }
 
+.wm-row-marker,
 .wm-row-glyph {
   width: 24px;
-  height: 24px;
+  height: 22px;
   min-width: 24px;
-  border: 1px solid rgba(142, 151, 146, 0.28);
-  background: #141414;
   color: #98a3ad;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
+  gap: 5px;
 }
 
-.wm-row-glyph svg {
-  width: 15px;
-  height: 15px;
+.wm-row-marker i,
+.wm-row-glyph::before {
+  width: 3px;
+  height: 18px;
+  background: currentColor;
+  content: "";
+  display: block;
+  opacity: 0.9;
 }
 
+.wm-row-marker em,
+.wm-row-glyph {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.wm-row-marker.hot,
 .wm-row-glyph.hot {
-  border-color: rgba(215, 107, 79, 0.52);
   color: #ee8a6c;
-  background: rgba(215, 107, 79, 0.08);
 }
 
+.wm-row-marker.cool,
 .wm-row-glyph.cool {
-  border-color: rgba(79, 169, 135, 0.52);
   color: #76c7a4;
-  background: rgba(79, 169, 135, 0.08);
 }
 
+.wm-row-marker.watch,
 .wm-row-glyph.watch {
-  border-color: rgba(209, 164, 68, 0.52);
   color: #d6b65b;
-  background: rgba(209, 164, 68, 0.08);
 }
 
+.wm-row-marker.official,
 .wm-row-glyph.official {
-  border-color: rgba(102, 124, 154, 0.54);
   color: #8da4c6;
-  background: rgba(102, 124, 154, 0.09);
 }
 
+.wm-row-marker.market,
 .wm-row-glyph.market {
-  border-color: rgba(126, 101, 176, 0.56);
   color: #b7a5e4;
-  background: rgba(126, 101, 176, 0.1);
 }
 
 .wm-status-badge {
@@ -4107,6 +4115,10 @@
   line-height: 1.35;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.wm-intel-signal-band > em {
+  margin-left: 16px;
 }
 
 .wm-food-basket-proxy-note strong {
@@ -4348,6 +4360,7 @@
   gap: 6px;
 }
 
+.wm-macro-map-category > .wm-row-marker,
 .wm-macro-map-category > .wm-row-glyph {
   grid-row: 1 / 3;
 }
@@ -4843,6 +4856,7 @@
   align-items: center;
 }
 
+.wm-energy-event-log .wm-row-marker,
 .wm-energy-event-log .wm-row-glyph {
   grid-row: 1 / 3;
 }
@@ -5090,12 +5104,14 @@
 }
 
 .wm-macro-driver-list,
+.wm-macro-registry-list,
 .wm-nowcast-quarterly-log {
   display: grid;
   gap: 7px;
 }
 
-.wm-macro-driver-row {
+.wm-macro-driver-row,
+.wm-macro-registry-row {
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid #252525;
@@ -5107,25 +5123,67 @@
   align-items: center;
 }
 
-.wm-macro-driver-row.hot {
+.wm-macro-registry-row {
+  grid-template-columns: 4px minmax(0, 1fr) 62px;
+  grid-template-areas:
+    "marker main value"
+    "marker main badge";
+  column-gap: 8px;
+  row-gap: 2px;
+}
+
+.wm-macro-registry-row .wm-row-marker {
+  grid-area: marker;
+  align-self: stretch;
+  width: 4px;
+  min-width: 4px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.wm-macro-registry-row .wm-row-marker i {
+  width: 100%;
+  height: 100%;
+  min-height: 32px;
+  border-radius: 0;
+}
+
+.wm-macro-registry-row .wm-row-marker em {
+  display: none;
+}
+
+.wm-macro-driver-row.hot,
+.wm-macro-registry-row.hot {
   border-left-color: #a95c41;
 }
 
-.wm-macro-driver-row.cool {
+.wm-macro-driver-row.cool,
+.wm-macro-registry-row.cool {
   border-left-color: #4f8d72;
 }
 
-.wm-macro-driver-row.watch {
+.wm-macro-driver-row.watch,
+.wm-macro-registry-row.watch {
   border-left-color: #9a7a35;
 }
 
-.wm-macro-driver-main {
+.wm-macro-driver-main,
+.wm-macro-registry-main {
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
+.wm-macro-registry-main {
+  grid-area: main;
+}
+
 .wm-macro-driver-main span,
+.wm-macro-registry-main span,
+.wm-macro-registry-main em,
 .wm-macro-driver-top span,
 .wm-macro-driver-top em,
 .wm-macro-driver-footer,
@@ -5140,8 +5198,19 @@
   text-transform: uppercase;
 }
 
+.wm-macro-registry-main span,
+.wm-macro-registry-main em {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wm-macro-driver-main strong,
+.wm-macro-registry-main strong,
 .wm-macro-driver-value,
+.wm-macro-registry-value,
 .wm-macro-driver-top strong,
 .wm-nowcast-driver-row strong,
 .wm-nowcast-quarterly-log strong {
@@ -5160,9 +5229,21 @@
   font-size: 13px;
 }
 
-.wm-macro-driver-row .wm-status-badge {
+.wm-macro-registry-value {
+  grid-area: value;
+  justify-self: end;
+  font-size: 13px;
+}
+
+.wm-macro-driver-row .wm-status-badge,
+.wm-macro-registry-row .wm-status-badge {
   justify-self: end;
   width: 100%;
+}
+
+.wm-macro-registry-row .wm-status-badge {
+  grid-area: badge;
+  min-width: 0;
 }
 
 .wm-macro-driver-top {
@@ -5177,6 +5258,7 @@
   align-items: center;
 }
 
+.wm-macro-driver-top .wm-row-marker,
 .wm-macro-driver-top .wm-row-glyph {
   grid-row: 1 / 3;
 }
@@ -5256,6 +5338,7 @@
   align-items: center;
 }
 
+.wm-nowcast-quarterly-log .wm-row-marker,
 .wm-nowcast-quarterly-log .wm-row-glyph {
   grid-row: 1 / 3;
 }
@@ -5320,6 +5403,7 @@
   }
 
   .wm-macro-driver-row,
+  .wm-macro-registry-row,
   .wm-nowcast-quarterly-log div {
     grid-template-columns: 28px minmax(0, 1fr) 68px;
   }
@@ -5332,14 +5416,16 @@
   .wm-cpi-calendar-row > .wm-status-badge:last-child,
   .wm-food-basket-row em,
   .wm-energy-row .wm-status-badge,
-  .wm-macro-driver-row .wm-status-badge {
+  .wm-macro-driver-row .wm-status-badge,
+  .wm-macro-registry-row .wm-status-badge {
     grid-column: 2 / -1;
     justify-self: start;
     width: auto;
     text-align: left;
   }
 
-  .wm-macro-driver-value {
+  .wm-macro-driver-value,
+  .wm-macro-registry-value {
     justify-self: end;
   }
 

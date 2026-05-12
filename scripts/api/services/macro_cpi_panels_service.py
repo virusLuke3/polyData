@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
 DEFAULT_ITEM_LIMIT = 8
+MAX_ITEM_LIMIT = 60
 DEFAULT_TTL_SECONDS = 21600
 FRED_SOURCE = "FRED CSV / public macro series"
 CACHE_KEY = "panel-v2"
@@ -31,6 +32,13 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "linkedMarketCategories": ["cpi", "fed", "growth"],
         "series": [
             {"key": "ppi_all", "seriesId": "PPIACO", "label": "Producer prices all commodities", "group": "Upstream", "icon": "source", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "cpi_commodities", "seriesId": "CUSR0000SAC", "label": "CPI commodities", "group": "Goods CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "durables", "seriesId": "CUSR0000SAD", "label": "CPI durables", "group": "Goods CPI", "icon": "market", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "nondurables", "seriesId": "CUSR0000SAN", "label": "CPI nondurables", "group": "Goods CPI", "icon": "basket", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "commodities_less_food_energy", "seriesId": "CUSR0000SACL1E", "label": "Commodities ex food/energy", "group": "Core goods", "icon": "source", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "new_vehicles", "seriesId": "CUSR0000SETA01", "label": "New vehicles CPI", "group": "Vehicles", "icon": "market", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "used_cars", "seriesId": "CUSR0000SETA02", "label": "Used cars and trucks CPI", "group": "Vehicles", "icon": "market", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "apparel", "seriesId": "CUSR0000SAA", "label": "Apparel CPI", "group": "Goods CPI", "icon": "source", "unit": "idx", "metric": "pct", "toneUp": "hot"},
             {"key": "imports", "seriesId": "IMPGS", "label": "Imports of goods & services", "group": "Imports", "icon": "market", "unit": "bil", "metric": "pct", "toneUp": "cool"},
             {"key": "export_import", "seriesId": "EXPGS", "label": "Exports of goods & services", "group": "Trade", "icon": "growth", "unit": "bil", "metric": "pct", "toneUp": "cool"},
         ],
@@ -48,6 +56,9 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
             {"key": "oer", "seriesId": "CUSR0000SEHC", "label": "Owners equivalent rent", "group": "OER", "icon": "home", "unit": "idx", "metric": "pct", "toneUp": "hot"},
             {"key": "shelter", "seriesId": "CUSR0000SAH1", "label": "Shelter CPI", "group": "Shelter", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
             {"key": "home_prices", "seriesId": "CSUSHPINSA", "label": "Case-Shiller home prices", "group": "Housing", "icon": "market", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "rent_nsa", "seriesId": "CUUR0000SEHA", "label": "Rent of residence NSA", "group": "Rent", "icon": "home", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "oer_nsa", "seriesId": "CUUR0000SEHC", "label": "Owners equivalent rent NSA", "group": "OER", "icon": "home", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "us_house_price", "seriesId": "USSTHPI", "label": "US house price index", "group": "Housing", "icon": "market", "unit": "idx", "metric": "pct", "toneUp": "hot"},
         ],
     },
     "labor-wage-services-pressure": {
@@ -62,7 +73,15 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
             {"key": "unrate", "seriesId": "UNRATE", "label": "Unemployment rate", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "cool"},
             {"key": "wages", "seriesId": "CES0500000003", "label": "Avg hourly earnings", "group": "Wages", "icon": "fed", "unit": "$", "metric": "pct", "toneUp": "hot"},
             {"key": "claims", "seriesId": "ICSA", "label": "Initial jobless claims", "group": "Claims", "icon": "source", "unit": "k", "metric": "delta", "toneUp": "cool"},
+            {"key": "continuing_claims", "seriesId": "CCSA", "label": "Continuing jobless claims", "group": "Claims", "icon": "source", "unit": "k", "metric": "delta", "toneUp": "cool"},
             {"key": "openings", "seriesId": "JTSJOL", "label": "Job openings", "group": "JOLTS", "icon": "market", "unit": "k", "metric": "delta", "toneUp": "hot"},
+            {"key": "quits_rate", "seriesId": "JTSQUR", "label": "Quits rate", "group": "JOLTS", "icon": "market", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "participation", "seriesId": "CIVPART", "label": "Labor force participation", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "cool"},
+            {"key": "employment_ratio", "seriesId": "EMRATIO", "label": "Employment-population ratio", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "u6", "seriesId": "U6RATE", "label": "U-6 unemployment rate", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "cool"},
+            {"key": "weekly_hours", "seriesId": "CES0500000002", "label": "Avg weekly hours", "group": "Wages", "icon": "fed", "unit": "hrs", "metric": "delta", "toneUp": "hot"},
+            {"key": "services_cpi", "seriesId": "CUSR0000SAS", "label": "Services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "medical_services", "seriesId": "CUSR0000SAM", "label": "Medical care CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
         ],
     },
     "growth-demand-recession-tracker": {
@@ -78,6 +97,11 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
             {"key": "industrial", "seriesId": "INDPRO", "label": "Industrial production", "group": "Output", "icon": "growth", "unit": "idx", "metric": "pct", "toneUp": "hot"},
             {"key": "gdp", "seriesId": "GDPC1", "label": "Real GDP", "group": "GDP", "icon": "growth", "unit": "bil", "metric": "pct", "toneUp": "hot"},
             {"key": "curve", "seriesId": "T10Y2Y", "label": "10Y minus 2Y Treasury", "group": "Curve", "icon": "rates", "unit": "pp", "metric": "level", "toneUp": "hot"},
+            {"key": "real_pce", "seriesId": "PCEC96", "label": "Real PCE", "group": "Demand", "icon": "cpi", "unit": "bil", "metric": "pct", "toneUp": "hot"},
+            {"key": "real_income", "seriesId": "DSPIC96", "label": "Real disposable income", "group": "Income", "icon": "growth", "unit": "bil", "metric": "pct", "toneUp": "hot"},
+            {"key": "housing_starts", "seriesId": "HOUST", "label": "Housing starts", "group": "Housing", "icon": "home", "unit": "k", "metric": "pct", "toneUp": "hot"},
+            {"key": "building_permits", "seriesId": "PERMIT", "label": "Building permits", "group": "Housing", "icon": "home", "unit": "k", "metric": "pct", "toneUp": "hot"},
+            {"key": "consumer_sentiment", "seriesId": "UMCSENT", "label": "Consumer sentiment", "group": "Demand", "icon": "market", "unit": "idx", "metric": "delta", "toneUp": "hot"},
         ],
     },
     "fed-rates-polymarket-gap": {
@@ -91,8 +115,13 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
             {"key": "dff", "seriesId": "DFF", "label": "Effective Fed funds", "group": "Fed", "icon": "fed", "unit": "%", "metric": "level", "toneUp": "hot"},
             {"key": "sofr", "seriesId": "SOFR", "label": "SOFR", "group": "Money", "icon": "rates", "unit": "%", "metric": "level", "toneUp": "hot"},
             {"key": "two_year", "seriesId": "DGS2", "label": "2Y Treasury", "group": "Front-end", "icon": "rates", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "three_month", "seriesId": "DGS3MO", "label": "3M Treasury", "group": "Front-end", "icon": "rates", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "five_year", "seriesId": "DGS5", "label": "5Y Treasury", "group": "Curve", "icon": "rates", "unit": "%", "metric": "level", "toneUp": "hot"},
             {"key": "ten_year", "seriesId": "DGS10", "label": "10Y Treasury", "group": "Long-end", "icon": "market", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "thirty_year", "seriesId": "DGS30", "label": "30Y Treasury", "group": "Long-end", "icon": "market", "unit": "%", "metric": "level", "toneUp": "hot"},
             {"key": "curve", "seriesId": "T10Y2Y", "label": "10Y / 2Y curve", "group": "Curve", "icon": "growth", "unit": "pp", "metric": "level", "toneUp": "cool"},
+            {"key": "target_upper", "seriesId": "DFEDTARU", "label": "Fed target upper bound", "group": "Fed", "icon": "fed", "unit": "%", "metric": "level", "toneUp": "hot"},
+            {"key": "target_lower", "seriesId": "DFEDTARL", "label": "Fed target lower bound", "group": "Fed", "icon": "fed", "unit": "%", "metric": "level", "toneUp": "hot"},
         ],
     },
 }
@@ -273,7 +302,7 @@ def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT
     if config.get("federalRegisterQuery"):
         try:
             policy_items = _fetch_federal_register_items(ctx, panel_id, config, limit)
-            items.extend(policy_items)
+            items = items[:3] + policy_items + items[3:]
             sources["federal_register"] = "ok" if policy_items else "empty"
         except Exception as exc:
             sources["federal_register"] = "error"
@@ -281,7 +310,7 @@ def build_macro_cpi_panel_payload(ctx: dict, panel_id: str, limit: int = DEFAULT
             if logger is not None:
                 logger.exception("macro cpi panel federal register failed panel=%s error=%s", panel_id, exc)
     status = "ok" if sources and all(value in {"ok", "empty"} for value in sources.values()) else ("degraded" if items else "warming")
-    limited_items = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 12))]
+    limited_items = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
     return {
         "generatedAt": _utc_now_iso(ctx),
         "source": config.get("source") or FRED_SOURCE,
@@ -312,7 +341,7 @@ def normalize_macro_cpi_panel_payload(payload: Any, *, ctx: dict, panel_id: str,
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     config = PANEL_CONFIGS[panel_id]
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
-    result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 12))]
+    result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(panel_id, config, result["items"], result.get("sources") or {})
     result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))

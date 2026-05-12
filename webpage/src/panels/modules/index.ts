@@ -20,6 +20,11 @@ import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
 import { panel as cryptoFundingWatch } from './crypto-funding-watch';
 import { panel as geoSanctionsShock } from './geo-sanctions-shock';
+import { panel as cpiReleaseCommandCenter } from './cpi-release-command-center';
+import { panel as cpiComponentsPressureRegistry } from './cpi-components-pressure-registry';
+import { panel as goodsTariffSupplyWatch } from './goods-tariff-supply-watch';
+import { panel as laborServicesInflationMonitor } from './labor-services-inflation-monitor';
+import { panel as fedReactionGrowthRiskBoard } from './fed-reaction-growth-risk-board';
 import { panel as polymarketMacroMap } from './polymarket-macro-map';
 import { panel as cpiReleaseCalendar } from './cpi-release-calendar';
 import { panel as energyGasolineShock } from './energy-gasoline-shock';
@@ -62,6 +67,11 @@ export const PANEL_MODULES: PanelModule[] = [
   cryptoWatch,
   cryptoFundingWatch,
   geoSanctionsShock,
+  cpiReleaseCommandCenter,
+  cpiComponentsPressureRegistry,
+  goodsTariffSupplyWatch,
+  laborServicesInflationMonitor,
+  fedReactionGrowthRiskBoard,
   polymarketMacroMap,
   cpiReleaseCalendar,
   energyGasolineShock,

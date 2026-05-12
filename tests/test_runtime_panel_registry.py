@@ -41,11 +41,16 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
         "get_crypto_funding_watch_snapshot": lambda limit=16: {"limit": limit},
         "get_cpi_release_calendar_snapshot": lambda limit=8: {"limit": limit},
+        "get_cpi_release_command_center_snapshot": lambda limit=36: {"limit": limit},
+        "get_cpi_components_pressure_registry_snapshot": lambda limit=48: {"limit": limit},
         "get_energy_gasoline_shock_snapshot": lambda limit=6: {"limit": limit},
+        "get_fed_reaction_growth_risk_board_snapshot": lambda limit=36: {"limit": limit},
         "get_food_retail_basket_snapshot": lambda limit=8: {"limit": limit},
+        "get_goods_tariff_supply_watch_snapshot": lambda limit=36: {"limit": limit},
         "get_supply_tariff_import_watch_snapshot": lambda limit=8: {"limit": limit},
         "get_shelter_rent_oer_pressure_snapshot": lambda limit=8: {"limit": limit},
         "get_labor_wage_services_pressure_snapshot": lambda limit=8: {"limit": limit},
+        "get_labor_services_inflation_monitor_snapshot": lambda limit=36: {"limit": limit},
         "get_growth_demand_recession_tracker_snapshot": lambda limit=8: {"limit": limit},
         "get_fed_rates_polymarket_gap_snapshot": lambda limit=8: {"limit": limit},
         "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
@@ -66,15 +71,10 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert "active-markets" in panel_ids
     assert "espn-matchup-predictor" in panel_ids
     assert "crypto-funding-watch" in panel_ids
-    assert "polymarket-macro-map" in panel_ids
-    assert "cpi-release-calendar" in panel_ids
-    assert "energy-gasoline-shock" in panel_ids
-    assert "food-retail-basket-pressure" in panel_ids
-    assert "supply-tariff-import-watch" in panel_ids
-    assert "shelter-rent-oer-pressure" in panel_ids
-    assert "labor-wage-services-pressure" in panel_ids
-    assert "growth-demand-recession-tracker" in panel_ids
-    assert "inflation-nowcast" in panel_ids
-    assert "fed-rates-polymarket-gap" in panel_ids
+    assert "cpi-release-command-center" in panel_ids
+    assert "cpi-components-pressure-registry" in panel_ids
+    assert "goods-tariff-supply-watch" in panel_ids
+    assert "labor-services-inflation-monitor" in panel_ids
+    assert "fed-reaction-growth-risk-board" in panel_ids
     assert "f1-trackside" in panel_ids
     assert len(panel_ids) == len(set(panel_ids))

@@ -13,8 +13,11 @@ DEFAULT_ITEM_LIMIT = 8
 SERIES = (
     {"key": "food", "seriesId": "CPIUFDSL", "label": "Food CPI", "weight": 1.0},
     {"key": "home", "seriesId": "CUSR0000SAF11", "label": "Food at home", "weight": 1.3},
+    {"key": "away", "seriesId": "CUSR0000SEFV", "label": "Food away from home", "weight": 1.1},
+    {"key": "cereals", "seriesId": "CUSR0000SAF111", "label": "Cereals / bakery", "weight": 0.8},
     {"key": "meat_eggs", "seriesId": "CUSR0000SAF112", "label": "Meat / eggs", "weight": 1.1},
     {"key": "fruit_veg", "seriesId": "CUSR0000SAF113", "label": "Fruit / veg", "weight": 0.9},
+    {"key": "beverages", "seriesId": "CUSR0000SAF116", "label": "Nonalcoholic beverages", "weight": 0.6},
     {"key": "eggs", "seriesId": "CUSR0000SEFJ", "label": "Eggs", "weight": 0.6},
 )
 
@@ -99,7 +102,7 @@ def build_food_retail_basket_payload(ctx: dict) -> Dict[str, Any]:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger is not None:
                 logger.exception("food basket source failed source=%s error=%s", spec["key"], exc)
-    status = "ok" if len(items) == len(SERIES) else ("degraded" if items else "warming")
+    status = "ok" if len(items) >= 5 else ("degraded" if items else "warming")
     return {
         "generatedAt": _utc_now_iso(ctx),
         "source": "FRED CSV / BLS CPI food components",
@@ -120,7 +123,7 @@ def normalize_food_retail_basket_payload(payload: Any, *, ctx: dict, limit: int 
         return _empty(ctx, "invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
-    result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 12))]
+    result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 24))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items)
     result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
     result["status"] = str(result.get("status") or ("ok" if items else "warming"))
@@ -150,11 +153,13 @@ def _read_seeded(ctx: dict, ttl: int) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_food_retail_basket_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
+def get_food_retail_basket_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
     ttl = max(1800, int(getattr(ctx["SETTINGS"], "food_basket_ttl_seconds", 21600) or 21600))
     seeded = _read_seeded(ctx, ttl)
     if seeded is not None:
         return normalize_food_retail_basket_payload(seeded, ctx=ctx, limit=limit)
+    if not allow_live_build:
+        return normalize_food_retail_basket_payload({**_empty(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
     payload = _with_mode(build_food_retail_basket_payload(ctx), "live-build")
     if payload.get("items"):
         store = ctx.get("SNAPSHOT_STORE")
