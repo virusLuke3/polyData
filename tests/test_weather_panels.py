@@ -182,15 +182,19 @@ def test_weather_news_bad_xml_degrades_without_items():
 def test_weather_news_filters_sports_storm_false_positives():
     rss = """<?xml version="1.0"?><rss><channel>
       <item><title>Eels v Storm: Moses riding high</title><link>https://news.example/sports</link><source>NRL.com</source><pubDate>Tue, 12 May 2026 10:00:00 GMT</pubDate><description>NRL team news and picks.</description></item>
+      <item><title>Melbourne ambush: Storm snap losing streak</title><link>https://news.example/storm-team</link><source>Daily Telegraph Sydney</source><pubDate>Tue, 12 May 2026 09:45:00 GMT</pubDate><description>Emotional Bellamy return.</description></item>
       <item><title>Perth property bloodbath warning amid housing crash</title><link>https://news.example/property</link><source>PerthNow</source><pubDate>Tue, 12 May 2026 09:30:00 GMT</pubDate><description>Property market warning.</description></item>
       <item><title>Johannesburg severe storm disrupts flights</title><link>https://news.example/weather</link><source>Travel Desk</source><pubDate>Tue, 12 May 2026 09:00:00 GMT</pubDate><description>Severe storm and wind delays expected.</description></item>
+      <item><title>Chicago weather: Tracking late storm chances</title><link>https://news.example/chicago</link><source>FOX 32 Chicago</source><pubDate>Tue, 12 May 2026 08:00:00 GMT</pubDate><description>Storm chance returns Tuesday.</description></item>
     </channel></rss>"""
     ctx = make_ctx(http_text_get=lambda *args, **kwargs: rss)
     payload = weather_news_service.build_weather_news_payload(ctx, limit=5)
 
     titles = [item["title"] for item in payload["items"]]
     assert "Johannesburg severe storm disrupts flights" in titles
+    assert "Chicago weather: Tracking late storm chances" in titles
     assert all("Eels v Storm" not in title for title in titles)
+    assert all("Storm snap losing streak" not in title for title in titles)
     assert all("property bloodbath" not in title for title in titles)
 
 

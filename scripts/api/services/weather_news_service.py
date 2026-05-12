@@ -19,7 +19,7 @@ DEFAULT_NEWS_LIMIT = 24
 
 RELEVANCE_RE = re.compile(r"\b(weather|forecast|storm|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane)\b", re.I)
 WEATHER_CONTEXT_RE = re.compile(
-    r"\b(weather|forecast|rain|heat|heatwave|cold|wind|snow|flood|temperature|typhoon|hurricane|tornado|freeze|severe storm|thunderstorm|storm damage|storm chance|storm threat|storm-hit|strong storm)\b",
+    r"\b(weather|forecast|rain|heat|heatwave|cold|wind|snow|flood|temperature|typhoon|hurricane|tornado|freeze|severe storms?|thunderstorms?|storm damage|storm chance|storm threat|storm warning|storm watch|storm advisory|storm-hit|strong storms?|storms? disrupts?|storms? delays?|storms? expected|storms? bring|storms? lash|storms? batter)\b",
     re.I,
 )
 SPORTS_FALSE_POSITIVE_RE = re.compile(
@@ -114,12 +114,12 @@ def fetch_google_news_rss(ctx: dict, city: Dict[str, Any]) -> List[Dict[str, Any
         summary = _strip_summary(_text(item, "description"))
         source_node = item.find("source")
         source = html.unescape(str(source_node.text or "").strip()) if source_node is not None else "Google News"
-        combined = f"{title} {summary}"
+        combined = f"{title} {summary} {source}"
         if not RELEVANCE_RE.search(combined):
             continue
         if not WEATHER_CONTEXT_RE.search(combined):
             continue
-        if SPORTS_FALSE_POSITIVE_RE.search(combined) and not WEATHER_CONTEXT_RE.search(combined):
+        if SPORTS_FALSE_POSITIVE_RE.search(combined):
             continue
         tags = _tags(combined)
         items.append(
