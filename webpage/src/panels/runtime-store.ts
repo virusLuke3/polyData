@@ -8,15 +8,21 @@ export function getRefreshablePanels(panels: PanelModule[], tier: PanelRefreshTi
   return panels.filter((panel) => panel.refresh?.tier === tier && typeof panel.fetchData === 'function');
 }
 
-export async function fetchPanelRuntimeData(panels: PanelModule[]): Promise<PanelRuntimeData> {
+export async function fetchPanelRuntimeData(
+  panels: PanelModule[],
+  onPanelData?: (panelId: string, value: unknown) => void,
+): Promise<PanelRuntimeData> {
   const entries = panels.filter((panel) => typeof panel.fetchData === 'function');
-  const settled = await Promise.allSettled(entries.map((panel) => panel.fetchData!()));
   const patch: PanelRuntimeData = {};
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      patch[entries[index]!.id] = result.value;
+  await Promise.all(entries.map(async (panel) => {
+    try {
+      const value = await panel.fetchData!();
+      patch[panel.id] = value;
+      onPanelData?.(panel.id, value);
+    } catch {
+      // Runtime panels are opportunistic; keep the last visible seed on transient misses.
     }
-  });
+  }));
   return patch;
 }
 

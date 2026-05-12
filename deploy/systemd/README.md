@@ -18,6 +18,7 @@ production services on one machine.
 - `polydata-market-group-seed.service`
 - `polydata-crypto-funding-seed.service`
 - `polydata-inflation-nowcast-seed.service`
+- `polydata-macro-cpi-panels-seed.service`
 - `polydata-alpha-signal-seed.service`
 - `polydata-whale-trades-seed.service`
 - `polydata-suspicious-trades-seed.service`

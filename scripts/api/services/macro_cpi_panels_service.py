@@ -12,6 +12,13 @@ DEFAULT_ITEM_LIMIT = 8
 DEFAULT_TTL_SECONDS = 21600
 FRED_SOURCE = "FRED CSV / public macro series"
 CACHE_KEY = "panel-v2"
+MACRO_CPI_PANEL_IDS = (
+    "supply-tariff-import-watch",
+    "shelter-rent-oer-pressure",
+    "labor-wage-services-pressure",
+    "growth-demand-recession-tracker",
+    "fed-rates-polymarket-gap",
+)
 
 
 PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
@@ -106,6 +113,10 @@ def _float(value: Any) -> Optional[float]:
 
 def _snapshot_namespace(panel_id: str) -> str:
     return f"{SNAPSHOT_NAMESPACE_PREFIX}{panel_id}"
+
+
+def ttl_seconds(ctx: dict) -> int:
+    return max(1800, int(getattr(ctx["SETTINGS"], "macro_cpi_panel_ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
 
 
 def _fred_url(ctx: dict, series_id: str) -> str:
@@ -333,11 +344,13 @@ def _read_seeded(ctx: dict, panel_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_macro_cpi_panel_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    ttl = max(1800, int(getattr(ctx["SETTINGS"], "macro_cpi_panel_ttl_seconds", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
+def get_macro_cpi_panel_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    ttl = ttl_seconds(ctx)
     seeded = _read_seeded(ctx, panel_id)
     if seeded is not None:
         return normalize_macro_cpi_panel_payload(seeded, ctx=ctx, panel_id=panel_id, limit=limit)
+    if not allow_live_build:
+        return normalize_macro_cpi_panel_payload(_with_mode(_empty(ctx, panel_id, "warming"), "seed-miss"), ctx=ctx, panel_id=panel_id, limit=limit)
     payload = _with_mode(build_macro_cpi_panel_payload(ctx, panel_id, limit=limit), "live-build")
     if payload.get("items"):
         namespace = _snapshot_namespace(panel_id)
@@ -350,21 +363,21 @@ def get_macro_cpi_panel_snapshot(ctx: dict, panel_id: str, limit: int = DEFAULT_
     return normalize_macro_cpi_panel_payload(payload, ctx=ctx, panel_id=panel_id, limit=limit)
 
 
-def get_supply_tariff_import_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    return get_macro_cpi_panel_snapshot(ctx, "supply-tariff-import-watch", limit=limit)
+def get_supply_tariff_import_watch_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    return get_macro_cpi_panel_snapshot(ctx, "supply-tariff-import-watch", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_shelter_rent_oer_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    return get_macro_cpi_panel_snapshot(ctx, "shelter-rent-oer-pressure", limit=limit)
+def get_shelter_rent_oer_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    return get_macro_cpi_panel_snapshot(ctx, "shelter-rent-oer-pressure", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_labor_wage_services_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    return get_macro_cpi_panel_snapshot(ctx, "labor-wage-services-pressure", limit=limit)
+def get_labor_wage_services_pressure_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    return get_macro_cpi_panel_snapshot(ctx, "labor-wage-services-pressure", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_growth_demand_recession_tracker_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    return get_macro_cpi_panel_snapshot(ctx, "growth-demand-recession-tracker", limit=limit)
+def get_growth_demand_recession_tracker_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    return get_macro_cpi_panel_snapshot(ctx, "growth-demand-recession-tracker", limit=limit, allow_live_build=allow_live_build)
 
 
-def get_fed_rates_polymarket_gap_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    return get_macro_cpi_panel_snapshot(ctx, "fed-rates-polymarket-gap", limit=limit)
+def get_fed_rates_polymarket_gap_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = False) -> Dict[str, Any]:
+    return get_macro_cpi_panel_snapshot(ctx, "fed-rates-polymarket-gap", limit=limit, allow_live_build=allow_live_build)

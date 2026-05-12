@@ -158,6 +158,7 @@ function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null
 
 type RuntimePanelRefreshOptions = {
   bootstrapPayload?: BootstrapPayload | null;
+  activePanelIds?: string[];
 };
 
 type IdleSchedulerWindow = Window & typeof globalThis & {
@@ -276,7 +277,7 @@ export function App() {
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
-  const slowRefreshInFlightRef = useRef(false);
+  const slowRefreshInFlightRef = useRef<Set<string>>(new Set());
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
 
@@ -334,30 +335,42 @@ export function App() {
     };
   }
 
-  async function refreshSlowRuntimePanels() {
-    const patch = await fetchPanelRuntimeData(SLOW_RUNTIME_PANELS);
-    setRuntimeData((current) => mergeRuntimeData(current, patch));
+  async function refreshSlowRuntimePanels(panels: typeof SLOW_RUNTIME_PANELS = SLOW_RUNTIME_PANELS) {
+    const eligible = panels.filter((panel) => !slowRefreshInFlightRef.current.has(panel.id));
+    if (!eligible.length) return;
+    eligible.forEach((panel) => slowRefreshInFlightRef.current.add(panel.id));
+    try {
+      const patch = await fetchPanelRuntimeData(eligible, (panelId, value) => {
+        setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
+      });
+      setRuntimeData((current) => mergeRuntimeData(current, patch));
+    } finally {
+      eligible.forEach((panel) => slowRefreshInFlightRef.current.delete(panel.id));
+    }
   }
 
-  function scheduleSlowRuntimePanels() {
-    if (slowRefreshCancelRef.current || slowRefreshInFlightRef.current) return;
+  function scheduleSlowRuntimePanels(excludedPanelIds = new Set<string>()) {
+    const panels = SLOW_RUNTIME_PANELS.filter((panel) => !excludedPanelIds.has(panel.id));
+    if (!panels.length || slowRefreshCancelRef.current) return;
     slowRefreshCancelRef.current = scheduleIdleTask(() => {
       slowRefreshCancelRef.current = null;
-      if (slowRefreshInFlightRef.current) return;
-      slowRefreshInFlightRef.current = true;
-      void refreshSlowRuntimePanels()
+      void refreshSlowRuntimePanels(panels)
         .catch((loadError) => {
           setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh slow runtime panels.'));
-        })
-        .finally(() => {
-          slowRefreshInFlightRef.current = false;
         });
     });
   }
 
   async function refreshRuntimePanels(options: RuntimePanelRefreshOptions = {}) {
     const fastResult = await refreshFastRuntimePanels(options);
-    scheduleSlowRuntimePanels();
+    const activePanelSet = new Set(options.activePanelIds || activePanelIds);
+    const visibleSlowPanels = SLOW_RUNTIME_PANELS.filter((panel) => activePanelSet.has(panel.id));
+    if (visibleSlowPanels.length) {
+      void refreshSlowRuntimePanels(visibleSlowPanels).catch((loadError) => {
+        setError((previous) => previous || (loadError instanceof Error ? loadError.message : 'Failed to refresh visible runtime panels.'));
+      });
+    }
+    scheduleSlowRuntimePanels(new Set(visibleSlowPanels.map((panel) => panel.id)));
     return fastResult;
   }
 
@@ -453,6 +466,7 @@ export function App() {
         if (cancelled) return;
 
         const defaultPanelIds = sanitizePanelIds(bootstrapPayload.defaultWorkspace?.panels || []);
+        const immediatePanelIds = activePanelIds.length ? sanitizePanelIds([...activePanelIds, ...defaultPanelIds]) : defaultPanelIds;
         const liveFeatured = bootstrapPayload.featuredMarket && isLiveStatus(bootstrapPayload.featuredMarket.status)
           ? bootstrapPayload.featuredMarket.id
           : null;
@@ -472,7 +486,7 @@ export function App() {
         ));
         setLoading(false);
 
-        void refreshRuntimePanels({ bootstrapPayload })
+        void refreshRuntimePanels({ bootstrapPayload, activePanelIds: immediatePanelIds })
           .then(({ marketsPayload, marketGroupsPayload }) => {
             if (cancelled) return;
             if (!liveFeatured && !bootstrapPayload.featuredMarket?.id) {

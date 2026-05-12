@@ -64,7 +64,7 @@ def make_context():
 
 
 def test_macro_cpi_panel_builds_fred_and_policy_items():
-    payload = macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot(make_context(), limit=8)
+    payload = macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot(make_context(), limit=8, allow_live_build=True)
 
     assert payload["status"] == "ok"
     assert payload["cacheMode"] == "live-build"
@@ -81,7 +81,15 @@ def test_all_remaining_macro_panels_return_normalized_payloads():
         "growth-demand-recession-tracker",
         "fed-rates-polymarket-gap",
     ):
-        payload = macro_cpi_panels_service.get_macro_cpi_panel_snapshot(ctx, panel_id, limit=5)
+        payload = macro_cpi_panels_service.get_macro_cpi_panel_snapshot(ctx, panel_id, limit=5, allow_live_build=True)
         assert payload["items"]
         assert payload["summary"]["panelId"] == panel_id
         assert len(payload["items"]) <= 5
+
+
+def test_macro_cpi_panel_api_is_seed_only_on_miss():
+    payload = macro_cpi_panels_service.get_supply_tariff_import_watch_snapshot(make_context(), limit=8)
+
+    assert payload["status"] == "warming"
+    assert payload["cacheMode"] == "seed-miss"
+    assert payload["items"] == []

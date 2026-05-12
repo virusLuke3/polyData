@@ -164,7 +164,7 @@ class SeedHealthTestCase(unittest.TestCase):
         payload = system_service.build_seed_health_payload(self.make_context(redis_payloads=redis_payloads))
 
         self.assertEqual("error", payload["status"])
-        self.assertEqual(14, payload["summary"]["watcherCount"])
+        self.assertEqual(len(system_service.SEED_META_SPECS), payload["summary"]["watcherCount"])
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("ok", geo["status"])
         self.assertEqual("fresh", geo["freshness"])
