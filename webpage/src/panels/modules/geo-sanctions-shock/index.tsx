@@ -3,6 +3,7 @@ import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { MarketImplicationStrip, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -82,12 +83,50 @@ function conflictFeedLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
   return `${provider} ${state}`;
 }
 
+function geoSignalLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  const summary = payload?.summary;
+  const nuclear = String(summary?.nuclearRisk || '').toLowerCase();
+  if (nuclear === 'critical' || nuclear === 'elevated') return `NUCLEAR RISK ${upperMetric(nuclear)}`;
+  if ((summary?.newSanctionsCount ?? 0) > 0) return 'SANCTIONS ACTIVE';
+  if ((summary?.hotspotCount ?? 0) > 0) return 'HOTSPOTS WATCH';
+  return 'GEO QUIET';
+}
+
+function geoSignalTone(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  const signal = geoSignalLabel(payload);
+  if (/CRITICAL|ELEVATED|ACTIVE/.test(signal)) return signalToneClass('alert high');
+  if (/WATCH/.test(signal)) return signalToneClass('watch');
+  return signalToneClass('quiet');
+}
+
+function GeoLinkedMarketRegistry({ payload }: { payload?: RuntimeGeoSanctionsShockPayload | null }) {
+  const markets = payload?.linkedMarkets || [];
+  return (
+    <div className="wm-linked-market-registry">
+      <div className="wm-linked-market-header">
+        <span>PMKT geo markets</span>
+        <em>{markets.length ? `${markets.length} linked` : 'No linked market seeded'}</em>
+      </div>
+      {markets.slice(0, 3).map((market, index) => (
+        <div className="wm-linked-market-row" key={`${market.marketId || market.slug || 'geo-market'}-${index}`}>
+          <div>
+            <span>{upperMetric(market.matchedBy || 'GEO')} / SCORE {market.score ?? '--'}</span>
+            <strong>{market.title || 'Linked geopolitical market'}</strong>
+          </div>
+          <em>{market.gammaActive ? 'LIVE' : 'WATCH'}</em>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
   const summary = payload?.summary;
   const items = payload?.items || [];
   const targetBreakdown = payload?.targetBreakdown || [];
+  const signal = geoSignalLabel(payload);
 
   return (
     <Panel
@@ -96,8 +135,17 @@ function GeoShockPanel({ payload }: {
       status={panelTone(payload?.status)}
       count={items.length || undefined}
       className="wm-market-panel wm-geo-shock-panel"
+      dataPanelId="geo-sanctions-shock"
     >
       <div className="wm-geo-shock-layout">
+        <div className={`wm-intel-signal-band ${geoSignalTone(payload)}`}>
+          <div>
+            <span>World shock driver</span>
+            <strong>{signal}</strong>
+          </div>
+          <em>OFAC / Federal Register / conflict fallback linked to macro risk</em>
+        </div>
+
         <section className="wm-geo-shock-summary-grid">
           <article className="wm-geo-shock-metric">
             <span>HOTSPOTS</span>
@@ -120,6 +168,8 @@ function GeoShockPanel({ payload }: {
             <strong>{upperMetric(summary?.militaryFeed || 'standby')}</strong>
           </article>
         </section>
+
+        <MarketImplicationStrip items={['Sanctions', 'Energy risk', 'Safe-haven flow', 'CPI tail risk']} />
 
         <section className="wm-geo-shock-section">
           <header className="wm-geo-shock-section-header">
@@ -178,6 +228,9 @@ function GeoShockPanel({ payload }: {
           </div>
         </section>
 
+        <GeoLinkedMarketRegistry payload={payload} />
+        <SourceStack sources={payload?.sources} labels={{ ofac: 'OFAC SLS', federalRegister: 'Federal Register', conflictFeed: upperMetric(payload?.conflictProvider || 'Conflict') }} />
+
         <footer className="wm-geo-shock-footer">
           <span>{sourceHealthLabel(payload?.sources)}</span>
           <span>{conflictFeedLabel(payload)}</span>
@@ -204,6 +257,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'world',
   description: 'Geopolitical shocks, sanctions changes, and linked macro-risk markets.',
   defaultEnabled: true,
+  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeGeoSanctionsShock(6),
