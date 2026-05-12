@@ -14,6 +14,7 @@ import type {
   RuntimeCryptoFundingPayload,
   RuntimeCpiReleaseCalendarPayload,
   RuntimeEnergyGasolineShockPayload,
+  RuntimeFoodRetailBasketPayload,
   RuntimeGeoSanctionsShockPayload,
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
@@ -180,6 +181,10 @@ export function fetchRuntimeCpiReleaseCalendar(limit = 8) {
 
 export function fetchRuntimeEnergyGasolineShock(limit = 6) {
   return apiGet<RuntimeEnergyGasolineShockPayload>(`/runtime/macro/energy-gasoline-shock?limit=${limit}`);
+}
+
+export function fetchRuntimeFoodRetailBasket(limit = 8) {
+  return apiGet<RuntimeFoodRetailBasketPayload>(`/runtime/macro/food-retail-basket?limit=${limit}`);
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 6) {

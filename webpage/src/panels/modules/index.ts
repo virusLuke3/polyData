@@ -23,6 +23,7 @@ import { panel as geoSanctionsShock } from './geo-sanctions-shock';
 import { panel as polymarketMacroMap } from './polymarket-macro-map';
 import { panel as cpiReleaseCalendar } from './cpi-release-calendar';
 import { panel as energyGasolineShock } from './energy-gasoline-shock';
+import { panel as foodRetailBasketPressure } from './food-retail-basket-pressure';
 import { panel as nbaScoreboard } from './nba-scoreboard';
 import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
@@ -59,6 +60,7 @@ export const PANEL_MODULES: PanelModule[] = [
   polymarketMacroMap,
   cpiReleaseCalendar,
   energyGasolineShock,
+  foodRetailBasketPressure,
   nbaScoreboard,
   nbaIntel,
   espnMatchupPredictor,

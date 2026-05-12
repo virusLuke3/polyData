@@ -22,6 +22,8 @@ from data_sources import (
     ENERGY_SHOCK_GASOLINE_XLS_URL,
     ENERGY_SHOCK_SOURCE_URL,
     ENERGY_SHOCK_WTI_XLS_URL,
+    FOOD_BASKET_FRED_CSV_URL_TEMPLATE,
+    FOOD_BASKET_SOURCE_URL,
     CRYPTO_FUNDING_WATCH_API_URL,
     CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
     CRYPTO_FUNDING_WATCH_SOURCE_URL,
@@ -155,6 +157,9 @@ class ApiSettings:
     energy_shock_diesel_xls_url: str
     energy_shock_source_url: str
     energy_shock_ttl_seconds: int
+    food_basket_fred_csv_url_template: str
+    food_basket_source_url: str
+    food_basket_ttl_seconds: int
     geo_shock_ofac_sdn_url: str
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
@@ -285,6 +290,15 @@ def load_api_settings() -> ApiSettings:
             ENERGY_SHOCK_SOURCE_URL or "https://www.eia.gov/petroleum/",
         ),
         energy_shock_ttl_seconds=_get_int("POLYDATA_ENERGY_SHOCK_TTL_SECONDS", 21600),
+        food_basket_fred_csv_url_template=_get_str(
+            "POLYDATA_FOOD_BASKET_FRED_CSV_URL_TEMPLATE",
+            FOOD_BASKET_FRED_CSV_URL_TEMPLATE or "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+        ),
+        food_basket_source_url=_get_str(
+            "POLYDATA_FOOD_BASKET_SOURCE_URL",
+            FOOD_BASKET_SOURCE_URL or "https://fred.stlouisfed.org/",
+        ),
+        food_basket_ttl_seconds=_get_int("POLYDATA_FOOD_BASKET_TTL_SECONDS", 21600),
         geo_shock_ofac_sdn_url=_get_str(
             "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
             GEO_SHOCK_OFAC_SDN_URL or "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",

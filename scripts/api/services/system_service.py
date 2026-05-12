@@ -104,6 +104,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 21600,
     },
     {
+        "panelId": "food-retail-basket-pressure",
+        "namespace": "seed-meta:macro",
+        "cacheKey": "food-retail-basket-pressure",
+        "serviceName": "polydata-food-retail-basket-seed.service",
+        "intervalEnv": "POLYDATA_FOOD_BASKET_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 21600,
+    },
+    {
         "panelId": "alpha-signal",
         "namespace": "seed-meta:signals",
         "cacheKey": "alpha-signal",

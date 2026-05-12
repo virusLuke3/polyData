@@ -710,6 +710,38 @@ export type RuntimeEnergyGasolineShockPayload = {
   items?: RuntimeEnergyShockItem[];
 };
 
+export type RuntimeFoodBasketItem = {
+  key?: string | null;
+  seriesId?: string | null;
+  label?: string | null;
+  date?: string | null;
+  value?: number | string | null;
+  momPct?: number | string | null;
+  yoyPct?: number | string | null;
+  threeMonthPct?: number | string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+};
+
+export type RuntimeFoodBasketSummary = {
+  signal?: string | null;
+  bias?: string | null;
+  pressureScore?: number | string | null;
+  topMover?: RuntimeFoodBasketItem | null;
+  coverage?: number | string | null;
+};
+
+export type RuntimeFoodRetailBasketPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeFoodBasketSummary | null;
+  items?: RuntimeFoodBasketItem[];
+};
+
 export type RuntimeTradeSignal = {
   marketId?: number | null;
   marketTitle?: string | null;

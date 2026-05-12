@@ -495,6 +495,9 @@ export function App() {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard.');
           setLoading(false);
+          void refreshRuntimePanels().catch(() => {
+            // Runtime panels can still hydrate from seed snapshots when bootstrap is temporarily unavailable.
+          });
         }
       }
     }

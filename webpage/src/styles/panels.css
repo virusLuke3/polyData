@@ -4424,6 +4424,142 @@
   background: #181818;
 }
 
+.wm-food-basket-panel .wm-panel-body {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow-x: hidden;
+}
+
+.wm-food-basket-hero {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.wm-food-basket-hero div,
+.wm-food-basket-top {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #252525;
+  border-top: 2px solid #6b6d56;
+  background: #171717;
+  display: grid;
+  gap: 4px;
+}
+
+.wm-food-basket-hero.hot div:first-child {
+  border-top-color: #a95c41;
+}
+
+.wm-food-basket-hero.cool div:first-child {
+  border-top-color: #4f8d72;
+}
+
+.wm-food-basket-hero span,
+.wm-food-basket-top span,
+.wm-food-basket-top em,
+.wm-food-basket-row span,
+.wm-food-basket-row em,
+.wm-food-basket-footer {
+  color: #858a86;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wm-food-basket-hero strong,
+.wm-food-basket-top strong {
+  min-width: 0;
+  color: #f2f4f2;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-food-basket-top em {
+  font-style: normal;
+}
+
+.wm-food-basket-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.wm-food-basket-row {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid #252525;
+  border-left: 3px solid #5d6f75;
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px 74px;
+  gap: 8px;
+  align-items: center;
+}
+
+.wm-food-basket-row.hot {
+  border-left-color: #a95c41;
+}
+
+.wm-food-basket-row.cool {
+  border-left-color: #4f8d72;
+}
+
+.wm-food-basket-row div {
+  min-width: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 3px;
+}
+
+.wm-food-basket-row span {
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-food-basket-row strong {
+  min-width: 0;
+  color: #f0f3f0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-food-basket-row > strong,
+.wm-food-basket-row em {
+  text-align: right;
+}
+
+.wm-food-basket-row em {
+  font-style: normal;
+}
+
+.wm-food-basket-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.wm-food-basket-footer span {
+  padding: 2px 6px;
+  border: 1px solid #252525;
+  background: #181818;
+}
+
 @media (max-width: 980px) {
   .wm-tape-row {
     grid-template-columns: 48px minmax(0, 1fr) 74px 80px;
@@ -4438,7 +4574,8 @@
   .wm-feature-grid,
   .wm-implications-grid,
   .wm-price-surface-head,
-  .wm-macro-map-summary {
+  .wm-macro-map-summary,
+  .wm-food-basket-hero {
     grid-template-columns: 1fr;
   }
 
@@ -4467,7 +4604,12 @@
     grid-template-columns: minmax(0, 1fr) 72px;
   }
 
-  .wm-cpi-calendar-row > em {
+  .wm-food-basket-row {
+    grid-template-columns: minmax(0, 1fr) 68px;
+  }
+
+  .wm-cpi-calendar-row > em,
+  .wm-food-basket-row em {
     text-align: left;
   }
 
