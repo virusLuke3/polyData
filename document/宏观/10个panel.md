@@ -23,20 +23,32 @@
 
 ---
 
-## 1. 面向 Polymarket 的设计原则
+## 1. 面向 WorldMonitor 级别的 Panel 设计原则
 
-每个 panel 都应该有固定结构：
+当前 polyData 的 CPI panel 不能只做成黑底白字的指标卡。WorldMonitor 值得借鉴的不是某个具体 UI，而是它把 panel 设计成 **intelligence registry / event log / atlas / market implication layer**：每个 panel 都有实体、事件、状态、证据、严重性、来源健康和可操作结论。
+
+因此后续每个 CPI macro panel 都要同时满足三件事：
 
 ```text
-PANEL NAME                 LIVE / OFFICIAL / MODEL / MARKET
+1. 数据源不止一个：official baseline + high-frequency proxy + Polymarket market layer
+2. 视觉不是装饰：颜色、badge、chip、边框、排序都表达严重性和下注相关性
+3. 输出不是指标：必须能回答 driver → CPI/PCE → Fed → PMKT odds 的交易问题
+```
 
-KEY VALUE                  value
-DELTA 1D / 7D              change
-NEXT CATALYST              release/event time
-LINKED MARKETS             CPI / Fed / recession / oil / shutdown
-PMKT GAP                   model-implied vs market-implied
-SIGNAL                     HOT / COOL / STICKY / ENERGY-LED / MISPRICED
-DATA HEALTH                updated / stale / unavailable
+### 1.1 Panel 的标准信息结构
+
+每个 panel 都应该从单一数据卡升级为如下结构：
+
+```text
+PANEL NAME                 OFFICIAL / MARKET / MODEL / DEGRADED
+
+SUMMARY STRIP              signal / severity / confidence / freshness
+DRIVER TILES               top 3-6 drivers, color-coded by direction and strength
+EVENT / RELEASE LOG        latest official release, policy event, market move, source update
+ENTITY / CATEGORY TABLE    components, regions, assets, markets, or catalysts
+PMKT LINKED MARKETS        active markets, midpoint, spread, volume, time to close
+GAP / IMPLICATION          model/driver signal vs Polymarket implied probability
+SOURCE HEALTH              source-level ok / stale / degraded / paid / optional
 ```
 
 不要只展示数据。Polymarket 用户需要的是：
@@ -48,6 +60,70 @@ DATA HEALTH                updated / stale / unavailable
 | Fed 市场是否已经 price in？ | Fed implied probability vs CPI/labor/growth signal |
 | 市场有没有低估某个事件？ | PMKT price vs external data / model probability |
 | 数据是否还能信？ | freshness、source、coverage、staleness |
+
+### 1.2 颜色和视觉语义
+
+颜色必须传递含义，而不是只靠黑白文字：
+
+| 语义 | 建议颜色 | 用法 |
+|---|---|---|
+| Hot / inflation up / hawkish | red / coral | CPI hot、energy shock、core sticky、Fed hawkish |
+| Cool / inflation down / dovish | green / teal | disinflation、growth cooling、Fed cut support |
+| Watch / uncertain / mixed | amber / yellow | 数据分歧、事件临近、confidence medium |
+| Official / verified | blue | BLS、BEA、Fed、EIA、Treasury、Federal Register |
+| Market / Polymarket odds | purple | PMKT price、gap、orderbook、volume |
+| Degraded / stale | gray | source stale、fallback、partial coverage |
+
+视觉层级规则：
+
+```text
+最强信号 = 最大字号 + 彩色左边框 / 顶边框
+最新事件 = 时间 chip + source badge
+可交易市场 = purple odds chip + spread/liquidity
+异常项 = red/green delta + rank
+数据问题 = gray degraded badge，不要和真实信号混在一起
+```
+
+每个 panel 至少要有：
+
+```text
+severity badge      HOT / COOL / WATCH / NEUTRAL / DEGRADED
+source badges       BLS / FRED / EIA / FED / PMKT / FR / TREASURY
+trend deltas        1D / 7D / MoM / YoY / release-to-release
+ranked rows         top movers / latest events / linked markets
+empty-state rule    数据缺失时解释缺哪个 source，而不是只显示 0
+```
+
+### 1.3 数据源栈要求
+
+每个 panel 的数据源应该按三层设计：
+
+| 层级 | 作用 | 示例 |
+|---|---|---|
+| Official baseline | 可信锚点，低频但权威 | BLS, BEA, EIA, Fed, Treasury, Federal Register, FRED |
+| High-frequency proxy | 提前反映冲击 | WTI, gasoline, yields, DXY, futures, retail proxy, news/event feeds |
+| Polymarket layer | 下注入口和价格校验 | Gamma active events, CLOB midpoint/spread, volume, expiry, resolution source |
+
+如果某个 panel 只有 official baseline，它可以作为一期上线，但必须在文档里标明二期要补 proxy 和 PMKT layer。否则视觉上一定会变成“孤立指标卡”。
+
+### 1.4 合并原则
+
+不要因为 panel 看起来空就机械合并。合并标准应该是：
+
+```text
+一个 panel = 一个交易判断问题
+一个 panel 内 = 多个数据源共同回答这个问题
+```
+
+允许做 composite panel，但它必须回答更高层问题：
+
+| Composite | 包含 | 回答的问题 |
+|---|---|---|
+| Headline CPI Pressure | energy + food + import/tariff | headline CPI 是否偏热？ |
+| Core CPI Pressure | shelter + labor/services | core CPI 是否 sticky？ |
+| Macro Gap | nowcast + Fed/rates + PMKT odds | 市场价格是否和宏观数据一致？ |
+
+所以当前 10 个 panel 不应该简单缩成 3 个，但每个 panel 都要从单源指标升级成 multi-source intelligence panel。
 
 ---
 
@@ -74,14 +150,14 @@ DATA HEALTH                updated / stale / unavailable
 |---|---|---|---|
 | 1 | `polymarket-macro-map` | 已完成 | Gamma seed-first，已接入 Redis + SQLite snapshot |
 | 2 | `cpi-release-calendar` | 已完成 | BLS / BEA / Fed 官方日历 + Polymarket implied baseline；BLS server 403 时使用当前年度官方 schedule fallback |
-| 3 | `energy-gasoline-shock` | 已完成 | EIA public XLS seed-first；WTI / gasoline / diesel headline CPI impulse |
-| 4 | `food-retail-basket-pressure` | 已完成 | FRED/BLS CPI food components seed-first；官方 food basket pressure，不做实时 retailer scraper |
-| 5 | `supply-tariff-import-watch` | 待开发 | Federal Register / Treasury / BLS import prices |
-| 6 | `shelter-rent-oer-pressure` | 待开发 | BLS/FRED/Zillow shelter pressure |
-| 7 | `labor-wage-services-pressure` | 待开发 | BLS/DOL labor and services inflation pressure |
-| 8 | `growth-demand-recession-tracker` | 待开发 | GDPNow/BEA/Census/Fed growth demand tracker |
-| 9 | `inflation-nowcast` | 待升级 | 已有 panel；后续按新 seed + visual QA prompt 复核升级 |
-| 10 | `fed-rates-polymarket-gap` | 待开发 | Fed/rates + PMKT gap layer |
+| 3 | `energy-gasoline-shock` | 已完成 / 待视觉升级 | EIA public XLS seed-first；后续补 PMKT oil/CPI linked markets、inventory/event log、severity colors |
+| 4 | `food-retail-basket-pressure` | 已完成 / 待数据源扩展 | FRED/BLS CPI food components seed-first；后续补 retail proxy / commodity proxy / PMKT CPI link |
+| 5 | `supply-tariff-import-watch` | 待开发 | Federal Register / Treasury / BLS import prices / GSCPI / PMKT tariff-China markets |
+| 6 | `shelter-rent-oer-pressure` | 待开发 | BLS/FRED + Zillow/FHFA/Case-Shiller + PMKT CPI/Fed link |
+| 7 | `labor-wage-services-pressure` | 待开发 | BLS/DOL + JOLTS/ECI/claims + PMKT Fed/unemployment/recession link |
+| 8 | `growth-demand-recession-tracker` | 待开发 | GDPNow/BEA/Census/Fed + PMKT GDP/recession/Fed link |
+| 9 | `inflation-nowcast` | 待升级 | 已有 panel；升级成 Cleveland Fed nowcast + official bridge + PMKT bucket gap |
+| 10 | `fed-rates-polymarket-gap` | 待开发 | Fed/rates/yields + PMKT Fed/CPI/recession gap layer |
 
 这条链路比原来的版本更贴近 CPI：
 
@@ -95,6 +171,35 @@ PMKT markets
 ```
 
 原文里的 `Fiscal / Shutdown` 和 `Market Risk Reaction` 不是没价值，而是更适合二期。它们对宏观情绪和政治市场有用，但不是 CPI 主链路。
+
+---
+
+## 3. 10 个 Panel 的 WorldMonitor 级升级矩阵
+
+这一节是后续开发的硬标准。每个 panel 都要有 `source stack`、`visual structure`、`PMKT use case`，否则容易退化成单调的黑白指标卡。
+
+| Panel | 交易问题 | 数据源栈 | 视觉结构 | 颜色重点 |
+|---|---|---|---|---|
+| `polymarket-macro-map` | 当前有哪些可下注宏观市场？ | Gamma events/markets + CLOB price/spread/volume + macro category classifier | market cluster registry、top catalyst、category heat tiles、active market rows | purple=PMKT, amber=event risk, red/green=odds move |
+| `cpi-release-calendar` | 离 release 多近，市场基准是多少？ | BLS/BEA/Fed calendars + PMKT CPI baseline + optional consensus | event timeline、countdown tiles、official source badges、baseline/gap strip | blue=official, amber=event risk, purple=PMKT baseline |
+| `energy-gasoline-shock` | headline CPI 是否被 energy 推热？ | EIA WTI/gas/diesel/inventory + FRED/market oil proxy + PMKT oil/CPI markets | energy driver tiles、inventory/event log、linked market rows、CPI impulse bar | red=energy inflation impulse, green=headline cooling |
+| `food-retail-basket-pressure` | food-at-home 是否出现压力？ | FRED/BLS CPI food components + commodity/retail proxy + optional retailer basket + PMKT CPI markets | category movers、component table、coverage/freshness、top mover strip | red=food pressure, green=food disinflation, gray=retail proxy missing |
+| `supply-tariff-import-watch` | goods inflation / tariff narrative 是否升温？ | Federal Register + USTR + Treasury customs revenue + BLS import prices + GSCPI + PMKT tariff/China markets | policy event log、import price tiles、tariff action registry、linked markets | red=tariff/goods pressure, blue=official notice, purple=PMKT trade markets |
+| `shelter-rent-oer-pressure` | core CPI 是否 sticky？ | BLS/FRED rent/OER + Zillow rent + FHFA/Case-Shiller + PMKT CPI/Fed markets | lag bridge chart、rent/OER tiles、leading indicator rows、core CPI implication | red=core sticky, green=shelter cooling, amber=lag uncertainty |
+| `labor-wage-services-pressure` | services inflation 和 Fed 反应是否偏 hawkish？ | BLS jobs/AHE/JOLTS/ECI + DOL claims + PMKT Fed/unemployment markets | labor heat grid、claims trend、wage/services strip、Fed implication rows | red=hawkish wage pressure, green=labor cooling, amber=mixed labor |
+| `growth-demand-recession-tracker` | demand 是否支撑 inflation，recession odds 是否错价？ | Atlanta Fed GDPNow + BEA + Census retail sales + Fed industrial production + PMKT GDP/recession markets | demand tiles、recession score, release log、market gap rows | green=soft landing, red=overheating, amber=slowdown |
+| `inflation-nowcast` | CPI/PCE bucket 是否和 nowcast 一致？ | Cleveland Fed nowcast + BLS/BEA official history + energy/food/shelter drivers + PMKT bucket markets | nowcast bridge table、threshold ladder、driver contribution strip、PMKT gap | red=hot bucket, green=cool bucket, purple=mispricing |
+| `fed-rates-polymarket-gap` | Fed/Rates 市场是否和宏观信号一致？ | Fed calendar/H.15/SOFR/FRED yields + PMKT Fed markets + CPI/labor/growth signals | rates curve tiles、Fed meeting ladder、macro-vs-PMKT gap registry | purple=PMKT gap, red=hawkish, green=dovish |
+
+### 3.1 每个 Panel 的最低数据源数量
+
+| 状态 | 要求 |
+|---|---|
+| 可上线 MVP | 至少 1 个 official source + seed cache + source health + clear empty/degraded state |
+| 可作为交易 panel | 至少 1 个 official source + 1 个 proxy source + 1 个 PMKT linked market layer |
+| WorldMonitor 级别 | official + proxy + PMKT + event log + source health + severity colors + screenshot QA |
+
+已经完成的前 4 个 panel 可以先保留当前 MVP，但后续要按这个矩阵逐个视觉和数据源升级。
 
 ---
 
@@ -245,7 +350,7 @@ SIGNAL           HEADLINE COOLING
 
 ## Panel 4: Food & Retail Basket Pressure
 
-这个 panel 参考 worldmonitor 的 `Consumer Prices` 设计：它不是官方 CPI，而是零售端价格压力监控。
+这个 panel 参考 WorldMonitor 的 `Consumer Prices` 设计，但 polyData 不能一开始就伪装成实时零售价格指数。当前已完成的一期实现是 **FRED/BLS CPI food components seed-first**，它是官方 CPI food 分项压力监控。二期再叠加 retail / commodity proxy，形成更接近 WorldMonitor 的消费价格面板。
 
 worldmonitor 的 Consumer Prices panel 分成：
 
@@ -262,51 +367,61 @@ Overview / Categories / Movers / Spread / Health
 示例：
 
 ```text
-FOOD / RETAIL BASKET       SCRAPE / DAILY
+FOOD / RETAIL BASKET       OFFICIAL / PROXY
 
-ESSENTIALS INDEX   104.2
-WOW                +0.8%
-MOM                +2.1%
-COVERAGE           82%
-FRESHNESS          6h ago
+FOOD CPI           +3.1% YoY
+FOOD AT HOME       +2.4% YoY
+MEAT / EGGS        -0.6% MoM
+FRUIT / VEG        +1.0% MoM
+COVERAGE           5 / 5 official components
+FRESHNESS          latest FRED/BLS
 
 TOP RISERS
-Eggs               +8.4%
-Milk               +2.2%
-Chicken            +1.8%
+Fruit / veg        +1.0% MoM
+Food CPI           -0.0% MoM
+Food at home       -0.2% MoM
 
-SIGNAL             FOOD PRESSURE RISING
+SIGNAL             FOOD STABLE
 ```
 
 ### 对 Polymarket 下注者的价值
 
-这个 panel 对官方 CPI 不是一一对应，但可以作为食品和生活成本压力的前置信号。
+这个 panel 对 CPI headline 和 food-at-home 分项有直接解释价值，但对 Polymarket CPI bucket 的使用必须区分两层：
+
+```text
+official food CPI components = 可信但低频
+retail / commodity proxy     = 高频但噪声更大
+```
 
 可交易用法：
 
 | 信号 | 可能影响 |
 |---|---|
-| eggs / dairy / meat 大幅上涨 | food-at-home CPI 上行风险 |
-| 多零售商同步涨价 | 更可信的广泛价格压力 |
-| 单一零售商异常 | 可能是促销结束或 scrape 噪声 |
-| freshness stale | 不应下注依赖该信号 |
+| BLS food-at-home / eggs / meat 分项加速 | headline CPI food contribution 上行风险 |
+| commodity / retail proxy 先于 CPI 分项加速 | 下一期 food CPI 可能偏热 |
+| 多个类别同步上涨 | 比单一食品异常更可信 |
+| retail proxy stale / coverage 低 | 不应把零售层作为下注依据 |
 
 ### 数据可得性
 
 | 数据 | 来源 | 免费可得性 |
 |---|---|---|
-| retailer shelf prices | 自建 scraper / retailer site | 免费但维护成本高，受网站结构和条款影响 |
+| food CPI components | FRED / BLS | 免费，已接入 |
+| food at home / meats / fruit & veg / eggs | FRED / BLS | 免费，已接入 |
 | FAO Food Price Index | FAO | 免费，但全球月频，不是美国 CPI |
+| commodity food proxy | FRED / USDA / futures proxy | 多数免费或延迟免费；需要口径校验 |
+| retailer shelf prices | 自建 scraper / retailer site | 免费但维护成本高，受网站结构和条款影响 |
 | grocery basket index | 自建计算 | 可行，需要固定 basket 和归一化 |
-| source freshness | 自建 pipeline metadata | 可行 |
+| linked PMKT CPI markets | Gamma / CLOB | 免费公开读接口 |
 
 落地建议：必须明确写出：
 
 ```text
-Does not represent official CPI. Tracks consumer price pressure only.
+Official layer tracks BLS/FRED CPI food components.
+Retail proxy layer, if enabled, tracks consumer price pressure only and does not represent official CPI.
 ```
 
-这个 panel 应作为 CPI nowcast 的辅助，不应替代 BLS CPI 或 Cleveland Fed nowcast。
+这个 panel 应作为 headline CPI / food-at-home driver，不应替代 Cleveland Fed nowcast。视觉上必须做成 category movers + source health，而不是只显示 summary tile。
 
 ---
 
@@ -622,7 +737,7 @@ Signal = hot CPI underpriced, confidence medium
 
 ---
 
-## 3. 哪些数据真正能帮助下注？
+## 4. 哪些数据真正能帮助下注？
 
 不是所有宏观数据都能变成 edge。对 Polymarket 用户来说，优先级应该这样排：
 
@@ -643,7 +758,7 @@ Signal = hot CPI underpriced, confidence medium
 
 ---
 
-## 4. 免费数据可得性总表
+## 5. 免费数据可得性总表
 
 | 数据源 | 免费吗 | 认证 | 稳定性 | 备注 |
 |---|---|---|---|---|
@@ -667,26 +782,31 @@ Signal = hot CPI underpriced, confidence medium
 
 ---
 
-## 5. 一期实现建议
+## 6. 一期实现建议
 
-第一期只做能直接帮助 Polymarket 宏观下注的核心链路：
+第一期不是把 10 个 panel 缩成 8 个，而是给每个 panel 明确成熟度。已经完成的 panel 可以先作为 MVP 存在，但后续必须补齐 proxy / PMKT / visual semantics。
 
 ```text
-1. Polymarket Macro Market Map
-2. CPI Release Calendar
-3. Energy & Gasoline Shock
-4. Shelter / Rent / OER Pressure
-5. Labor / Wage / Services Pressure
-6. Inflation Nowcast & Official CPI Bridge
-7. Fed / Rates
-8. Polymarket Macro Gap
+MVP       official source + seed cache + source health
+V1        official + proxy + PMKT linked markets
+V2        event log + severity colors + ranked drivers + gap model
+WorldMon  multi-source registry + filters + evidence + screenshot QA
 ```
 
-`Food & Retail Basket` 和 `Supply / Tariff` 可以作为 P2 加入；它们有价值，但需要更多数据清洗和解释，尤其 retail basket 不能被误解成官方 CPI。
+推荐推进顺序：
+
+```text
+1. 补剩余 panel 的 MVP：supply, shelter, labor, growth, nowcast upgrade, fed gap
+2. 回头升级已完成 panel 的视觉语义：geo, macro map, calendar, energy, food
+3. 给每个 panel 增加 PMKT linked markets 和 gap strip
+4. 再做 Headline CPI Pressure / Core CPI Pressure composite 汇总层
+```
+
+`Food & Retail Basket` 和 `Supply / Tariff` 不是低优先级，它们只是需要明确 official/proxy 边界。尤其 retail basket 不能被误解成官方 CPI。
 
 ---
 
-## 6. 参考 worldmonitor 的设计取舍
+## 7. 参考 WorldMonitor 的设计取舍
 
 worldmonitor 里最值得借鉴的不是某个具体数据，而是 panel 组织方式：
 
@@ -711,8 +831,9 @@ Macro data → CPI signal → Fed reaction → Polymarket mispricing
 
 ---
 
-## 7. Source Links
+## 8. Source Links
 
+- WorldMonitor reference: https://www.worldmonitor.app/
 - Cleveland Fed Inflation Nowcasting: https://www.clevelandfed.org/indicators-and-data/inflation-nowcasting
 - Polymarket API docs: https://docs.polymarket.com/api-reference/introduction
 - BLS API: https://www.bls.gov/developers/

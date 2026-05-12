@@ -1,9 +1,10 @@
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
-import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem } from '@/types';
+import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, RuntimePolymarketMacroMapPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { LinkedMarketRegistry, MarketImplicationStrip, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 
 function badge(status?: string | null) {
   return String(status || '').toLowerCase() === 'ok' ? 'EIA' : 'PARTIAL';
@@ -40,9 +41,11 @@ function EnergyRow({ item }: { item: RuntimeEnergyShockItem }) {
   );
 }
 
-function EnergyGasolineShockPanel({ payload }: { payload?: RuntimeEnergyGasolineShockPayload | null }) {
+function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: RuntimeEnergyGasolineShockPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const summary = payload?.summary;
   const items = payload?.items || [];
+  const linkedMarkets = linkedMacroMarkets(macroPayload, ['energy', 'cpi', 'fed']);
+  const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
       title="ENERGY / GAS"
@@ -52,6 +55,13 @@ function EnergyGasolineShockPanel({ payload }: { payload?: RuntimeEnergyGasoline
       className="wm-market-panel wm-energy-shock-panel"
       dataPanelId="energy-gasoline-shock"
     >
+      <div className={`wm-intel-signal-band ${signalTone}`}>
+        <div>
+          <span>Headline CPI Driver</span>
+          <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
+        </div>
+        <em>EIA petroleum stack / CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
+      </div>
       <div className={`wm-energy-hero ${summary?.bias || 'neutral'}`}>
         <span>Signal</span>
         <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
@@ -60,9 +70,21 @@ function EnergyGasolineShockPanel({ payload }: { payload?: RuntimeEnergyGasoline
       <div className="wm-energy-grid">
         {items.map((item) => <EnergyRow key={item.key || item.label || 'energy'} item={item} />)}
       </div>
+      <div className="wm-energy-event-log">
+        {items.slice(0, 3).map((item) => (
+          <div key={`${item.key || item.label}-event`}>
+            <span>{String(item.source || 'EIA').toUpperCase()} / {item.cadence || 'series'}</span>
+            <strong>{item.label || 'Energy series'} {changeLabel(item.changeWeek)}W</strong>
+            <em>{item.date || 'date pending'}</em>
+          </div>
+        ))}
+      </div>
       <div className="wm-energy-links">
         {(summary?.linkedMarkets || ['CPI headline', 'oil', 'Fed']).slice(0, 4).map((label) => <span key={label}>{label}</span>)}
       </div>
+      <MarketImplicationStrip items={['Headline CPI', 'Oil markets', 'Gasoline pressure', 'Fed reaction']} />
+      <LinkedMarketRegistry title="PMKT energy / CPI" items={linkedMarkets} emptyLabel="Awaiting macro map" />
+      <SourceStack sources={payload?.sources} labels={{ wti: 'WTI', gasoline: 'Gasoline', diesel: 'Diesel' }} />
       <div className="wm-energy-footer">
         <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
         <span>{formatRelative(payload?.generatedAt)}</span>
@@ -73,7 +95,7 @@ function EnergyGasolineShockPanel({ payload }: { payload?: RuntimeEnergyGasoline
 
 const renderers: PanelRenderMap = {
   'energy-gasoline-shock': {
-    render: (ctx) => <EnergyGasolineShockPanel payload={ctx.runtimeData['energy-gasoline-shock'] as RuntimeEnergyGasolineShockPayload | undefined} />,
+    render: (ctx) => <EnergyGasolineShockPanel payload={ctx.runtimeData['energy-gasoline-shock'] as RuntimeEnergyGasolineShockPayload | undefined} macroPayload={ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined} />,
   },
 };
 
@@ -83,6 +105,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',
   defaultEnabled: true,
+  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeEnergyGasolineShock(6),

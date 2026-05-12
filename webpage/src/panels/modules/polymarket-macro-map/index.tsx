@@ -9,6 +9,7 @@ import type {
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { MarketImplicationStrip, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -88,8 +89,9 @@ function MacroCategoryMatrix({ categories }: { categories: RuntimePolymarketMacr
 function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
   const topOutcome = item.topOutcomes?.[0];
   const category = item.categoryLabels?.[0] || 'Macro';
+  const outcomeLabel = String(topOutcome?.label || '').trim();
   return (
-    <div className="wm-macro-map-row">
+    <div className={`wm-macro-map-row ${signalToneClass(category)}`}>
       <div className="wm-macro-map-row-main">
         <div className="wm-macro-map-meta">
           <span>{category.toUpperCase()}</span>
@@ -105,7 +107,7 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
       </div>
       <div className="wm-macro-map-prob">
         <span>{probabilityLabel(topOutcome?.yesPrice)}</span>
-        <em>{topOutcome?.label || 'TOP YES'}</em>
+        <em>{outcomeLabel && outcomeLabel.length <= 14 ? outcomeLabel : 'TOP YES'}</em>
       </div>
     </div>
   );
@@ -134,6 +136,7 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
   const categories = payload?.categories || [];
   const items = payload?.items || [];
   const summary = payload?.summary;
+  const topMarkets = items.slice(0, 3).map((item) => item.categoryLabels?.[0] || 'PMKT');
   return (
     <Panel
       title="PMKT MACRO MAP"
@@ -158,11 +161,19 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
         </div>
       ) : null}
       className="wm-market-panel wm-macro-map-panel"
+      dataPanelId="polymarket-macro-map"
     >
-      <div className="wm-macro-map-summary">
+      <div className={`wm-intel-signal-band ${signalToneClass(summary?.signal)}`}>
         <div>
           <span>Signal</span>
           <strong>{signalLabel(summary?.signal)}</strong>
+        </div>
+        <em>Polymarket macro route / {summary?.activeCount ?? items.length} active</em>
+      </div>
+      <div className="wm-macro-map-summary">
+        <div>
+          <span>PMKT Coverage</span>
+          <strong>{summary?.activeCount ?? items.length}</strong>
         </div>
         <div>
           <span>Top Catalyst</span>
@@ -173,8 +184,10 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
           <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
       </div>
+      <MarketImplicationStrip items={topMarkets.length ? topMarkets : ['CPI', 'Fed', 'Growth']} />
       <MacroCategoryMatrix categories={categories} />
       <MacroMarketList items={items} />
+      <SourceStack sources={payload?.sources} labels={{ gammaEvents: 'Gamma', gammaSearch: 'Search' }} />
       <div className="wm-macro-map-footer">
         <span>{(payload?.sources?.gammaEvents || payload?.status || 'warming').toUpperCase()}</span>
         <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
@@ -199,6 +212,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Active CPI, Fed, growth, labor, and energy market clusters from Polymarket.',
   defaultEnabled: true,
+  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimePolymarketMacroMap(12),

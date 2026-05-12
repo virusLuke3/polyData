@@ -1,10 +1,11 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFoodRetailBasket } from '@/services/api';
-import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload } from '@/types';
+import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
+import { LinkedMarketRegistry, MarketImplicationStrip, SourceStack, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -60,11 +61,13 @@ function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
   );
 }
 
-function FoodRetailBasketPanel({ payload }: { payload?: RuntimeFoodRetailBasketPayload | null }) {
+function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoodRetailBasketPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const topMover = summary?.topMover;
+  const linkedMarkets = linkedMacroMarkets(macroPayload, ['cpi']);
+  const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
       title="FOOD / RETAIL"
@@ -91,6 +94,13 @@ function FoodRetailBasketPanel({ payload }: { payload?: RuntimeFoodRetailBasketP
       className="wm-market-panel wm-food-basket-panel"
       dataPanelId="food-retail-basket-pressure"
     >
+      <div className={`wm-intel-signal-band ${signalTone}`}>
+        <div>
+          <span>Food CPI Driver</span>
+          <strong>{summary?.signal || 'FOOD WARMING'}</strong>
+        </div>
+        <em>Official FRED/BLS food components / retail proxy optional</em>
+      </div>
       <div className={`wm-food-basket-hero ${summary?.bias || 'neutral'}`}>
         <div>
           <span>Signal</span>
@@ -120,6 +130,14 @@ function FoodRetailBasketPanel({ payload }: { payload?: RuntimeFoodRetailBasketP
           <em>FRED/BLS component data has not been seeded yet.</em>
         </div>
       )}
+      <div className="wm-food-basket-proxy-note">
+        <span>Source Stack</span>
+        <strong>Official CPI food components active</strong>
+        <em>Retail shelf-price proxy is intentionally optional and should not be treated as official CPI.</em>
+      </div>
+      <MarketImplicationStrip items={['Headline CPI', 'Food-at-home', 'CPI bucket risk', 'Retail proxy optional']} />
+      <LinkedMarketRegistry title="PMKT CPI markets" items={linkedMarkets} emptyLabel="Awaiting macro map" />
+      <SourceStack sources={payload?.sources} labels={{ food: 'Food', home: 'At home', meat_eggs: 'Meat', fruit_veg: 'Fruit/Veg', eggs: 'Eggs' }} />
       <div className="wm-food-basket-footer">
         <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
         <span>{(payload?.status || 'warming').toUpperCase()}</span>
@@ -131,7 +149,7 @@ function FoodRetailBasketPanel({ payload }: { payload?: RuntimeFoodRetailBasketP
 
 const renderers: PanelRenderMap = {
   'food-retail-basket-pressure': {
-    render: (ctx) => <FoodRetailBasketPanel payload={ctx.runtimeData['food-retail-basket-pressure'] as RuntimeFoodRetailBasketPayload | undefined} />,
+    render: (ctx) => <FoodRetailBasketPanel payload={ctx.runtimeData['food-retail-basket-pressure'] as RuntimeFoodRetailBasketPayload | undefined} macroPayload={ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined} />,
   },
 };
 
