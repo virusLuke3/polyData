@@ -4,11 +4,11 @@ import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, Runtime
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badge(status?: string | null) {
-  return String(status || '').toLowerCase() === 'ok' ? 'EIA' : 'PARTIAL';
+  return String(status || '').toLowerCase() === 'ok' ? undefined : 'PARTIAL';
 }
 
 function valueLabel(item?: RuntimeEnergyShockItem) {
@@ -74,11 +74,10 @@ function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: Runtime
             <strong>{summary?.signal || 'ENERGY WARMING'}</strong>
           </div>
         </div>
-        <em>EIA petroleum stack / CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
+        <em>Headline CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
       </div>
       <div className="wm-energy-driver-strip">
         <StatusBadge tone={signalTone}>{`CPI impulse ${summary?.headlineImpulsePp ?? '--'}pp`}</StatusBadge>
-        <StatusBadge tone="official">{(payload?.cacheMode || 'snapshot').toUpperCase()}</StatusBadge>
       </div>
       <div className="wm-energy-grid">
         {items.map((item) => <EnergyRow key={item.key || item.label || 'energy'} item={item} />)}
@@ -86,8 +85,8 @@ function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: Runtime
       <div className="wm-energy-event-log">
         {items.slice(0, 3).map((item) => (
           <div key={`${item.key || item.label}-event`}>
-            <RowGlyph icon="source" tone="official" label="EIA source" />
-            <span>{String(item.source || 'EIA').toUpperCase()} / {item.cadence || 'series'}</span>
+            <RowGlyph icon={energyIcon(item)} tone={itemTone(item.changeWeek) === 'flat' ? 'neutral' : itemTone(item.changeWeek)} label={item.label || 'Energy move'} />
+            <span>{String(item.key || 'energy').toUpperCase()}</span>
             <strong>{item.label || 'Energy series'} {changeLabel(item.changeWeek)}W</strong>
             <em>{item.date || 'date pending'}</em>
           </div>
@@ -98,10 +97,8 @@ function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: Runtime
       </div>
       <MarketImplicationStrip items={['Headline CPI', 'Oil markets', 'Gasoline pressure', 'Fed reaction']} />
       <LinkedMarketRegistry title="PMKT energy / CPI" items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <SourceStack sources={payload?.sources} labels={{ wti: 'WTI', gasoline: 'Gasoline', diesel: 'Diesel' }} />
       <div className="wm-energy-footer">
-        <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
-        <span>{formatRelative(payload?.generatedAt)}</span>
+        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );

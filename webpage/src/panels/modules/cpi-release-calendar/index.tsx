@@ -5,12 +5,12 @@ import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimeP
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
-  if (normalized === 'ok') return 'OFFICIAL';
+  if (normalized === 'ok') return undefined;
   if (normalized === 'degraded') return 'PARTIAL';
   if (normalized === 'warming') return 'WARMING';
   return 'STALE';
@@ -134,7 +134,7 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
             <strong>{summary?.signal || 'CALENDAR WARMING'}</strong>
           </div>
         </div>
-        <em>BLS / BEA / Fed calendar linked to PMKT baseline</em>
+        <em>Release timing / baseline probability</em>
       </div>
       <div className={`wm-cpi-calendar-hero compact ${summary?.risk || 'unknown'}`}>
         <div>
@@ -155,7 +155,7 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
       ) : (
         <div className="wm-empty-state">
           <strong>Calendar snapshot warming.</strong>
-          <em>Official release sources are configured, but no upcoming CPI/PCE/FOMC/NFP rows are cached yet.</em>
+          <em>No upcoming CPI/PCE/FOMC/NFP rows are cached yet.</em>
         </div>
       )}
       <MarketImplicationStrip items={['CPI bucket', 'PCE/Core PCE', 'Fed decision', `${probabilityLabel(summary?.baselineProbability)} PMKT baseline`]} />
@@ -167,15 +167,12 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
       </div>
       <div className="wm-cpi-calendar-baseline">
         <span>CONSENSUS</span>
-        <strong>{payload?.consensus?.status === 'optional-unavailable' ? 'Optional / paid-grade source not configured' : payload?.consensus?.label || 'Unavailable'}</strong>
+        <strong>{payload?.consensus?.status === 'optional-unavailable' ? 'Consensus unavailable' : payload?.consensus?.label || 'Unavailable'}</strong>
         <em>{payload?.baseline?.label || 'No active CPI Polymarket baseline'}</em>
       </div>
       <LinkedMarketRegistry title="PMKT release markets" items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <SourceStack sources={payload?.sources} labels={{ blsCpi: 'BLS CPI', blsEmployment: 'BLS NFP', bea: 'BEA', fomc: 'Fed' }} />
       <div className="wm-cpi-calendar-footer">
-        <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
-        <span>{(payload?.sources?.blsCpi || payload?.status || 'warming').toUpperCase()}</span>
-        <span>{formatRelative(payload?.generatedAt)}</span>
+        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );

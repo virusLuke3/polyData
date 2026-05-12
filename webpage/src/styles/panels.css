@@ -3875,7 +3875,7 @@
   min-width: 0;
   padding: 9px 10px;
   border: 1px solid #292929;
-  border-left: 3px solid #6c7370;
+  border-left: 4px solid #6c7370;
   background: #171717;
   display: grid;
   gap: 6px;
@@ -3883,17 +3883,29 @@
 
 .wm-intel-signal-band.hot {
   border-left-color: #d76b4f;
-  box-shadow: inset 0 1px 0 rgba(215, 107, 79, 0.18);
+  border-color: rgba(215, 107, 79, 0.34);
+  background:
+    linear-gradient(90deg, rgba(215, 107, 79, 0.18), rgba(215, 107, 79, 0.04) 34%, transparent 72%),
+    #171717;
+  box-shadow: inset 0 1px 0 rgba(255, 143, 112, 0.16);
 }
 
 .wm-intel-signal-band.cool {
   border-left-color: #4fa987;
-  box-shadow: inset 0 1px 0 rgba(79, 169, 135, 0.16);
+  border-color: rgba(79, 169, 135, 0.34);
+  background:
+    linear-gradient(90deg, rgba(79, 169, 135, 0.18), rgba(79, 169, 135, 0.04) 34%, transparent 72%),
+    #171717;
+  box-shadow: inset 0 1px 0 rgba(122, 220, 181, 0.14);
 }
 
 .wm-intel-signal-band.watch {
   border-left-color: #d1a444;
-  box-shadow: inset 0 1px 0 rgba(209, 164, 68, 0.16);
+  border-color: rgba(209, 164, 68, 0.34);
+  background:
+    linear-gradient(90deg, rgba(209, 164, 68, 0.17), rgba(209, 164, 68, 0.04) 34%, transparent 72%),
+    #171717;
+  box-shadow: inset 0 1px 0 rgba(242, 205, 106, 0.14);
 }
 
 .wm-intel-signal-band.neutral {
@@ -4041,21 +4053,21 @@
 }
 
 .wm-status-badge.hot {
-  border-color: rgba(215, 107, 79, 0.5);
-  color: #ee8a6c;
-  background: rgba(215, 107, 79, 0.1);
+  border-color: rgba(255, 126, 91, 0.68);
+  color: #ff9a78;
+  background: rgba(215, 76, 48, 0.2);
 }
 
 .wm-status-badge.cool {
-  border-color: rgba(79, 169, 135, 0.5);
-  color: #76c7a4;
-  background: rgba(79, 169, 135, 0.1);
+  border-color: rgba(93, 208, 162, 0.64);
+  color: #83e1b4;
+  background: rgba(47, 151, 113, 0.2);
 }
 
 .wm-status-badge.watch {
-  border-color: rgba(209, 164, 68, 0.5);
-  color: #d6b65b;
-  background: rgba(209, 164, 68, 0.1);
+  border-color: rgba(233, 188, 76, 0.65);
+  color: #eccb65;
+  background: rgba(190, 137, 35, 0.2);
 }
 
 .wm-status-badge.official {
@@ -4848,7 +4860,7 @@
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid #252525;
-  border-left: 3px solid #667c9a;
+  border-left: 4px solid #667c9a;
   background: rgba(255, 255, 255, 0.02);
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -5157,17 +5169,26 @@
 
 .wm-macro-driver-row.hot,
 .wm-macro-registry-row.hot {
-  border-left-color: #a95c41;
+  border-left-color: #df7655;
+  border-color: rgba(223, 118, 85, 0.24);
+  background:
+    linear-gradient(90deg, rgba(223, 91, 55, 0.15), rgba(223, 91, 55, 0.035) 42%, rgba(255, 255, 255, 0.018));
 }
 
 .wm-macro-driver-row.cool,
 .wm-macro-registry-row.cool {
-  border-left-color: #4f8d72;
+  border-left-color: #5cc89b;
+  border-color: rgba(92, 200, 155, 0.22);
+  background:
+    linear-gradient(90deg, rgba(64, 172, 127, 0.15), rgba(64, 172, 127, 0.035) 42%, rgba(255, 255, 255, 0.018));
 }
 
 .wm-macro-driver-row.watch,
 .wm-macro-registry-row.watch {
-  border-left-color: #9a7a35;
+  border-left-color: #e1b448;
+  border-color: rgba(225, 180, 72, 0.23);
+  background:
+    linear-gradient(90deg, rgba(205, 148, 41, 0.14), rgba(205, 148, 41, 0.034) 42%, rgba(255, 255, 255, 0.018));
 }
 
 .wm-macro-driver-main,
@@ -5215,7 +5236,7 @@
 .wm-nowcast-driver-row strong,
 .wm-nowcast-quarterly-log strong {
   min-width: 0;
-  color: #f0f3f0;
+  color: #f5f7f4;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 900;
@@ -5280,13 +5301,15 @@
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  justify-content: flex-end;
 }
 
 .wm-macro-driver-footer span,
 .wm-nowcast-footer span {
-  padding: 2px 6px;
-  border: 1px solid #252525;
-  background: #181818;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #686f6a;
 }
 
 .wm-nowcast-driver-grid {

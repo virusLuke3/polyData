@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroRegistryItem, RuntimeMacroRegistryPayload } from '@/types';
 import { formatRelative } from '../shared/formatters';
-import { MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, signalToneClass } from './macro-intel';
+import { MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
 
 export type MacroRegistryConfig = {
@@ -41,22 +41,14 @@ function rowTone(item: RuntimeMacroRegistryItem) {
   return 'neutral';
 }
 
-function sourceLabels(sources?: Record<string, string>) {
-  const labels: Record<string, string> = {};
-  Object.keys(sources || {}).forEach((key) => {
-    const parts = key.split('.');
-    labels[key] = (parts[parts.length - 1] || key).replace(/_/g, ' ').slice(0, 12);
-  });
-  return labels;
-}
-
 function RegistryRow({ item }: { item: RuntimeMacroRegistryItem }) {
   const tone = rowTone(item);
+  const meta = String(item.group || item.type || item.implication || 'macro').toUpperCase();
   return (
     <div className={`wm-macro-registry-row ${tone}`}>
       <RowGlyph icon={rowGlyph(item)} tone={tone} label={item.label || item.group || 'Macro row'} />
       <div className="wm-macro-registry-main">
-        <span>{String(item.group || item.type || 'macro').toUpperCase()} / {String(item.source || 'public').toUpperCase()}</span>
+        <span>{meta}</span>
         <strong>{item.label || 'Macro registry row'}</strong>
         <em>{item.implication || item.type || 'macro signal'}</em>
       </div>
@@ -71,7 +63,8 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
   const summary = payload?.summary;
   const items = payload?.items || [];
   const tone = signalToneClass(summary?.signal || summary?.bias || payload?.status);
-  const badge = String(payload?.status || '').toLowerCase() === 'ok' ? config.badge : String(payload?.status || 'WARMING').toUpperCase();
+  const status = String(payload?.status || '').toLowerCase();
+  const badge = status && status !== 'ok' ? String(payload?.status || 'WARMING').toUpperCase() : undefined;
   return (
     <Panel
       title={config.title}
@@ -106,13 +99,12 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
             <strong>{summary?.signal || config.emptyTitle}</strong>
           </div>
         </div>
-        <em>{payload?.source || 'Official/public macro sources'} / {summary?.rowCount ?? items.length} rows</em>
+        <em>{`${summary?.hotCount ?? 0} hot / ${summary?.coolCount ?? 0} cool / ${summary?.watchCount ?? 0} watch`}</em>
       </div>
       <div className="wm-macro-driver-strip">
         <StatusBadge tone="hot">{`HOT ${summary?.hotCount ?? 0}`}</StatusBadge>
         <StatusBadge tone="cool">{`COOL ${summary?.coolCount ?? 0}`}</StatusBadge>
         <StatusBadge tone="watch">{`WATCH ${summary?.watchCount ?? 0}`}</StatusBadge>
-        <StatusBadge tone="official">{(payload?.cacheMode || 'snapshot').toUpperCase()}</StatusBadge>
       </div>
       <div className="wm-macro-registry-list">
         {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} />) : (
@@ -131,10 +123,8 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
         </div>
       ) : null}
       <MarketImplicationStrip items={config.implicationItems} />
-      <SourceStack sources={payload?.sources} labels={sourceLabels(payload?.sources)} />
       <div className="wm-macro-driver-footer">
-        <span>{(payload?.status || 'warming').toUpperCase()}</span>
-        <span>{formatRelative(payload?.generatedAt)}</span>
+        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );
