@@ -150,14 +150,14 @@ empty-state rule    数据缺失时解释缺哪个 source，而不是只显示 0
 |---|---|---|---|
 | 1 | `polymarket-macro-map` | 已完成 | Gamma seed-first，已接入 Redis + SQLite snapshot |
 | 2 | `cpi-release-calendar` | 已完成 | BLS / BEA / Fed 官方日历 + Polymarket implied baseline；BLS server 403 时使用当前年度官方 schedule fallback |
-| 3 | `energy-gasoline-shock` | 已完成 / 待视觉升级 | EIA public XLS seed-first；后续补 PMKT oil/CPI linked markets、inventory/event log、severity colors |
-| 4 | `food-retail-basket-pressure` | 已完成 / 待数据源扩展 | FRED/BLS CPI food components seed-first；后续补 retail proxy / commodity proxy / PMKT CPI link |
-| 5 | `supply-tariff-import-watch` | 待开发 | Federal Register / Treasury / BLS import prices / GSCPI / PMKT tariff-China markets |
-| 6 | `shelter-rent-oer-pressure` | 待开发 | BLS/FRED + Zillow/FHFA/Case-Shiller + PMKT CPI/Fed link |
-| 7 | `labor-wage-services-pressure` | 待开发 | BLS/DOL + JOLTS/ECI/claims + PMKT Fed/unemployment/recession link |
-| 8 | `growth-demand-recession-tracker` | 待开发 | GDPNow/BEA/Census/Fed + PMKT GDP/recession/Fed link |
-| 9 | `inflation-nowcast` | 待升级 | 已有 panel；升级成 Cleveland Fed nowcast + official bridge + PMKT bucket gap |
-| 10 | `fed-rates-polymarket-gap` | 待开发 | Fed/rates/yields + PMKT Fed/CPI/recession gap layer |
+| 3 | `energy-gasoline-shock` | 已完成 | EIA public XLS seed-first；已升级 glyph / severity / PMKT linked registry |
+| 4 | `food-retail-basket-pressure` | 已完成 / 待数据源扩展 | FRED/BLS CPI food components seed-first；已升级视觉；二期补 retail proxy / commodity proxy |
+| 5 | `supply-tariff-import-watch` | 已完成 MVP | FRED PPI/import/export + Federal Register trade-policy event seed；二期补 GSCPI / USTR / customs revenue / import-price细分 |
+| 6 | `shelter-rent-oer-pressure` | 已完成 MVP | FRED/BLS rent/OER/shelter + Case-Shiller；二期补 Zillow/FHFA leading proxy |
+| 7 | `labor-wage-services-pressure` | 已完成 MVP | FRED/BLS/DOL payrolls/unemployment/AHE/claims/JOLTS；二期补 ECI / services wage bridge |
+| 8 | `growth-demand-recession-tracker` | 已完成 MVP | FRED retail sales/PCE/industrial production/GDP/yield curve；二期补 Atlanta Fed GDPNow |
+| 9 | `inflation-nowcast` | 已升级 MVP | Cleveland Fed nowcast seed-first；已升级 nowcast ladder + PMKT CPI/Fed linked registry |
+| 10 | `fed-rates-polymarket-gap` | 已完成 MVP | FRED Fed funds/SOFR/Treasury yields/curve；二期补 meeting ladder 与 PMKT gap model |
 
 这条链路比原来的版本更贴近 CPI：
 
@@ -1117,9 +1117,9 @@ WorldMon  multi-source registry + filters + evidence + screenshot QA
 推荐推进顺序：
 
 ```text
-1. 补剩余 panel 的 MVP：supply, shelter, labor, growth, nowcast upgrade, fed gap
-2. 回头升级已完成 panel 的视觉语义：geo, macro map, calendar, energy, food
-3. 给每个 panel 增加 PMKT linked markets 和 gap strip
+1. 对 10 个 panel 做公网截图验收与源健康巡检
+2. 给 food / supply / shelter / labor / growth 分别补二期 proxy 源
+3. 给 fed gap 与 nowcast 增加 PMKT probability gap model
 4. 再做 Headline CPI Pressure / Core CPI Pressure composite 汇总层
 ```
 

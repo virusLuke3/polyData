@@ -19,6 +19,7 @@ import type {
   RuntimeInflationNowcastPayload,
   RuntimeF1Payload,
   RuntimeJin10Payload,
+  RuntimeMacroDriverPayload,
   RuntimeNbaMatchupPredictorPayload,
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
@@ -185,6 +186,26 @@ export function fetchRuntimeEnergyGasolineShock(limit = 6) {
 
 export function fetchRuntimeFoodRetailBasket(limit = 8) {
   return apiGet<RuntimeFoodRetailBasketPayload>(`/runtime/macro/food-retail-basket?limit=${limit}`);
+}
+
+export function fetchRuntimeSupplyTariffImportWatch(limit = 8) {
+  return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/supply-tariff-import-watch?limit=${limit}`);
+}
+
+export function fetchRuntimeShelterRentOerPressure(limit = 8) {
+  return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/shelter-rent-oer-pressure?limit=${limit}`);
+}
+
+export function fetchRuntimeLaborWageServicesPressure(limit = 8) {
+  return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/labor-wage-services-pressure?limit=${limit}`);
+}
+
+export function fetchRuntimeGrowthDemandRecessionTracker(limit = 8) {
+  return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/growth-demand-recession-tracker?limit=${limit}`);
+}
+
+export function fetchRuntimeFedRatesPolymarketGap(limit = 8) {
+  return apiGet<RuntimeMacroDriverPayload>(`/runtime/macro/fed-rates-polymarket-gap?limit=${limit}`);
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 6) {

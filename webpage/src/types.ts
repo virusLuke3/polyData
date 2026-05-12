@@ -510,6 +510,8 @@ export type RuntimeInflationNowcastPayload = {
   generatedAt?: string;
   source?: string;
   url?: string;
+  status?: string | null;
+  cacheMode?: string | null;
 };
 
 export type RuntimeGeoSanctionsShockSummary = {
@@ -740,6 +742,48 @@ export type RuntimeFoodRetailBasketPayload = {
   sources?: Record<string, string>;
   summary?: RuntimeFoodBasketSummary | null;
   items?: RuntimeFoodBasketItem[];
+};
+
+export type RuntimeMacroDriverItem = {
+  key?: string | null;
+  seriesId?: string | null;
+  label?: string | null;
+  group?: string | null;
+  icon?: string | null;
+  metric?: string | null;
+  unit?: string | null;
+  date?: string | null;
+  value?: number | string | null;
+  change?: number | string | null;
+  changePct?: number | string | null;
+  yoyPct?: number | string | null;
+  tone?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+};
+
+export type RuntimeMacroDriverSummary = {
+  signal?: string | null;
+  bias?: string | null;
+  hotCount?: number | string | null;
+  coolCount?: number | string | null;
+  watchCount?: number | string | null;
+  coverage?: number | string | null;
+  sourceCount?: number | string | null;
+  topMover?: RuntimeMacroDriverItem | null;
+  linkedMarketCategories?: string[];
+  panelId?: string | null;
+};
+
+export type RuntimeMacroDriverPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: RuntimeMacroDriverSummary | null;
+  items?: RuntimeMacroDriverItem[];
 };
 
 export type RuntimeTradeSignal = {

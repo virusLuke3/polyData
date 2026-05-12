@@ -24,6 +24,11 @@ import { panel as polymarketMacroMap } from './polymarket-macro-map';
 import { panel as cpiReleaseCalendar } from './cpi-release-calendar';
 import { panel as energyGasolineShock } from './energy-gasoline-shock';
 import { panel as foodRetailBasketPressure } from './food-retail-basket-pressure';
+import { panel as supplyTariffImportWatch } from './supply-tariff-import-watch';
+import { panel as shelterRentOerPressure } from './shelter-rent-oer-pressure';
+import { panel as laborWageServicesPressure } from './labor-wage-services-pressure';
+import { panel as growthDemandRecessionTracker } from './growth-demand-recession-tracker';
+import { panel as fedRatesPolymarketGap } from './fed-rates-polymarket-gap';
 import { panel as nbaScoreboard } from './nba-scoreboard';
 import { panel as nbaIntel } from './nba-intel';
 import { panel as espnMatchupPredictor } from './espn-matchup-predictor';
@@ -61,10 +66,15 @@ export const PANEL_MODULES: PanelModule[] = [
   cpiReleaseCalendar,
   energyGasolineShock,
   foodRetailBasketPressure,
+  supplyTariffImportWatch,
+  shelterRentOerPressure,
+  laborWageServicesPressure,
+  growthDemandRecessionTracker,
+  inflationNowcast,
+  fedRatesPolymarketGap,
   nbaScoreboard,
   nbaIntel,
   espnMatchupPredictor,
-  inflationNowcast,
   jin10Flash,
   newMarketSignals,
   lobDepth,

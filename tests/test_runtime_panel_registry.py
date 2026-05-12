@@ -43,6 +43,11 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_cpi_release_calendar_snapshot": lambda limit=8: {"limit": limit},
         "get_energy_gasoline_shock_snapshot": lambda limit=6: {"limit": limit},
         "get_food_retail_basket_snapshot": lambda limit=8: {"limit": limit},
+        "get_supply_tariff_import_watch_snapshot": lambda limit=8: {"limit": limit},
+        "get_shelter_rent_oer_pressure_snapshot": lambda limit=8: {"limit": limit},
+        "get_labor_wage_services_pressure_snapshot": lambda limit=8: {"limit": limit},
+        "get_growth_demand_recession_tracker_snapshot": lambda limit=8: {"limit": limit},
+        "get_fed_rates_polymarket_gap_snapshot": lambda limit=8: {"limit": limit},
         "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
@@ -65,5 +70,11 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert "cpi-release-calendar" in panel_ids
     assert "energy-gasoline-shock" in panel_ids
     assert "food-retail-basket-pressure" in panel_ids
+    assert "supply-tariff-import-watch" in panel_ids
+    assert "shelter-rent-oer-pressure" in panel_ids
+    assert "labor-wage-services-pressure" in panel_ids
+    assert "growth-demand-recession-tracker" in panel_ids
+    assert "inflation-nowcast" in panel_ids
+    assert "fed-rates-polymarket-gap" in panel_ids
     assert "f1-trackside" in panel_ids
     assert len(panel_ids) == len(set(panel_ids))

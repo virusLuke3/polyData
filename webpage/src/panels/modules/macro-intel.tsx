@@ -16,6 +16,9 @@ export type PanelGlyphName =
   | 'gas'
   | 'diesel'
   | 'food'
+  | 'home'
+  | 'policy'
+  | 'rates'
   | 'source';
 
 function numberLabel(value?: string | number | null) {
@@ -134,6 +137,24 @@ function GlyphSvg({ icon }: { icon: PanelGlyphName }) {
       {icon === 'source' ? (
         <>
           <path {...common} d="M7 4h8l3 3v13H7zM15 4v4h4M9 12h6M9 16h6" />
+        </>
+      ) : null}
+      {icon === 'home' ? (
+        <>
+          <path {...common} d="M4 11l8-7 8 7" />
+          <path {...common} d="M6 10v10h12V10M10 20v-6h4v6" />
+        </>
+      ) : null}
+      {icon === 'policy' ? (
+        <>
+          <path {...common} d="M7 4h10v16H7zM9 8h6M9 12h6M9 16h4" />
+          <path {...common} d="M5 6h2M17 6h2M5 18h2M17 18h2" />
+        </>
+      ) : null}
+      {icon === 'rates' ? (
+        <>
+          <path {...common} d="M5 17l5-5 3 3 6-8" />
+          <path {...common} d="M15 7h4v4M5 7h5M5 11h3M5 20h14" />
         </>
       ) : null}
     </svg>
