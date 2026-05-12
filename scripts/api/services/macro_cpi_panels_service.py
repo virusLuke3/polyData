@@ -80,8 +80,12 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
             {"key": "employment_ratio", "seriesId": "EMRATIO", "label": "Employment-population ratio", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "hot"},
             {"key": "u6", "seriesId": "U6RATE", "label": "U-6 unemployment rate", "group": "Slack", "icon": "labor", "unit": "%", "metric": "level", "toneUp": "cool"},
             {"key": "weekly_hours", "seriesId": "AWHAETP", "label": "Avg weekly hours", "group": "Wages", "icon": "fed", "unit": "hrs", "metric": "delta", "toneUp": "hot"},
+            {"key": "nonfarm_weekly_hours", "seriesId": "AWHNONAG", "label": "Nonfarm weekly hours", "group": "Wages", "icon": "fed", "unit": "hrs", "metric": "delta", "toneUp": "hot"},
             {"key": "services_cpi", "seriesId": "CUSR0000SAS", "label": "Services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
             {"key": "medical_services", "seriesId": "CUSR0000SAM2", "label": "Medical care services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "transport_services", "seriesId": "CUSR0000SAS4", "label": "Transportation services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "professional_services", "seriesId": "CUSR0000SEMC", "label": "Professional services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
+            {"key": "hospital_services", "seriesId": "CUSR0000SEMD", "label": "Hospital services CPI", "group": "Services CPI", "icon": "cpi", "unit": "idx", "metric": "pct", "toneUp": "hot"},
         ],
     },
     "growth-demand-recession-tracker": {
