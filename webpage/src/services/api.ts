@@ -14,6 +14,7 @@ import type {
   RuntimeCryptoFundingPayload,
   RuntimeCpiReleaseCalendarPayload,
   RuntimeEnergyGasolineShockPayload,
+  RuntimeGlobalWeatherMapPayload,
   RuntimeFoodRetailBasketPayload,
   RuntimeGeoSanctionsShockPayload,
   RuntimeInflationNowcastPayload,
@@ -27,6 +28,7 @@ import type {
   RuntimeNewMarketSignalsPayload,
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
+  RuntimeWeatherNewsPayload,
   SystemHealth,
   TradeRow,
   WorkspaceBundle,
@@ -183,6 +185,14 @@ export function fetchRuntimeCpiReleaseCalendar(limit = 8) {
 
 export function fetchRuntimeEnergyGasolineShock(limit = 6) {
   return apiGet<RuntimeEnergyGasolineShockPayload>(`/runtime/macro/energy-gasoline-shock?limit=${limit}`);
+}
+
+export function fetchRuntimeGlobalWeatherMap(limit = 34) {
+  return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/global-map?limit=${limit}`);
+}
+
+export function fetchRuntimeWeatherNews(limit = 24) {
+  return apiGet<RuntimeWeatherNewsPayload>(`/runtime/weather/news?limit=${limit}`);
 }
 
 export function fetchRuntimeFoodRetailBasket(limit = 8) {

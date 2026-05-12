@@ -104,6 +104,22 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 21600,
     },
     {
+        "panelId": "global-weather-map",
+        "namespace": "seed-meta:weather",
+        "cacheKey": "global-weather-map",
+        "serviceName": "polydata-global-weather-map-seed.service",
+        "intervalEnv": "POLYDATA_GLOBAL_WEATHER_MAP_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 300,
+    },
+    {
+        "panelId": "weather-news",
+        "namespace": "seed-meta:weather",
+        "cacheKey": "weather-news",
+        "serviceName": "polydata-weather-news-seed.service",
+        "intervalEnv": "POLYDATA_WEATHER_NEWS_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 900,
+    },
+    {
         "panelId": "food-retail-basket-pressure",
         "namespace": "seed-meta:macro",
         "cacheKey": "food-retail-basket-pressure",

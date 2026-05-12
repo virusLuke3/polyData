@@ -712,6 +712,96 @@ export type RuntimeEnergyGasolineShockPayload = {
   items?: RuntimeEnergyShockItem[];
 };
 
+export type RuntimeWeatherQuoteBin = {
+  label?: string | null;
+  bucketType?: string | null;
+  minTemp?: number | string | null;
+  maxTemp?: number | string | null;
+  unit?: string | null;
+  bestBidYes?: number | string | null;
+  bestAskYes?: number | string | null;
+  midPriceYes?: number | string | null;
+  marketSlug?: string | null;
+  marketStatus?: string | null;
+};
+
+export type RuntimeGlobalWeatherCity = {
+  cityId?: string | null;
+  city?: string | null;
+  country?: string | null;
+  region?: string | null;
+  lat?: number | string | null;
+  lon?: number | string | null;
+  timezone?: string | null;
+  unit?: string | null;
+  icao?: string | null;
+  labelDx?: number | string | null;
+  labelDy?: number | string | null;
+  condition?: string | null;
+  currentTemp?: number | string | null;
+  todayHigh?: number | string | null;
+  todayLow?: number | string | null;
+  forecastHigh?: number | string | null;
+  metarTemp?: number | string | null;
+  hourly?: Array<{ time?: string | null; temp?: number | string | null }>;
+  daily?: Array<{ date?: string | null; high?: number | string | null; low?: number | string | null }>;
+  eventSlug?: string | null;
+  eventTitle?: string | null;
+  eventStatus?: string | null;
+  marketUrl?: string | null;
+  quoteCoverage?: string | null;
+  topBin?: RuntimeWeatherQuoteBin | null;
+  bins?: RuntimeWeatherQuoteBin[];
+  sourceStates?: Record<string, string>;
+  updatedAt?: string | null;
+};
+
+export type RuntimeGlobalWeatherMapPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    cityCount?: number | string | null;
+    mappedCount?: number | string | null;
+    liveMarketCount?: number | string | null;
+    staleCount?: number | string | null;
+    hottestCity?: RuntimeGlobalWeatherCity | null;
+  } | null;
+  items?: RuntimeGlobalWeatherCity[];
+};
+
+export type RuntimeWeatherNewsItem = {
+  id?: string | null;
+  cityId?: string | null;
+  city?: string | null;
+  source?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  publishedAt?: string | null;
+  url?: string | null;
+  severity?: string | null;
+  tags?: string[];
+};
+
+export type RuntimeWeatherNewsPayload = {
+  generatedAt?: string;
+  source?: string | null;
+  sourceUrl?: string | null;
+  cacheMode?: string | null;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    articleCount?: number | string | null;
+    cityCount?: number | string | null;
+    warningCount?: number | string | null;
+    topCity?: string | null;
+  } | null;
+  items?: RuntimeWeatherNewsItem[];
+};
+
 export type RuntimeFoodBasketItem = {
   key?: string | null;
   seriesId?: string | null;

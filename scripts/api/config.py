@@ -51,6 +51,10 @@ from data_sources import (
     POLYMARKET_CLOB_API_BASE,
     POLYMARKET_GAMMA_API_BASE,
     POLYMARKET_MACRO_MAP_SOURCE_URL,
+    OPEN_METEO_API_URL,
+    AVIATIONWEATHER_METAR_API_URL,
+    GOOGLE_NEWS_RSS_URL,
+    WEATHER_SOURCE_URL,
     YAHOO_CHART_BASE_URL,
 )
 
@@ -175,6 +179,14 @@ class ApiSettings:
     geo_shock_acled_password: str
     geo_shock_source_url: str
     geo_shock_ttl_seconds: int
+    open_meteo_api_url: str
+    aviationweather_metar_api_url: str
+    google_news_rss_url: str
+    weather_source_url: str
+    global_weather_map_ttl_seconds: int
+    global_weather_market_days: int
+    weather_news_ttl_seconds: int
+    weather_news_limit: int
     f1_panel_path: str
     f1_bwenews_rss_url: str
     f1_bwenews_source_url: str
@@ -340,6 +352,17 @@ def load_api_settings() -> ApiSettings:
             GEO_SHOCK_SOURCE_URL or "https://ofac.treasury.gov/sanctions-list-service",
         ),
         geo_shock_ttl_seconds=_get_int("POLYDATA_GEO_SHOCK_TTL_SECONDS", 900),
+        open_meteo_api_url=_get_str("POLYDATA_OPEN_METEO_API_URL", OPEN_METEO_API_URL or "https://api.open-meteo.com/v1/forecast"),
+        aviationweather_metar_api_url=_get_str(
+            "POLYDATA_AVIATIONWEATHER_METAR_API_URL",
+            AVIATIONWEATHER_METAR_API_URL or "https://aviationweather.gov/api/data/metar",
+        ),
+        google_news_rss_url=_get_str("POLYDATA_GOOGLE_NEWS_RSS_URL", GOOGLE_NEWS_RSS_URL or "https://news.google.com/rss/search"),
+        weather_source_url=_get_str("POLYDATA_WEATHER_SOURCE_URL", WEATHER_SOURCE_URL or "https://open-meteo.com/"),
+        global_weather_map_ttl_seconds=_get_int("POLYDATA_GLOBAL_WEATHER_MAP_TTL_SECONDS", 300),
+        global_weather_market_days=_get_int("POLYDATA_GLOBAL_WEATHER_MARKET_DAYS", 4),
+        weather_news_ttl_seconds=_get_int("POLYDATA_WEATHER_NEWS_TTL_SECONDS", 900),
+        weather_news_limit=_get_int("POLYDATA_WEATHER_NEWS_LIMIT", 40),
         f1_panel_path=_get_str(
             "POLYDATA_F1_PANEL_PATH",
             str((PROJECT_ROOT / "data" / "runtime" / "f1" / "panel.json").resolve()),

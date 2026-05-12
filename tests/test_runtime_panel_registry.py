@@ -33,6 +33,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_polymarket_macro_map_snapshot": lambda limit=12: {"limit": limit},
         "get_f1_panel_snapshot": lambda limit=10: {"limit": limit},
         "get_geo_sanctions_shock_snapshot": lambda limit=6: {"limit": limit},
+        "get_global_weather_map_snapshot": lambda limit=34: {"limit": limit},
         "get_jin10_panel_snapshot": lambda limit=24: {"limit": limit},
         "get_nba_scoreboard_snapshot": lambda limit=10: {"limit": limit},
         "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
@@ -56,6 +57,7 @@ def test_runtime_panel_blueprint_registers_all_routes():
         "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
+        "get_weather_news_snapshot": lambda limit=24: {"limit": limit},
     }
 
     app.register_blueprint(create_runtime_panels_blueprint(helpers))

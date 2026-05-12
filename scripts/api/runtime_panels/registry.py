@@ -17,6 +17,7 @@ from .modules import (
     fed_reaction_growth_risk_board,
     fed_rates_polymarket_gap,
     food_retail_basket,
+    global_weather_map,
     geo_sanctions_shock,
     goods_tariff_supply_watch,
     growth_demand_recession_tracker,
@@ -31,6 +32,7 @@ from .modules import (
     shelter_rent_oer_pressure,
     supply_tariff_import_watch,
     suspicious_flow,
+    weather_news,
     whale_tracker,
 )
 from .types import RuntimePanelModule
@@ -40,6 +42,8 @@ _MODULES: List[ModuleType] = [
     commodities_watch,
     crypto_watch,
     crypto_funding_watch,
+    global_weather_map,
+    weather_news,
     f1_trackside,
     jin10_flash,
     new_market_signals,

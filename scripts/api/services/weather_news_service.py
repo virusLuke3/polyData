@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import hashlib
+import html
+import json
+import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
+from xml.etree import ElementTree
+
+from weather.cities import load_weather_cities
+
+
+WEATHER_NEWS_SNAPSHOT_NAMESPACE = "snapshot:weather:news"
+WEATHER_NEWS_CACHE_KEY = "panel-v1"
+DEFAULT_NEWS_LIMIT = 24
+
+RELEVANCE_RE = re.compile(r"\b(weather|forecast|storm|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane)\b", re.I)
+SEVERE_RE = re.compile(r"\b(heatwave|warning|storm|flood|extreme|alert|hurricane|typhoon|danger|record)\b", re.I)
+TAG_PATTERNS = {
+    "heat": re.compile(r"\b(heat|heatwave|hot|temperature)\b", re.I),
+    "storm": re.compile(r"\b(storm|thunder|hurricane|typhoon)\b", re.I),
+    "rain": re.compile(r"\b(rain|flood|shower)\b", re.I),
+    "snow": re.compile(r"\b(snow|ice|cold|freeze)\b", re.I),
+    "forecast": re.compile(r"\b(forecast|weather|outlook)\b", re.I),
+}
+
+
+def _utc_now_iso(ctx: dict) -> str:
+    now = ctx.get("utc_now_iso")
+    return now() if callable(now) else datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_pub_date(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        parsed = parsedate_to_datetime(text)
+    except Exception:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except Exception:
+            parsed = datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp(value: Any) -> float:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except Exception:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def _text(node: ElementTree.Element, name: str) -> str:
+    child = node.find(name)
+    return html.unescape(str(child.text or "").strip()) if child is not None else ""
+
+
+def _strip_summary(value: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html.unescape(str(value or "")))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:260]
+
+
+def _tags(text: str) -> List[str]:
+    return [tag for tag, pattern in TAG_PATTERNS.items() if pattern.search(text)]
+
+
+def _severity(text: str) -> str:
+    if SEVERE_RE.search(text):
+        return "warning"
+    if re.search(r"\b(watch|advisory|rain|wind|heat|cold)\b", text, re.I):
+        return "watch"
+    return "normal"
+
+
+def _article_id(city_id: str, title: str, source: str, url: str) -> str:
+    raw = f"{city_id}|{title.lower().strip()}|{source.lower().strip()}|{url.strip()}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _google_news_url(base_url: str, query: str) -> str:
+    return f"{base_url}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
+
+
+def fetch_google_news_rss(ctx: dict, city: Dict[str, Any]) -> List[Dict[str, Any]]:
+    base_url = str(getattr(ctx["SETTINGS"], "google_news_rss_url", "") or "").strip()
+    if not base_url:
+        raise RuntimeError("google news rss url missing")
+    query = str(city.get("news_query") or f"{city.get('city')} weather OR forecast OR storm OR heatwave")
+    rss_url = _google_news_url(base_url, query)
+    xml_text = ctx["http_text_get"](rss_url, timeout=14, headers={"Accept": "application/rss+xml,application/xml,text/xml", "User-Agent": "polydata-weather-news/1.0"})
+    root = ElementTree.fromstring(xml_text)
+    items: List[Dict[str, Any]] = []
+    for item in root.findall("./channel/item"):
+        title = _text(item, "title")
+        link = _text(item, "link")
+        summary = _strip_summary(_text(item, "description"))
+        source_node = item.find("source")
+        source = html.unescape(str(source_node.text or "").strip()) if source_node is not None else "Google News"
+        combined = f"{title} {summary}"
+        if not RELEVANCE_RE.search(combined):
+            continue
+        tags = _tags(combined)
+        items.append(
+            {
+                "id": _article_id(str(city["city_id"]), title, source, link),
+                "cityId": city.get("city_id"),
+                "city": city.get("city"),
+                "source": source,
+                "title": title,
+                "summary": summary or title,
+                "publishedAt": _parse_pub_date(_text(item, "pubDate")),
+                "url": link,
+                "severity": _severity(combined),
+                "tags": tags or ["forecast"],
+            }
+        )
+    return items
+
+
+def _dedupe_rank(articles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for article in articles:
+        key = re.sub(r"[^a-z0-9]+", " ", f"{article.get('title', '')} {article.get('source', '')}".lower()).strip()
+        url_key = str(article.get("url") or "").strip()
+        identity = url_key or key
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(article)
+    severity_weight = {"warning": 2, "watch": 1, "normal": 0}
+    deduped.sort(key=lambda row: (severity_weight.get(str(row.get("severity")), 0), _timestamp(row.get("publishedAt"))), reverse=True)
+    return deduped
+
+
+def build_news_summary(articles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    by_city: Dict[str, int] = {}
+    for article in articles:
+        city = str(article.get("city") or "Unknown")
+        by_city[city] = by_city.get(city, 0) + 1
+    top_city = max(by_city.items(), key=lambda item: item[1])[0] if by_city else None
+    return {
+        "articleCount": len(articles),
+        "cityCount": len(by_city),
+        "warningCount": len([row for row in articles if row.get("severity") == "warning"]),
+        "topCity": top_city,
+    }
+
+
+def build_weather_news_payload(ctx: dict, *, limit: int = DEFAULT_NEWS_LIMIT) -> Dict[str, Any]:
+    cities = load_weather_cities()
+    articles: List[Dict[str, Any]] = []
+    source_states: Dict[str, str] = {}
+    for city in cities:
+        try:
+            city_articles = fetch_google_news_rss(ctx, city)
+            articles.extend(city_articles)
+            source_states[str(city["city_id"])] = "ok" if city_articles else "empty"
+        except Exception as exc:
+            source_states[str(city["city_id"])] = "error"
+            logger = getattr(ctx.get("app"), "logger", None)
+            if logger is not None:
+                logger.exception("weather news rss fetch failed city=%s error=%s", city.get("city"), exc)
+    ranked = _dedupe_rank(articles)
+    status = "ok" if ranked else ("degraded" if any(value == "error" for value in source_states.values()) else "empty")
+    if ranked and any(value == "error" for value in source_states.values()):
+        status = "degraded"
+    return {
+        "generatedAt": _utc_now_iso(ctx),
+        "source": "Google News RSS",
+        "sourceUrl": getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"),
+        "status": status,
+        "sources": source_states,
+        "summary": build_news_summary(ranked),
+        "items": ranked[: max(1, int(limit or DEFAULT_NEWS_LIMIT))],
+    }
+
+
+def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
+    return {
+        "generatedAt": _utc_now_iso(ctx),
+        "source": "Google News RSS",
+        "sourceUrl": getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"),
+        "status": status,
+        "sources": {},
+        "summary": {"articleCount": 0, "cityCount": 0, "warningCount": 0, "topCity": None},
+        "items": [],
+    }
+
+
+def normalize_weather_news_payload(payload: Any, *, ctx: dict, limit: int = DEFAULT_NEWS_LIMIT) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return _empty_payload(ctx, status="invalid")
+    result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
+    result["items"] = items[: max(1, min(int(limit or DEFAULT_NEWS_LIMIT), 80))]
+    result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_news_summary(result["items"])
+    result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
+    result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
+    result["source"] = str(result.get("source") or "Google News RSS")
+    result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "google_news_rss_url", "https://news.google.com/rss/search"))
+    return result
+
+
+def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
+    return {**payload, "cacheMode": cache_mode}
+
+
+def _read_seeded_snapshot(ctx: dict, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        payload = reader(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
+        if isinstance(payload, dict):
+            return _with_cache_mode(payload, "redis-seed")
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is None:
+        return None
+    payload = store.get(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
+    if isinstance(payload, dict):
+        return _with_cache_mode(payload, "sqlite-seed")
+    stale = store.get_stale(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
+    if isinstance(stale, dict):
+        return _with_cache_mode(stale, "stale-seed")
+    return None
+
+
+def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
+    store = ctx.get("SNAPSHOT_STORE")
+    if store is not None:
+        store.set(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY, payload, ttl_seconds)
+    setter = ctx.get("set_cached_json")
+    if callable(setter):
+        setter(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY, payload, ttl_seconds)
+
+
+def get_weather_news_snapshot(ctx: dict, limit: int = DEFAULT_NEWS_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
+    ttl_seconds = max(300, int(getattr(ctx["SETTINGS"], "weather_news_ttl_seconds", 900) or 900))
+    seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
+    if seeded is not None:
+        return normalize_weather_news_payload(seeded, ctx=ctx, limit=limit)
+    if not allow_live_build:
+        return normalize_weather_news_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
+    payload = _with_cache_mode(build_weather_news_payload(ctx, limit=max(limit, int(getattr(ctx["SETTINGS"], "weather_news_limit", 40) or 40))), "live-build")
+    if payload.get("items"):
+        _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+    return normalize_weather_news_payload(payload, ctx=ctx, limit=limit)
+
