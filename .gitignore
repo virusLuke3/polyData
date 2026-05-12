@@ -47,6 +47,7 @@ data/*.lock
 data/*.marker
 
 runtime_logs/
+artifacts/
 
 # 私有文档，禁止提交到 GitHub。公开文档请放 docs/。
 # 不要对 document/ 使用 git add -f。
