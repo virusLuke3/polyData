@@ -141,6 +141,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Official CPI food-component pressure for inflation market positioning.',
   defaultEnabled: true,
+  size: 'tall',
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeFoodRetailBasket(8),
