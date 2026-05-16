@@ -44,7 +44,8 @@ except ImportError:
             geth_poa_middleware = None
             print("Warning: POA middleware not found; will use raw RPC for block timestamp.", file=sys.stderr)
 
-from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_connection, init_schema, dict_from_row, DEFAULT_DB_PATH
+from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_backend, get_connection, init_schema, dict_from_row, DEFAULT_DB_PATH
+from db.db import table_exists
 from db.trade_v2 import (
     LEGACY_TRADES_TABLE,
     TRADE_V2_READ_VIEW,
@@ -531,13 +532,57 @@ def prefetch_existing_trade_keys(
     }
 
 
+def _has_market_tokens_table(conn) -> bool:
+    try:
+        return table_exists(conn, "market_tokens")
+    except Exception:
+        return False
+
+
 def find_market_by_token_id(conn, token_id: str) -> Optional[Dict]:
-    """根据 tokenId 查找市场"""
+    """根据 OrderFilled tokenId 查找本地 market。返回的 id 是 local markets.id。"""
+    token_text = str(token_id)
     cursor = conn.cursor()
+
+    if _has_market_tokens_table(conn):
+        cursor.execute(
+            """
+            SELECT m.*
+            FROM market_tokens mt
+            JOIN markets m ON m.id = mt.market_id
+            WHERE mt.token_id = ?
+            LIMIT 1
+            """,
+            (token_text,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict_from_row(row)
+
     cursor.execute(
-        "SELECT * FROM markets WHERE yes_token_id = %s OR no_token_id = %s OR JSON_CONTAINS(clob_token_ids, JSON_QUOTE(%s)) LIMIT 1",
-        (str(token_id), str(token_id), str(token_id)),
+        "SELECT * FROM markets WHERE yes_token_id = ? OR no_token_id = ? LIMIT 1",
+        (token_text, token_text),
     )
+    row = cursor.fetchone()
+    if row:
+        return dict_from_row(row)
+
+    backend = get_backend()
+    if backend in {"postgres", "postgresql"}:
+        cursor.execute(
+            "SELECT * FROM markets WHERE clob_token_ids @> ?::jsonb LIMIT 1",
+            (json.dumps([token_text]),),
+        )
+    elif backend == "mysql":
+        cursor.execute(
+            "SELECT * FROM markets WHERE JSON_CONTAINS(clob_token_ids, JSON_QUOTE(?)) LIMIT 1",
+            (token_text,),
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM markets WHERE clob_token_ids LIKE ? LIMIT 1",
+            (f"%{token_text}%",),
+        )
     row = cursor.fetchone()
     return dict_from_row(row) if row else None
 
@@ -556,6 +601,22 @@ def prefetch_market_cache_for_token_ids(
     for chunk_start in range(0, len(unresolved), SQLITE_IN_MAX_VARS):
         chunk = unresolved[chunk_start:chunk_start + SQLITE_IN_MAX_VARS]
         placeholders = ",".join("?" for _ in chunk)
+
+        if _has_market_tokens_table(conn):
+            cursor.execute(
+                f"""
+                SELECT m.*, mt.token_id AS matched_token_id
+                FROM market_tokens mt
+                JOIN markets m ON m.id = mt.market_id
+                WHERE mt.token_id IN ({placeholders})
+                """,
+                chunk,
+            )
+            for row in cursor.fetchall():
+                market = dict_from_row(row)
+                matched_token_id = str(market.get("matched_token_id") or "")
+                if matched_token_id:
+                    market_cache[matched_token_id] = market
 
         cursor.execute(
             f"SELECT * FROM markets WHERE yes_token_id IN ({placeholders})",

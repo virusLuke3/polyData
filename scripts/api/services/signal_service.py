@@ -65,6 +65,7 @@ def _severity_for_notional(ctx: dict, notional: Any) -> str:
 def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "marketId": row.get("market_id"),
+        "localMarketId": row.get("market_id"),
         "marketTitle": row.get("market_title"),
         "timestamp": row.get("timestamp"),
         "txHash": row.get("tx_hash"),

@@ -52,8 +52,8 @@ def _select_retry_candidates(
                 gamma_market_id IS NULL OR TRIM(gamma_market_id) = ''
              OR question_id IS NULL OR TRIM(question_id) = ''
              OR oracle IS NULL OR TRIM(oracle) = ''
-             OR created_at IS NULL OR TRIM(created_at) = ''
-             OR end_date IS NULL OR TRIM(end_date) = ''
+             OR created_at IS NULL
+             OR end_date IS NULL
           )
         ORDER BY id ASC
         LIMIT ?

@@ -5,12 +5,12 @@ Polymarket market resolution fast sync.
 
 目标：
 1. 从 Gamma API 批量抓取已关闭 market
-2. 将 market_id -> settlement_code 写入本地数据库
+2. 将 local markets.id -> settlement_code 写入本地数据库
 3. 提供尽可能快的本地结算查询层，供 PnL/历史曲线复用
 
 表设计尽量轻量但查询友好：
     market_resolution_fast(
-        market_id BIGINT PRIMARY KEY,
+        market_id BIGINT PRIMARY KEY,  # local markets.id, not Gamma market id
         condition_id VARCHAR,
         slug VARCHAR,
         settlement_code TINYINT NOT NULL,

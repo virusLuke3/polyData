@@ -1146,6 +1146,7 @@ def get_bootstrap_component_cached(component_key: str, builder, *, ttl_seconds: 
 def normalize_market(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
+        "localMarketId": row.get("id"),
         "slug": row.get("slug"),
         "title": row.get("title"),
         "conditionId": row.get("condition_id"),
@@ -1192,6 +1193,7 @@ def normalize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
         "outcome": row.get("outcome"),
         "tokenId": token_id_text,
         "marketId": row.get("market_id"),
+        "localMarketId": row.get("market_id"),
         "marketTitle": row.get("market_title"),
         "orderHash": row.get("order_hash").hex() if isinstance(row.get("order_hash"), (bytes, bytearray, memoryview)) else row.get("order_hash"),
         "makerAssetId": maker_asset_id,
@@ -1212,6 +1214,8 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "eventStatus": row.get("event_status"),
         "externalMarketId": row.get("external_market_id"),
         "marketId": row.get("market_id"),
+        "localMarketId": row.get("market_id"),
+        "gammaMarketId": row.get("external_market_id"),
         "marketTitle": row.get("market_title"),
         "matchedBy": row.get("matched_by"),
         "questionId": row.get("question_id"),

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -141,7 +142,7 @@ class NewMarketSignalServiceTestCase(unittest.TestCase):
 
 
 class NewMarketSignalWatcherTestCase(unittest.TestCase):
-    def make_watcher(self) -> NewMarketSignalWatcher:
+    def make_watcher(self, *, max_market_age_hours: int = 0) -> NewMarketSignalWatcher:
         watcher = NewMarketSignalWatcher.__new__(NewMarketSignalWatcher)
         watcher.redis_client = FakeRedis()
         watcher.redis_prefix = "polydata:"
@@ -149,6 +150,7 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         watcher.items_key = "polydata:runtime:new-market-signals:items"
         watcher.pending_key = "polydata:runtime:new-market-signals:pending_market_ids"
         watcher.retention = 50
+        watcher.max_market_age_hours = max_market_age_hours
         snapshot_dir = tempfile.TemporaryDirectory()
         self.addCleanup(snapshot_dir.cleanup)
         watcher.snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "seed-meta.sqlite3"))
@@ -204,7 +206,7 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
     def test_scan_holds_placeholder_titles_in_pending_without_signal(self):
         watcher = self.make_watcher()
         watcher.set_last_seen_market_id(10)
-        watcher.fetch_markets_by_ids = lambda market_ids: []
+        watcher.fetch_markets_by_local_ids = lambda market_ids: []
         watcher.fetch_new_markets = lambda last_seen, limit: [
             {"id": 11, "title": "On-chain recovered market 0xabc", "yes_token_id": "yes-11", "created_at": None}
         ]
@@ -219,11 +221,12 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual([], json.loads(watcher.redis_client.get(watcher.items_key)))
 
     def test_pending_placeholder_emits_after_title_becomes_ready(self):
-        watcher = self.make_watcher()
+        watcher = self.make_watcher(max_market_age_hours=72)
         watcher.set_last_seen_market_id(11)
         watcher.store_pending_market_ids([11])
-        watcher.fetch_markets_by_ids = lambda market_ids: [
-            {"id": 11, "title": "Will the title be filled?", "yes_token_id": "yes-11", "created_at": None}
+        recent_created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        watcher.fetch_markets_by_local_ids = lambda market_ids: [
+            {"id": 11, "title": "Will the title be filled?", "yes_token_id": "yes-11", "created_at": recent_created_at}
         ]
         watcher.fetch_new_markets = lambda last_seen, limit: []
         watcher.fetch_initial_yes_probability = lambda yes_token_id: ("0.62", "clob_book_midpoint")
@@ -236,6 +239,40 @@ class NewMarketSignalWatcherTestCase(unittest.TestCase):
         self.assertEqual([], json.loads(watcher.redis_client.get(watcher.pending_key)))
         self.assertEqual("Will the title be filled?", items[0]["title"])
         self.assertEqual("0.62", items[0]["initialYesProbability"])
+
+    def test_scan_skips_stale_created_at_without_signal(self):
+        watcher = self.make_watcher(max_market_age_hours=72)
+        watcher.set_last_seen_market_id(10)
+        stale_created_at = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat().replace("+00:00", "Z")
+        watcher.fetch_markets_by_local_ids = lambda market_ids: []
+        watcher.fetch_new_markets = lambda last_seen, limit: [
+            {"id": 11, "title": "Old recovered market", "yes_token_id": "yes-11", "created_at": stale_created_at}
+        ]
+        watcher.fetch_initial_yes_probability = lambda yes_token_id: self.fail("stale market should not fetch CLOB")
+
+        result = watcher.run_once(limit=100)
+
+        self.assertEqual(0, result["signals"])
+        self.assertEqual(1, result["staleCreatedAt"])
+        self.assertEqual(0, result["pending"])
+        self.assertEqual("11", watcher.redis_client.get(watcher.last_seen_key))
+        self.assertEqual([], json.loads(watcher.redis_client.get(watcher.items_key)))
+
+    def test_ready_market_missing_created_at_waits_in_pending(self):
+        watcher = self.make_watcher(max_market_age_hours=72)
+        watcher.set_last_seen_market_id(10)
+        watcher.fetch_markets_by_local_ids = lambda market_ids: []
+        watcher.fetch_new_markets = lambda last_seen, limit: [
+            {"id": 11, "title": "Ready but missing timestamp", "yes_token_id": "yes-11", "created_at": None}
+        ]
+        watcher.fetch_initial_yes_probability = lambda yes_token_id: self.fail("missing created_at should not fetch CLOB")
+
+        result = watcher.run_once(limit=100)
+
+        self.assertEqual(0, result["signals"])
+        self.assertEqual(1, result["missingCreatedAt"])
+        self.assertEqual(1, result["pending"])
+        self.assertEqual([11], json.loads(watcher.redis_client.get(watcher.pending_key)))
 
 
 if __name__ == "__main__":

@@ -188,6 +188,7 @@ def get_address_summary_payload(ctx: dict, address: str, days: int) -> Dict[str,
         "topMarkets": [
             {
                 "marketId": row.get("market_id"),
+                "localMarketId": row.get("market_id"),
                 "slug": row.get("slug"),
                 "title": row.get("title"),
                 "tradeCount": int(row.get("trade_count") or 0),

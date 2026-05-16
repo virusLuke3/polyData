@@ -74,6 +74,8 @@ def build_dashboard_payload(ctx: dict) -> Dict[str, Any]:
         "recentActiveMarkets": [
             {
                 "id": row.get("id"),
+                "localMarketId": row.get("id"),
+                "gammaMarketId": row.get("gamma_market_id"),
                 "slug": row.get("slug"),
                 "title": row.get("title"),
                 "tradeCount": int(row.get("trade_count") or 0),
@@ -234,6 +236,8 @@ def _normalize_bootstrap_market_item(ctx: dict, row: Dict[str, Any]) -> Dict[str
     no_token_id = str(row.get("no_token_id") or "").strip()
     return {
         "id": row.get("id"),
+        "localMarketId": row.get("id"),
+        "gammaMarketId": row.get("gamma_market_id"),
         "slug": row.get("slug"),
         "title": row.get("title"),
         "conditionId": row.get("condition_id"),
@@ -262,6 +266,7 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
         """
         SELECT
             m.id,
+            m.gamma_market_id,
             m.slug,
             m.title,
             m.condition_id,
@@ -482,6 +487,7 @@ def _build_bootstrap_price_preview(ctx: dict, market_id: int) -> Dict[str, Any]:
     )
     return {
         "marketId": market_id,
+        "localMarketId": market_id,
         "latestPrice": summary_row.get("latest_price") if summary_row else None,
         "latestYesPrice": summary_row.get("latest_yes_price") if summary_row else None,
         "latestNoPrice": summary_row.get("latest_no_price") if summary_row else None,

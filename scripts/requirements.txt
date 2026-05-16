@@ -5,6 +5,7 @@ flask>=2.3.0
 gunicorn>=23.0.0
 python-dotenv>=1.0.0
 PyMySQL>=1.1.0
+psycopg[binary]>=3.2.0
 redis>=5.0.0
 websockets>=15.0.0
 numpy>=1.24.0

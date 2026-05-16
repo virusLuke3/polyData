@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
+from market.market_identity import MarketIdentity, oracle_event_lookup_clause
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v8"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
@@ -439,7 +440,7 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
     pattern = f"%{cleaned}%"
     rows = ctx["query_all"](
         """
-        SELECT id, slug, title, condition_id, question_id
+        SELECT id, gamma_market_id, slug, title, condition_id, question_id
         FROM markets
         WHERE title LIKE ? OR slug LIKE ? OR condition_id LIKE ? OR question_id LIKE ?
         ORDER BY created_at DESC
@@ -451,10 +452,12 @@ def search_markets(ctx: dict, query: str, limit: int = 10) -> Dict[str, Any]:
         "items": [
             {
                 "id": row.get("id"),
+                "localMarketId": row.get("id"),
                 "slug": row.get("slug"),
                 "title": row.get("title"),
                 "conditionId": row.get("condition_id"),
                 "questionId": row.get("question_id"),
+                "gammaMarketId": row.get("gamma_market_id"),
             }
             for row in rows
         ]
@@ -547,18 +550,23 @@ def get_recent_trades_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
 
 
 def get_oracle_events_by_market_id(ctx: dict, market_id: int) -> List[Dict[str, Any]]:
+    market = get_market_by_id(ctx, market_id)
+    if market:
+        where_sql, where_params = oracle_event_lookup_clause(MarketIdentity.from_row(market), "oe")
+    else:
+        where_sql, where_params = "oe.market_id = ?", (market_id,)
     rows = ctx["query_all"](
-        """
+        f"""
         SELECT
-            id, tx_hash, block_number, event_time, event_status, external_market_id,
-            market_id, market_title, matched_by, question_id, condition_id,
-            proposed_price, settled_price, requester, proposer, disputer,
-            proposal_transaction, settlement_transaction, source_adapter, source_oracle
-        FROM oracle_events
-        WHERE market_id = ?
-        ORDER BY block_number ASC, id ASC
+            oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+            oe.market_id, oe.market_title, oe.matched_by, oe.question_id, oe.condition_id,
+            oe.proposed_price, oe.settled_price, oe.requester, oe.proposer, oe.disputer,
+            oe.proposal_transaction, oe.settlement_transaction, oe.source_adapter, oe.source_oracle
+        FROM oracle_events oe
+        WHERE {where_sql}
+        ORDER BY oe.block_number ASC, oe.id ASC
         """,
-        (market_id,),
+        where_params,
     )
     return [ctx["normalize_oracle_event"](row) for row in rows]
 
@@ -652,6 +660,7 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
 
     return {
         "marketId": market_id,
+        "localMarketId": market_id,
         "latestPrice": ctx["format_trade_decimal"](latest_yes_price or latest_price),
         "latestYesPrice": ctx["format_trade_decimal"](latest_yes_price),
         "latestNoPrice": ctx["format_trade_decimal"](latest_no_price),
@@ -669,6 +678,7 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
     if chart_context:
         return {
             "marketId": market_id,
+            "localMarketId": market_id,
             "range": range_name,
             "interval": interval,
             "kind": chart_context.get("kind"),
@@ -702,7 +712,14 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
             {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
             {"timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
         ]
-    return {"marketId": market_id, "range": range_name, "interval": interval, "kind": "probability", "points": points}
+    return {
+        "marketId": market_id,
+        "localMarketId": market_id,
+        "range": range_name,
+        "interval": interval,
+        "kind": "probability",
+        "points": points,
+    }
 
 
 def get_market_oracle_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
@@ -711,6 +728,8 @@ def get_market_oracle_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
     return {
         "marketId": market_id,
+        "localMarketId": market_id,
+        "gammaMarketId": market.get("gamma_market_id"),
         "questionId": market.get("question_id"),
         "oracle": market.get("oracle"),
         "currentStatus": market.get("status"),
@@ -836,6 +855,8 @@ def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
 def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": row.get("id"),
+        "localMarketId": row.get("id"),
+        "gammaMarketId": row.get("gamma_market_id"),
         "slug": row.get("slug"),
         "title": row.get("title"),
         "conditionId": row.get("condition_id"),
@@ -891,6 +912,7 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
         f"""
             SELECT
                 m.id,
+                m.gamma_market_id,
                 m.slug,
                 m.title,
                 m.condition_id,
@@ -1177,6 +1199,8 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
     return {
         "market": ctx["normalize_market"](market),
+        "localMarketId": market_id,
+        "gammaMarketId": market.get("gamma_market_id"),
         "priceSeries": get_market_chart_payload(ctx, market_id).get("points", []),
         "trades": get_trades_by_market_id(ctx, market_id, limit=100, offset=0),
         "oracleEvents": get_oracle_events_by_market_id(ctx, market_id),

@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -53,6 +53,7 @@ DEFAULT_RETENTION = 50
 DEFAULT_PENDING_RETENTION = 500
 DEFAULT_CLOB_TIMEOUT_SECONDS = 10
 DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
+DEFAULT_MAX_MARKET_AGE_HOURS = 72
 PLACEHOLDER_TITLE_PREFIXES = ("On-chain recovered market ",)
 SEED_META_NAMESPACE = "seed-meta:markets"
 SEED_META_CACHE_KEY = "new-market-signals"
@@ -61,6 +62,16 @@ SEED_META_SERVICE_NAME = "polydata-new-market-signal.service"
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return int(str(raw))
+    except (TypeError, ValueError):
+        return default
 
 
 def _safe_decimal(value: Any) -> Optional[Decimal]:
@@ -88,6 +99,28 @@ def _clean_title(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _parse_market_created_at(value: Any) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        text = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                dt = datetime.fromisoformat(text.replace(" ", "T"))
+            except ValueError:
+                return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def is_placeholder_market_title(value: Any) -> bool:
     title = _clean_title(value)
     if not title:
@@ -106,6 +139,7 @@ class NewMarketSignalWatcher:
         snapshot_sqlite_path: str,
         clob_timeout_seconds: int = DEFAULT_CLOB_TIMEOUT_SECONDS,
         retention: int = DEFAULT_RETENTION,
+        max_market_age_hours: int = DEFAULT_MAX_MARKET_AGE_HOURS,
     ) -> None:
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
@@ -122,6 +156,7 @@ class NewMarketSignalWatcher:
         self.items_key = _redis_key(redis_prefix, namespace, "items")
         self.pending_key = _redis_key(redis_prefix, namespace, "pending_market_ids")
         self.retention = max(1, int(retention))
+        self.max_market_age_hours = int(max_market_age_hours)
         self.clob_api_base = str(clob_api_base).rstrip("/")
         self.clob_timeout_seconds = max(1, int(clob_timeout_seconds))
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
@@ -205,7 +240,7 @@ class NewMarketSignalWatcher:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, title, yes_token_id, created_at
+                SELECT id, gamma_market_id, condition_id, slug, title, yes_token_id, created_at
                 FROM markets
                 WHERE id > ?
                 ORDER BY id ASC
@@ -217,7 +252,7 @@ class NewMarketSignalWatcher:
         finally:
             conn.close()
 
-    def fetch_markets_by_ids(self, market_ids: Iterable[int]) -> List[Dict[str, Any]]:
+    def fetch_markets_by_local_ids(self, market_ids: Iterable[int]) -> List[Dict[str, Any]]:
         ids = sorted({int(market_id) for market_id in market_ids if int(market_id or 0) > 0})
         if not ids:
             return []
@@ -227,7 +262,7 @@ class NewMarketSignalWatcher:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                SELECT id, title, yes_token_id, created_at
+                SELECT id, gamma_market_id, condition_id, slug, title, yes_token_id, created_at
                 FROM markets
                 WHERE id IN ({placeholders})
                 ORDER BY id ASC
@@ -343,31 +378,53 @@ class NewMarketSignalWatcher:
     def is_signal_ready(self, row: Dict[str, Any]) -> bool:
         return not is_placeholder_market_title(row.get("title"))
 
+    def market_freshness_state(self, row: Dict[str, Any], *, now: Optional[datetime] = None) -> str:
+        if self.max_market_age_hours <= 0:
+            return "fresh"
+        created_at = _parse_market_created_at(row.get("created_at"))
+        if created_at is None:
+            return "missing_created_at"
+        now_dt = now or datetime.now(timezone.utc)
+        if created_at > now_dt + timedelta(hours=1):
+            return "future_created_at"
+        if now_dt - created_at > timedelta(hours=self.max_market_age_hours):
+            return "stale_created_at"
+        return "fresh"
+
     def run_once(self, *, limit: int = DEFAULT_BATCH_LIMIT) -> Dict[str, Any]:
         self.redis_client.ping()
         last_seen = self.get_last_seen_market_id()
         if last_seen is None:
             baseline = self.get_current_max_market_id()
             self.set_last_seen_market_id(baseline)
-            result = {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0}
+            result = {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0, "maxMarketAgeHours": self.max_market_age_hours}
             self.store_snapshot_payload(status="empty", metadata=result)
             self.store_seed_meta(status="bootstrap", record_count=0, metadata=result)
             return result
 
         pending_ids = self.load_pending_market_ids()
-        pending_rows = self.fetch_markets_by_ids(pending_ids)
+        pending_rows = self.fetch_markets_by_local_ids(pending_ids)
         rows = self.fetch_new_markets(last_seen, limit=limit)
         if not rows and not pending_rows:
-            result = {"mode": "scan", "lastSeenMarketId": last_seen, "signals": 0, "pending": len(pending_ids)}
+            result = {
+                "mode": "scan",
+                "lastSeenMarketId": last_seen,
+                "signals": 0,
+                "pending": len(pending_ids),
+                "maxMarketAgeHours": self.max_market_age_hours,
+            }
             self.store_snapshot_payload(status="ok" if self.load_items() else "empty", metadata=result)
             self.store_seed_meta(status="scan", record_count=len(self.load_items()), metadata=result)
             return result
 
         observed_at = utc_now_iso()
+        now_dt = datetime.now(timezone.utc)
         signals: List[Dict[str, Any]] = []
         max_seen = last_seen
         next_pending_ids = set(pending_ids)
         skipped = 0
+        stale = 0
+        missing_created_at = 0
         candidate_rows = [*pending_rows, *rows]
         seen_candidate_ids = set()
         for row in candidate_rows:
@@ -380,11 +437,26 @@ class NewMarketSignalWatcher:
                 next_pending_ids.add(market_id)
                 skipped += 1
                 continue
+            freshness_state = self.market_freshness_state(row, now=now_dt)
+            if freshness_state == "missing_created_at":
+                next_pending_ids.add(market_id)
+                missing_created_at += 1
+                skipped += 1
+                continue
+            if freshness_state == "stale_created_at":
+                next_pending_ids.discard(market_id)
+                stale += 1
+                skipped += 1
+                continue
             probability, source = self.fetch_initial_yes_probability(row.get("yes_token_id"))
             next_pending_ids.discard(market_id)
             signals.append(
                 {
                     "marketId": market_id,
+                    "localMarketId": market_id,
+                    "gammaMarketId": row.get("gamma_market_id"),
+                    "conditionId": row.get("condition_id"),
+                    "slug": row.get("slug"),
                     "title": _clean_title(row.get("title")) or f"Market {market_id}",
                     "initialYesProbability": probability,
                     "probabilitySource": source,
@@ -400,7 +472,16 @@ class NewMarketSignalWatcher:
         self.store_pending_market_ids(next_pending_ids)
         self.set_last_seen_market_id(max_seen)
         stored_items = self.load_items()
-        result = {"mode": "scan", "lastSeenMarketId": max_seen, "signals": len(signals), "pending": len(next_pending_ids), "skipped": skipped}
+        result = {
+            "mode": "scan",
+            "lastSeenMarketId": max_seen,
+            "signals": len(signals),
+            "pending": len(next_pending_ids),
+            "skipped": skipped,
+            "staleCreatedAt": stale,
+            "missingCreatedAt": missing_created_at,
+            "maxMarketAgeHours": self.max_market_age_hours,
+        }
         self.store_snapshot_payload(status="ok" if stored_items else "empty", metadata=result)
         self.store_seed_meta(status="scan", record_count=len(stored_items), metadata=result)
         return result
@@ -419,6 +500,12 @@ def main() -> None:
     parser.add_argument("--redis-prefix", default=settings.redis_prefix, help="Redis key prefix")
     parser.add_argument("--clob-api-base", default=settings.clob_api_base or POLYMARKET_CLOB_API_BASE, help="Polymarket CLOB API base")
     parser.add_argument("--clob-timeout-seconds", type=int, default=settings.clob_timeout_seconds, help="CLOB request timeout")
+    parser.add_argument(
+        "--max-market-age-hours",
+        type=int,
+        default=_env_int("POLYDATA_NEW_MARKET_SIGNAL_MAX_AGE_HOURS", DEFAULT_MAX_MARKET_AGE_HOURS),
+        help="Only emit markets whose market.created_at is within this many hours; <=0 disables the guard",
+    )
     args = parser.parse_args()
     db_read_timeout = max(3, int(os.environ.get("POLYDATA_NEW_MARKET_SIGNAL_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
     current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
@@ -434,6 +521,7 @@ def main() -> None:
         snapshot_sqlite_path=settings.snapshot_sqlite_path,
         clob_timeout_seconds=args.clob_timeout_seconds,
         retention=args.retention,
+        max_market_age_hours=args.max_market_age_hours,
     )
     print(f"[new-market-signal] db={describe_db_target()} redis_key={watcher.items_key}", file=sys.stderr)
 

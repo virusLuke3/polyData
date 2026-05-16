@@ -218,6 +218,7 @@ def get_market_clob_price_snapshot(ctx: dict, market: Optional[Dict[str, Any]]) 
 
     payload = {
         "marketId": market_id,
+        "localMarketId": market_id,
         "latestPrice": _decimal_to_payload_text(ctx, latest_price),
         "latestYesPrice": _decimal_to_payload_text(ctx, latest_price),
         "latestNoPrice": _decimal_to_payload_text(ctx, Decimal("1") - latest_price),

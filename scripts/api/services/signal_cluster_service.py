@@ -181,6 +181,7 @@ def build_polybeats_clusters(
             key,
             {
                 "marketId": market_id,
+                "localMarketId": market_id,
                 "marketTitle": trade.get("marketTitle") or trade.get("market_title") or "Market signal",
                 "outcome": outcome,
                 "side": side,
@@ -274,6 +275,7 @@ def build_polybeats_clusters(
                 "summary": "; ".join(summary_parts),
                 "timestamp": entry.get("latestTimestamp"),
                 "marketId": market_id,
+                "localMarketId": market_id,
                 "marketTitle": entry.get("marketTitle"),
                 "txHash": entry.get("txHash"),
                 "side": entry.get("side"),

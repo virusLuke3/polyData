@@ -432,6 +432,7 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
             {
                 "outcomeKey": _normalize_outcome_key(label, market.get("id")),
                 "marketId": local.get("id"),
+                "localMarketId": local.get("id"),
                 "gammaMarketId": market.get("id"),
                 "label": label,
                 "title": market.get("question") or market.get("title") or local.get("title") or event_title,

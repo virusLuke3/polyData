@@ -55,11 +55,11 @@ def _clob_book_fallback(ctx: dict, market: Dict[str, Any], yes_token_id: str, no
 def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     market = ctx["get_market_by_id"](market_id)
     if not market:
-        return {"error": "Market not found", "marketId": market_id, "_status": 404}
+        return {"error": "Market not found", "marketId": market_id, "localMarketId": market_id, "_status": 404}
     yes_token_id = str(market.get("yes_token_id") or "").strip()
     no_token_id = str(market.get("no_token_id") or "").strip()
     if not yes_token_id or not no_token_id:
-        return {"error": "Market is missing token ids", "marketId": market_id, "_status": 409}
+        return {"error": "Market is missing token ids", "marketId": market_id, "localMarketId": market_id, "_status": 409}
     try:
         return ctx["LOB_RUNTIME_MANAGER"].get_market_snapshot(
             market_id=market_id,
@@ -73,4 +73,10 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             return _clob_book_fallback(ctx, market, yes_token_id, no_token_id)
         except Exception as fallback_exc:
             ctx["app"].logger.exception("lob-runtime fallback failed market_id=%s", market_id)
-            return {"error": "LOB runtime unavailable", "marketId": market_id, "detail": str(fallback_exc), "_status": 502}
+            return {
+                "error": "LOB runtime unavailable",
+                "marketId": market_id,
+                "localMarketId": market_id,
+                "detail": str(fallback_exc),
+                "_status": 502,
+            }

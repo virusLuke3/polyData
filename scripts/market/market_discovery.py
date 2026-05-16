@@ -35,8 +35,13 @@ try:
 except ImportError:
     Web3 = None
 
+try:
+    from psycopg.types.json import Jsonb
+except ImportError:
+    Jsonb = None
+
 # 引入阶段一模块
-from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_db, get_connection, init_schema, DEFAULT_DB_PATH
+from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_backend, get_db, get_connection, init_schema, DEFAULT_DB_PATH
 from config import get_rpc_url
 from data_sources import POLYMARKET_CLOB_API_BASE
 from trade.trade_decoder import CTF_EXCHANGE_ADDRESS, NEG_RISK_EXCHANGE_ADDRESS
@@ -46,6 +51,7 @@ try:
         GAMMA_API_BASE,
         USDC_E_ADDRESS,
     )
+    from .market_identity import gamma_market_url, normalize_gamma_market_id
 except ImportError:
     # 直接运行脚本时无父包，将 market 目录加入 path
     _market_dir = Path(__file__).resolve().parent
@@ -56,6 +62,7 @@ except ImportError:
         GAMMA_API_BASE,
         USDC_E_ADDRESS,
     )
+    from market_identity import gamma_market_url, normalize_gamma_market_id
 
 # Gamma API
 GAMMA_MARKETS_URL = f"{GAMMA_API_BASE}/markets"
@@ -282,11 +289,11 @@ def _fetch_tags_endpoint(url: str) -> List[str]:
     return _normalize_tags_payload(data)
 
 
-def _fetch_market_tags_by_id(gamma_market_id: Any) -> List[str]:
-    market_id = str(gamma_market_id or "").strip()
-    if not market_id:
+def _fetch_market_tags_by_gamma_market_id(gamma_market_id: Any) -> List[str]:
+    gamma_id = normalize_gamma_market_id(gamma_market_id)
+    if not gamma_id:
         return []
-    return _fetch_tags_endpoint(f"{GAMMA_MARKETS_URL}/{market_id}/tags")
+    return _fetch_tags_endpoint(gamma_market_url(GAMMA_API_BASE, gamma_id, "tags"))
 
 
 def _fetch_event_tags_by_id(event_id: Any) -> List[str]:
@@ -335,7 +342,7 @@ def _hydrate_market_taxonomy_and_ids(m: Dict) -> Dict:
         event_id = (m.get("events") or [{}])[0].get("id")
 
     if not existing_tags and gamma_market_id:
-        existing_tags = _fetch_market_tags_by_id(gamma_market_id)
+        existing_tags = _fetch_market_tags_by_gamma_market_id(gamma_market_id)
     if not existing_tags and event_id:
         existing_tags = _fetch_event_tags_by_id(event_id)
     if not existing_tags:
@@ -902,6 +909,35 @@ def _parse_iso_date(s: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(clean).replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+def _is_postgres_target() -> bool:
+    return get_backend() in {"postgres", "postgresql"}
+
+
+def _json_for_db(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            parsed = []
+    else:
+        parsed = value
+    if parsed is None:
+        parsed = []
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+    if _is_postgres_target() and Jsonb is not None:
+        return Jsonb(parsed)
+    return json.dumps(parsed, ensure_ascii=False)
+
+
+def _datetime_for_db(value: Any) -> Any:
+    if not _is_postgres_target():
+        return value
+    if isinstance(value, datetime):
+        return value
+    return _parse_iso_date(str(value)) if value is not None else None
 
 
 def _get_market_created_at(market: Dict) -> Optional[datetime]:
@@ -1577,6 +1613,8 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     condition_id = m.get("conditionId") or m.get("condition_id")
     if not condition_id:
         return None
+    # Gamma payload "id" is the official Gamma market id. It is not markets.id,
+    # which is a local surrogate key used only for internal joins.
     gamma_market_id = m.get("id") or m.get("gamma_market_id")
     gamma_market_id = str(gamma_market_id).strip() if gamma_market_id is not None else ""
 
@@ -2012,9 +2050,7 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
         return 0
     rows = []
     for market in markets:
-        tags_json = json.dumps(market.get("tags", []) or [])
         cids = market.get("clob_token_ids", []) or []
-        clob_token_ids_json = json.dumps(cids, ensure_ascii=False) if isinstance(cids, list) else (cids if isinstance(cids, str) else "[]")
         rows.append((
             market.get("gamma_market_id", "") or "",
             market.get("slug"),
@@ -2026,38 +2062,71 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
             market.get("title", ""),
             market.get("description", ""),
             market.get("enable_neg_risk", 0),
-            market.get("end_date"),
-            market.get("created_at"),
+            _datetime_for_db(market.get("end_date")),
+            _datetime_for_db(market.get("created_at")),
             market.get("category", "") or "",
-            tags_json,
-            clob_token_ids_json,
+            _json_for_db(market.get("tags", []) or []),
+            _json_for_db(cids),
         ))
     cursor = conn.cursor()
-    cursor.executemany(
-        """
-        INSERT INTO markets (
-            gamma_market_id, slug, condition_id, question_id, oracle,
-            yes_token_id, no_token_id, title, description,
-            enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(condition_id) DO UPDATE SET
-            gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
-            slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
-            question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
-            oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
-            yes_token_id=excluded.yes_token_id,
-            no_token_id=excluded.no_token_id,
-            title=excluded.title,
-            description=excluded.description,
-            enable_neg_risk=excluded.enable_neg_risk,
-            end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
-            created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
-            category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
-            tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
-            clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
-        """,
-        rows,
-    )
+    if _is_postgres_target():
+        cursor.executemany(
+            """
+            INSERT INTO markets (
+                gamma_market_id, slug, condition_id, question_id, oracle,
+                yes_token_id, no_token_id, title, description,
+                enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+                question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+                oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
+                yes_token_id=excluded.yes_token_id,
+                no_token_id=excluded.no_token_id,
+                title=excluded.title,
+                description=excluded.description,
+                enable_neg_risk=excluded.enable_neg_risk,
+                end_date=COALESCE(excluded.end_date, markets.end_date),
+                created_at=COALESCE(excluded.created_at, markets.created_at),
+                category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+                tags=CASE
+                    WHEN markets.tags IS NULL OR markets.tags = '[]'::jsonb THEN excluded.tags
+                    ELSE markets.tags
+                END,
+                clob_token_ids=CASE
+                    WHEN markets.clob_token_ids IS NULL OR markets.clob_token_ids = '[]'::jsonb THEN excluded.clob_token_ids
+                    ELSE markets.clob_token_ids
+                END
+            """,
+            rows,
+        )
+    else:
+        cursor.executemany(
+            """
+            INSERT INTO markets (
+                gamma_market_id, slug, condition_id, question_id, oracle,
+                yes_token_id, no_token_id, title, description,
+                enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+                question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+                oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
+                yes_token_id=excluded.yes_token_id,
+                no_token_id=excluded.no_token_id,
+                title=excluded.title,
+                description=excluded.description,
+                enable_neg_risk=excluded.enable_neg_risk,
+                end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
+                created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
+                category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+                tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
+                clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
+            """,
+            rows,
+        )
     conn.commit()
     return len(markets)
 
@@ -2068,51 +2137,83 @@ def upsert_market(conn, market: Dict) -> int:
     不存储 collateral_token、status、updated_at；存储 category、tags、clob_token_ids
     category/tags 使用 COALESCE 保护，避免覆盖已有精准标签。
     """
-    tags_json = json.dumps(market.get("tags", []) or [])
     cids = market.get("clob_token_ids", []) or []
-    clob_token_ids_json = json.dumps(cids, ensure_ascii=False) if isinstance(cids, list) else (cids if isinstance(cids, str) else "[]")
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO markets (
-            gamma_market_id, slug, condition_id, question_id, oracle,
-            yes_token_id, no_token_id, title, description,
-            enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(condition_id) DO UPDATE SET
-            gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
-            slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
-            question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
-            oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
-            yes_token_id=excluded.yes_token_id,
-            no_token_id=excluded.no_token_id,
-            title=excluded.title,
-            description=excluded.description,
-            enable_neg_risk=excluded.enable_neg_risk,
-            end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
-            created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
-            category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
-            tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
-            clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
-        """,
-        (
-            market.get("gamma_market_id", "") or "",
-            market.get("slug"),
-            market.get("condition_id"),
-            market.get("question_id"),
-            market.get("oracle"),
-            market.get("yes_token_id"),
-            market.get("no_token_id"),
-            market.get("title", ""),
-            market.get("description", ""),
-            market.get("enable_neg_risk", 0),
-            market.get("end_date"),
-            market.get("created_at"),
-            market.get("category", "") or "",
-            tags_json,
-            clob_token_ids_json,
-        ),
+    row = (
+        market.get("gamma_market_id", "") or "",
+        market.get("slug"),
+        market.get("condition_id"),
+        market.get("question_id"),
+        market.get("oracle"),
+        market.get("yes_token_id"),
+        market.get("no_token_id"),
+        market.get("title", ""),
+        market.get("description", ""),
+        market.get("enable_neg_risk", 0),
+        _datetime_for_db(market.get("end_date")),
+        _datetime_for_db(market.get("created_at")),
+        market.get("category", "") or "",
+        _json_for_db(market.get("tags", []) or []),
+        _json_for_db(cids),
     )
+    if _is_postgres_target():
+        cursor.execute(
+            """
+            INSERT INTO markets (
+                gamma_market_id, slug, condition_id, question_id, oracle,
+                yes_token_id, no_token_id, title, description,
+                enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+                question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+                oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
+                yes_token_id=excluded.yes_token_id,
+                no_token_id=excluded.no_token_id,
+                title=excluded.title,
+                description=excluded.description,
+                enable_neg_risk=excluded.enable_neg_risk,
+                end_date=COALESCE(excluded.end_date, markets.end_date),
+                created_at=COALESCE(excluded.created_at, markets.created_at),
+                category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+                tags=CASE
+                    WHEN markets.tags IS NULL OR markets.tags = '[]'::jsonb THEN excluded.tags
+                    ELSE markets.tags
+                END,
+                clob_token_ids=CASE
+                    WHEN markets.clob_token_ids IS NULL OR markets.clob_token_ids = '[]'::jsonb THEN excluded.clob_token_ids
+                    ELSE markets.clob_token_ids
+                END
+            """,
+            row,
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO markets (
+                gamma_market_id, slug, condition_id, question_id, oracle,
+                yes_token_id, no_token_id, title, description,
+                enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
+                question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
+                oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
+                yes_token_id=excluded.yes_token_id,
+                no_token_id=excluded.no_token_id,
+                title=excluded.title,
+                description=excluded.description,
+                enable_neg_risk=excluded.enable_neg_risk,
+                end_date=COALESCE(NULLIF(TRIM(COALESCE(excluded.end_date,'')), ''), markets.end_date),
+                created_at=COALESCE(NULLIF(TRIM(COALESCE(excluded.created_at,'')), ''), markets.created_at),
+                category=COALESCE(NULLIF(TRIM(COALESCE(markets.category,'')), ''), excluded.category),
+                tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
+                clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
+            """,
+            row,
+        )
     conn.commit()
     cursor.execute("SELECT id FROM markets WHERE condition_id = ?", (market["condition_id"],))
     row = cursor.fetchone()
@@ -2241,6 +2342,7 @@ def run_market_discovery(
     session_recycle_every: int = SESSION_RECYCLE_EVERY,
     sync_state_key: str = SYNC_KEY_LAST_DISCOVERY_AT,
     update_sync_state: bool = True,
+    onchain_registry_supplement: bool = True,
 ) -> int:
     """
     执行市场发现流程
@@ -2352,7 +2454,7 @@ def run_market_discovery(
                     _save_last_discovery_at(conn, discovery_watermark, sync_state_key=sync_state_key)
         except Exception:
             pass
-    if db_path:
+    if db_path and onchain_registry_supplement:
         pre_written += supplement_missing_markets_from_onchain_registry(
             db_path=db_path,
             batch_blocks=DEFAULT_CHAIN_BATCH_BLOCKS,
@@ -2360,6 +2462,77 @@ def run_market_discovery(
         )
 
     return pre_written + len(norms)
+
+
+def _get_current_max_market_id(db_path: Optional[str]) -> int:
+    init_schema(db_path=db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT COALESCE(MAX(id), 0) FROM markets").fetchone()
+        return int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+
+
+def _run_post_discovery_canonical_repair(
+    db_path: Optional[str],
+    *,
+    start_id: int,
+    max_id: int,
+    batch_size: int,
+    workers: int,
+    limit: Optional[int],
+    run_retry: bool,
+    dry_run: bool = False,
+) -> None:
+    if max_id <= start_id:
+        print(
+            f"[post-repair] No new market id range to repair: ({start_id}, {max_id}]",
+            file=sys.stderr,
+        )
+        return
+
+    from market.backfill_market_canonical_fields import (
+        DEFAULT_SYNC_STATE_KEY as CANONICAL_BACKFILL_STATE_KEY,
+        run_backfill,
+    )
+
+    print(
+        f"[post-repair] Canonical backfill for market id range ({start_id}, {max_id}]",
+        file=sys.stderr,
+    )
+    backfill_stats = run_backfill(
+        db_path,
+        batch_size=batch_size,
+        workers=workers,
+        limit=limit,
+        start_id=start_id,
+        max_id=max_id,
+        resume=False,
+        sync_state_key=CANONICAL_BACKFILL_STATE_KEY,
+        dry_run=dry_run,
+    )
+    print(f"[post-repair] canonical backfill stats: {backfill_stats}", file=sys.stderr)
+
+    if not run_retry:
+        return
+
+    from market.retry_market_fetch_failed import run_retry as run_retry_fetch_failed
+
+    print(
+        f"[post-repair] Retrying unresolved canonical fields for market id range ({start_id}, {max_id}]",
+        file=sys.stderr,
+    )
+    retry_stats = run_retry_fetch_failed(
+        db_path,
+        batch_size=batch_size,
+        workers=workers,
+        limit=limit,
+        start_id=start_id,
+        max_id=max_id,
+        dry_run=dry_run,
+    )
+    print(f"[post-repair] retry fetch-failed stats: {retry_stats}", file=sys.stderr)
 
 
 def main():
@@ -2494,6 +2667,61 @@ def main():
         "--post-refresh-category-tags",
         action="store_true",
         help="在 discovery 结束后额外执行一次全表 category/tags 修复；默认关闭，通常只在 repair 时使用",
+    )
+    parser.add_argument(
+        "--skip-onchain-registry-supplement",
+        action="store_true",
+        help="跳过 discovery 后的链上 TokenRegistered 补市场扫描；PostgreSQL 增量同步 smoke test 时建议使用",
+    )
+    parser.add_argument(
+        "--post-canonical-repair",
+        dest="post_canonical_repair",
+        action="store_true",
+        default=True,
+        help="数据库写入后自动对本次新增 market 运行 canonical backfill；默认开启",
+    )
+    parser.add_argument(
+        "--no-post-canonical-repair",
+        dest="post_canonical_repair",
+        action="store_false",
+        help="禁用 discovery 后的 canonical backfill",
+    )
+    parser.add_argument(
+        "--post-retry-fetch-failed",
+        dest="post_retry_fetch_failed",
+        action="store_true",
+        default=True,
+        help="canonical backfill 后自动运行第二轮 retry；默认开启",
+    )
+    parser.add_argument(
+        "--no-post-retry-fetch-failed",
+        dest="post_retry_fetch_failed",
+        action="store_false",
+        help="禁用 discovery 后的 retry_market_fetch_failed",
+    )
+    parser.add_argument(
+        "--post-repair-start-id",
+        type=int,
+        default=None,
+        help="post repair 起始 market id；默认只修复本次 discovery 新增 id，可传 0 修复全库",
+    )
+    parser.add_argument(
+        "--post-repair-limit",
+        type=int,
+        default=None,
+        help="post repair 最多扫描多少条候选；默认不限制",
+    )
+    parser.add_argument(
+        "--post-repair-batch-size",
+        type=int,
+        default=200,
+        help="post repair 每批扫描多少条候选 market，默认 200",
+    )
+    parser.add_argument(
+        "--post-repair-workers",
+        type=int,
+        default=8,
+        help="post repair 并发请求数，默认 8",
     )
 
     args = parser.parse_args()
@@ -2640,6 +2868,7 @@ def main():
             max_fetches=args.max_fetches,
             session_recycle_every=args.session_recycle_every,
             update_sync_state=update_sync_state,
+            onchain_registry_supplement=not args.skip_onchain_registry_supplement,
         )
 
     if args.watch:
@@ -2654,9 +2883,21 @@ def main():
                 run_index += 1
                 ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 print(f"\n[watch] Run #{run_index} at {ts}", file=sys.stderr)
+                pre_repair_max_id = _get_current_max_market_id(db_path) if db_path else 0
                 count = _run_once()
                 if db_path:
                     print(f"[watch] Done. Stored/updated {count} markets.", file=sys.stderr)
+                    if args.post_canonical_repair:
+                        post_repair_max_id = _get_current_max_market_id(db_path)
+                        _run_post_discovery_canonical_repair(
+                            db_path,
+                            start_id=args.post_repair_start_id if args.post_repair_start_id is not None else pre_repair_max_id,
+                            max_id=post_repair_max_id,
+                            batch_size=args.post_repair_batch_size,
+                            workers=args.post_repair_workers,
+                            limit=args.post_repair_limit,
+                            run_retry=args.post_retry_fetch_failed,
+                        )
                     if getattr(args, "post_refresh_category_tags", False):
                         print("[watch] Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
                         refresh_category_tags_in_db(
@@ -2676,10 +2917,22 @@ def main():
         except KeyboardInterrupt:
             print("\n[watch] Interrupted by user. Exiting.", file=sys.stderr)
     else:
+        pre_repair_max_id = _get_current_max_market_id(db_path) if db_path else 0
         count = _run_once()
         if db_path:
             print(f"Database target: {describe_db_target()}", file=sys.stderr)
             print(f"Done. Stored/updated {count} markets to database.", file=sys.stderr)
+            if args.post_canonical_repair:
+                post_repair_max_id = _get_current_max_market_id(db_path)
+                _run_post_discovery_canonical_repair(
+                    db_path,
+                    start_id=args.post_repair_start_id if args.post_repair_start_id is not None else pre_repair_max_id,
+                    max_id=post_repair_max_id,
+                    batch_size=args.post_repair_batch_size,
+                    workers=args.post_repair_workers,
+                    limit=args.post_repair_limit,
+                    run_retry=args.post_retry_fetch_failed,
+                )
             if getattr(args, "post_refresh_category_tags", False):
                 print("Refreshing category/tags for existing markets with empty data...", file=sys.stderr)
                 refresh_category_tags_in_db(

@@ -277,7 +277,7 @@ def _build_string_raw(market: Dict[str, Any], decoded: Dict[str, Any]) -> str:
         parts.append(f"description: {description}")
     gamma_market_id = str(market.get("gamma_market_id") or "").strip()
     if gamma_market_id:
-        parts.append(f"market_id: {gamma_market_id}")
+        parts.append(f"gamma_market_id: {gamma_market_id}")
     parts.append(f"updown_oracle: {decoded.get('oracle') or ''}")
     if decoded.get("label") == "settle":
         parts.append(f"payouts: {json.dumps(decoded.get('payout_numerators') or [])}")

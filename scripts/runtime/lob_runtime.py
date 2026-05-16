@@ -111,6 +111,7 @@ class LOBRuntimeManager:
         updated_at = max(yes_payload.updated_at, no_payload.updated_at)
         payload = {
             "marketId": market_id,
+            "localMarketId": market_id,
             "marketTitle": market_title,
             "updatedAt": updated_at,
             "yes": {

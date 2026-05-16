@@ -125,6 +125,7 @@ def fetch_dashboard_recent_markets(ctx: dict, now_iso: str, window_size: int) ->
         )
         SELECT
             m.id,
+            m.gamma_market_id,
             m.slug,
             m.title,
             m.end_date,
@@ -177,6 +178,7 @@ def fetch_dashboard_recent_markets(ctx: dict, now_iso: str, window_size: int) ->
         )
         SELECT
             m.id,
+            m.gamma_market_id,
             m.slug,
             m.title,
             m.end_date,
@@ -271,7 +273,7 @@ def get_recent_oracle_events(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]
 def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) -> Dict[str, Any]:
     market = ctx["get_market_by_id"](market_id)
     if not market:
-        return {"marketId": market_id, "items": []}
+        return {"marketId": market_id, "localMarketId": market_id, "items": []}
     if ctx["table_exists"]("content_items") and ctx["table_exists"]("content_links"):
         rows = ctx["query_all"](
             """
@@ -294,6 +296,7 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
         if rows:
             return {
                 "marketId": market_id,
+                "localMarketId": market_id,
                 "items": [
                     {
                         "id": row.get("id"),
@@ -310,6 +313,7 @@ def get_related_content_by_market_id(ctx: dict, market_id: int, limit: int = 8) 
             }
     return {
         "marketId": market_id,
+        "localMarketId": market_id,
         "items": ctx["CONTENT_RUNTIME_PROVIDER"].get_related_news(
             market_title=str(market.get("title") or ""),
             category=str(market.get("category") or ""),

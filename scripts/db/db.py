@@ -3,7 +3,8 @@
 """
 Polymarket 索引器数据库模块。
 
-当前默认后端为 MySQL，保留 SQLite 作为迁移来源和回退路径。
+当前默认后端为 MySQL，保留 SQLite 作为迁移来源和回退路径，并支持
+PostgreSQL core 库作为 market/oracle 重构后的直接写入目标。
 该模块尽量兼容原有 sqlite3 风格调用，避免大规模重写业务脚本。
 """
 
@@ -21,6 +22,11 @@ try:
     import pymysql
 except ImportError:
     pymysql = None
+
+try:
+    import psycopg
+except ImportError:
+    psycopg = None
 
 
 def _load_dotenv_files() -> None:
@@ -55,6 +61,42 @@ DEFAULT_MYSQL_PASSWORD = os.environ.get("POLYMARKET_MYSQL_PASSWORD", "")
 DEFAULT_MYSQL_DATABASE = os.environ.get("POLYMARKET_MYSQL_DATABASE", "")
 DEFAULT_MYSQL_CHARSET = os.environ.get("POLYMARKET_MYSQL_CHARSET", "utf8mb4")
 
+DEFAULT_POSTGRES_HOST = (
+    os.environ.get("POLYDATA_POSTGRES_HOST")
+    or os.environ.get("POLYMARKET_POSTGRES_HOST")
+    or os.environ.get("POLYMARKET_PostgreSQL_HOST")
+    or "127.0.0.1"
+)
+DEFAULT_POSTGRES_PORT = int(
+    os.environ.get("POLYDATA_POSTGRES_PORT")
+    or os.environ.get("POLYMARKET_POSTGRES_PORT")
+    or os.environ.get("POLYMARKET_PostgreSQL_PORT")
+    or "45432"
+)
+DEFAULT_POSTGRES_USER = (
+    os.environ.get("POLYDATA_POSTGRES_USER")
+    or os.environ.get("POLYMARKET_POSTGRES_USER")
+    or os.environ.get("POLYMARKET_PostgreSQL_USER")
+    or "poly_user"
+)
+DEFAULT_POSTGRES_PASSWORD = (
+    os.environ.get("POLYDATA_POSTGRES_PASSWORD")
+    or os.environ.get("POLYMARKET_POSTGRES_PASSWORD")
+    or os.environ.get("POLYMARKET_POSTGRESQL_PASSWORD")
+    or os.environ.get("POLYMARKET_PostgreSQL_PASSWORD")
+    or ""
+)
+DEFAULT_POSTGRES_DATABASE = (
+    os.environ.get("POLYDATA_POSTGRES_DATABASE")
+    or os.environ.get("POLYMARKET_POSTGRES_DATABASE")
+    or os.environ.get("POLYMARKET_PostgreSQL_DATABASE")
+    or "poly_data_core"
+)
+DEFAULT_POSTGRES_SEARCH_PATH = os.environ.get(
+    "POLYDATA_POSTGRES_SEARCH_PATH",
+    "core,oracle,ops,public",
+)
+
 _runtime_db_backend = DEFAULT_DB_BACKEND
 _runtime_sqlite_path = DEFAULT_SQLITE_PATH
 _runtime_mysql_host = DEFAULT_MYSQL_HOST
@@ -63,6 +105,12 @@ _runtime_mysql_user = DEFAULT_MYSQL_USER
 _runtime_mysql_password = DEFAULT_MYSQL_PASSWORD
 _runtime_mysql_database = DEFAULT_MYSQL_DATABASE
 _runtime_mysql_charset = DEFAULT_MYSQL_CHARSET
+_runtime_postgres_host = DEFAULT_POSTGRES_HOST
+_runtime_postgres_port = DEFAULT_POSTGRES_PORT
+_runtime_postgres_user = DEFAULT_POSTGRES_USER
+_runtime_postgres_password = DEFAULT_POSTGRES_PASSWORD
+_runtime_postgres_database = DEFAULT_POSTGRES_DATABASE
+_runtime_postgres_search_path = DEFAULT_POSTGRES_SEARCH_PATH
 
 _NAMED_PARAM_RE = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
 _ON_CONFLICT_RE = re.compile(
@@ -90,6 +138,17 @@ def get_mysql_settings() -> Dict[str, Any]:
     }
 
 
+def get_postgres_settings() -> Dict[str, Any]:
+    return {
+        "host": _runtime_postgres_host,
+        "port": _runtime_postgres_port,
+        "user": _runtime_postgres_user,
+        "password": _runtime_postgres_password,
+        "database": _runtime_postgres_database,
+        "search_path": _runtime_postgres_search_path,
+    }
+
+
 def configure_runtime_db(
     *,
     backend: Optional[str] = None,
@@ -100,6 +159,12 @@ def configure_runtime_db(
     mysql_password: Optional[str] = None,
     mysql_database: Optional[str] = None,
     mysql_charset: Optional[str] = None,
+    postgres_host: Optional[str] = None,
+    postgres_port: Optional[int] = None,
+    postgres_user: Optional[str] = None,
+    postgres_password: Optional[str] = None,
+    postgres_database: Optional[str] = None,
+    postgres_search_path: Optional[str] = None,
 ) -> None:
     global _runtime_db_backend
     global _runtime_sqlite_path
@@ -109,6 +174,12 @@ def configure_runtime_db(
     global _runtime_mysql_password
     global _runtime_mysql_database
     global _runtime_mysql_charset
+    global _runtime_postgres_host
+    global _runtime_postgres_port
+    global _runtime_postgres_user
+    global _runtime_postgres_password
+    global _runtime_postgres_database
+    global _runtime_postgres_search_path
 
     if backend is not None:
         _runtime_db_backend = backend.strip().lower()
@@ -126,12 +197,24 @@ def configure_runtime_db(
         _runtime_mysql_database = mysql_database
     if mysql_charset is not None:
         _runtime_mysql_charset = mysql_charset
+    if postgres_host is not None:
+        _runtime_postgres_host = postgres_host
+    if postgres_port is not None:
+        _runtime_postgres_port = int(postgres_port)
+    if postgres_user is not None:
+        _runtime_postgres_user = postgres_user
+    if postgres_password is not None:
+        _runtime_postgres_password = postgres_password
+    if postgres_database is not None:
+        _runtime_postgres_database = postgres_database
+    if postgres_search_path is not None:
+        _runtime_postgres_search_path = postgres_search_path
 
 
 def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--backend",
-        choices=["mysql", "sqlite"],
+        choices=["mysql", "sqlite", "postgres", "postgresql"],
         default=DEFAULT_DB_BACKEND,
         help="数据库后端；默认从 POLYMARKET_DB_BACKEND 读取，当前默认 mysql",
     )
@@ -146,6 +229,16 @@ def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mysql-password", default=DEFAULT_MYSQL_PASSWORD, help="MySQL password")
     parser.add_argument("--mysql-database", default=DEFAULT_MYSQL_DATABASE, help="MySQL database")
     parser.add_argument("--mysql-charset", default=DEFAULT_MYSQL_CHARSET, help="MySQL charset")
+    parser.add_argument("--postgres-host", default=DEFAULT_POSTGRES_HOST, help="PostgreSQL host")
+    parser.add_argument("--postgres-port", type=int, default=DEFAULT_POSTGRES_PORT, help="PostgreSQL port")
+    parser.add_argument("--postgres-user", default=DEFAULT_POSTGRES_USER, help="PostgreSQL user")
+    parser.add_argument("--postgres-password", default=DEFAULT_POSTGRES_PASSWORD, help="PostgreSQL password")
+    parser.add_argument("--postgres-database", default=DEFAULT_POSTGRES_DATABASE, help="PostgreSQL database")
+    parser.add_argument(
+        "--postgres-search-path",
+        default=DEFAULT_POSTGRES_SEARCH_PATH,
+        help="PostgreSQL search_path for legacy unqualified table names",
+    )
 
 
 def configure_db_from_args(args: argparse.Namespace) -> None:
@@ -158,6 +251,12 @@ def configure_db_from_args(args: argparse.Namespace) -> None:
         mysql_password=getattr(args, "mysql_password", None),
         mysql_database=getattr(args, "mysql_database", None),
         mysql_charset=getattr(args, "mysql_charset", None),
+        postgres_host=getattr(args, "postgres_host", None),
+        postgres_port=getattr(args, "postgres_port", None),
+        postgres_user=getattr(args, "postgres_user", None),
+        postgres_password=getattr(args, "postgres_password", None),
+        postgres_database=getattr(args, "postgres_database", None),
+        postgres_search_path=getattr(args, "postgres_search_path", None),
     )
 
 
@@ -165,12 +264,19 @@ def describe_db_target() -> str:
     backend = get_backend()
     if backend == "sqlite":
         return f"sqlite:{Path(get_sqlite_path()).expanduser()}"
+    if backend in {"postgres", "postgresql"}:
+        settings = get_postgres_settings()
+        return f"postgres:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
     settings = get_mysql_settings()
     return f"mysql:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
 
 
 def is_mysql_backend() -> bool:
     return get_backend() == "mysql"
+
+
+def is_postgres_backend() -> bool:
+    return get_backend() in {"postgres", "postgresql"}
 
 
 class DBRow:
@@ -279,7 +385,90 @@ class MySQLConnectionWrapper:
         self._raw_conn.close()
 
 
+class PostgresCursorWrapper:
+    def __init__(self, connection: "PostgresConnectionWrapper", cursor) -> None:
+        self._connection = connection
+        self._cursor = cursor
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+    def execute(self, query: str, params: Optional[Any] = None):
+        sql, bound = adapt_sql_for_postgres(query, params)
+        result = self._cursor.execute(sql, bound)
+        self._connection._bump_changes(self._cursor.rowcount)
+        return result
+
+    def executemany(self, query: str, seq_of_params: Iterable[Any]):
+        bound_many = list(seq_of_params)
+        if not bound_many:
+            return 0
+        sql, sample = adapt_sql_for_postgres(query, bound_many[0])
+        if sample is None:
+            raise RuntimeError("unexpected missing bound parameters while adapting executemany")
+        bound_many = [adapt_params_for_postgres(query, item) for item in bound_many]
+        result = self._cursor.executemany(sql, bound_many)
+        self._connection._bump_changes(self._cursor.rowcount)
+        return result
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return wrap_db_row(self._cursor.description, row)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        return [wrap_db_row(self._cursor.description, row) for row in rows]
+
+    def close(self) -> None:
+        self._cursor.close()
+
+
+class PostgresConnectionWrapper:
+    def __init__(self, pg_conn) -> None:
+        self._pg_conn = pg_conn
+        self.total_changes = 0
+        self.row_factory = DBRow
+
+    def _bump_changes(self, rowcount: int) -> None:
+        if rowcount and rowcount > 0:
+            self.total_changes += rowcount
+
+    def cursor(self) -> PostgresCursorWrapper:
+        return PostgresCursorWrapper(self, self._pg_conn.cursor())
+
+    def execute(self, query: str, params: Optional[Any] = None):
+        cur = self.cursor()
+        cur.execute(query, params)
+        return cur
+
+    def executemany(self, query: str, seq_of_params: Iterable[Any]):
+        cur = self.cursor()
+        cur.executemany(query, seq_of_params)
+        return cur
+
+    def commit(self) -> None:
+        self._pg_conn.commit()
+
+    def rollback(self) -> None:
+        self._pg_conn.rollback()
+
+    def close(self) -> None:
+        self._pg_conn.close()
+
+
 def wrap_mysql_row(description, row):
+    if row is None:
+        return None
+    columns = [col[0] for col in description] if description else []
+    return DBRow(columns, row)
+
+
+def wrap_db_row(description, row):
     if row is None:
         return None
     columns = [col[0] for col in description] if description else []
@@ -313,6 +502,49 @@ def adapt_sql_for_mysql(query: str, params: Optional[Any]) -> Tuple[str, Optiona
     if params is not None:
         sql = sql.replace("?", "%s")
         return sql, adapt_params_for_mysql(query, params)
+    return sql.replace("?", "%s"), None
+
+
+def adapt_params_for_postgres(query: str, params: Optional[Any]) -> Any:
+    if params is None:
+        return None
+    if isinstance(params, dict):
+        return params
+    if isinstance(params, tuple):
+        return params
+    if isinstance(params, list):
+        return tuple(params)
+    return (params,)
+
+
+def _replace_insert_or_replace_for_postgres(sql: str) -> str:
+    match = re.match(
+        r"INSERT\s+OR\s+REPLACE\s+INTO\s+sync_state\s*\(([^)]*)\)\s*VALUES\s*\(([^)]*)\)",
+        sql,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", sql, flags=re.IGNORECASE)
+    columns = [part.strip().strip('"') for part in match.group(1).split(",")]
+    update_columns = [col for col in columns if col != "key"]
+    updates = ", ".join(f"{col} = EXCLUDED.{col}" for col in update_columns)
+    return (
+        re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO", "INSERT INTO", sql, flags=re.IGNORECASE)
+        + f" ON CONFLICT (key) DO UPDATE SET {updates}"
+    )
+
+
+def adapt_sql_for_postgres(query: str, params: Optional[Any]) -> Tuple[str, Optional[Any]]:
+    sql = query.strip()
+    sql = sql.replace(" COLLATE NOCASE", "")
+    sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, flags=re.IGNORECASE)
+    if re.search(r"INSERT\s+OR\s+REPLACE\s+INTO", sql, flags=re.IGNORECASE):
+        sql = _replace_insert_or_replace_for_postgres(sql)
+    if isinstance(params, dict):
+        sql = _NAMED_PARAM_RE.sub(r"%(\1)s", sql)
+        return sql, params
+    if params is not None:
+        return sql.replace("?", "%s"), adapt_params_for_postgres(query, params)
     return sql.replace("?", "%s"), None
 
 
@@ -351,6 +583,25 @@ def get_mysql_connection() -> MySQLConnectionWrapper:
     return MySQLConnectionWrapper(raw)
 
 
+def get_postgres_connection() -> PostgresConnectionWrapper:
+    if psycopg is None:
+        raise RuntimeError("psycopg is not installed. Please install psycopg[binary] first.")
+    settings = get_postgres_settings()
+    raw = psycopg.connect(
+        host=settings["host"],
+        port=settings["port"],
+        user=settings["user"],
+        password=settings["password"],
+        dbname=settings["database"],
+        autocommit=False,
+    )
+    search_path = str(settings.get("search_path") or "").strip()
+    if search_path:
+        with raw.cursor() as cur:
+            cur.execute("SET search_path TO " + search_path)
+    return PostgresConnectionWrapper(raw)
+
+
 def get_connection(
     db_path: Optional[str] = DEFAULT_DB_PATH,
     *,
@@ -360,6 +611,8 @@ def get_connection(
     chosen = (backend or get_backend()).strip().lower()
     if chosen == "sqlite":
         return get_sqlite_connection(db_path or get_sqlite_path(), readonly=readonly)
+    if chosen in {"postgres", "postgresql"}:
+        return get_postgres_connection()
     if readonly:
         return get_mysql_connection()
     return get_mysql_connection()
@@ -384,6 +637,25 @@ def get_table_columns(conn, table: str) -> List[str]:
     if isinstance(conn, sqlite3.Connection):
         cur = conn.execute(f"PRAGMA table_info({table})")
         return [row[1] for row in cur.fetchall()]
+    if isinstance(conn, PostgresConnectionWrapper):
+        if "." in table:
+            schema, table_name = table.split(".", 1)
+            params = (schema, table_name)
+            schema_filter = "table_schema = %s"
+        else:
+            table_name = table
+            params = (table_name,)
+            schema_filter = "table_schema IN ('core', 'oracle', 'ops', 'public')"
+        cur = conn.execute(
+            f"""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE {schema_filter} AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            params,
+        )
+        return [row[0] for row in cur.fetchall()]
 
     cur = conn.execute(
         """
@@ -401,6 +673,25 @@ def get_table_column_types(conn, table: str) -> Dict[str, str]:
     if isinstance(conn, sqlite3.Connection):
         cur = conn.execute(f"PRAGMA table_info({table})")
         return {row[1]: row[2] for row in cur.fetchall()}
+    if isinstance(conn, PostgresConnectionWrapper):
+        if "." in table:
+            schema, table_name = table.split(".", 1)
+            params = (schema, table_name)
+            schema_filter = "table_schema = %s"
+        else:
+            table_name = table
+            params = (table_name,)
+            schema_filter = "table_schema IN ('core', 'oracle', 'ops', 'public')"
+        cur = conn.execute(
+            f"""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE {schema_filter} AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            params,
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
 
     cur = conn.execute(
         """
@@ -422,6 +713,12 @@ def create_index_if_not_exists(conn, table: str, index_name: str, columns: Seque
     if isinstance(conn, sqlite3.Connection):
         unique_sql = "UNIQUE " if unique else ""
         conn.execute(f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})")
+        return
+    if isinstance(conn, PostgresConnectionWrapper):
+        unique_sql = "UNIQUE " if unique else ""
+        conn.execute(
+            f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})"
+        )
         return
 
     cur = conn.execute(
@@ -512,6 +809,161 @@ def _ensure_mysql_neg_risk_request_mapping_schema(conn) -> None:
     ensure_column_exists(conn, "neg_risk_request_mapping", "source_operator", "VARCHAR(255)")
 
 
+def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
+    conn.execute("CREATE SCHEMA IF NOT EXISTS core")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS oracle")
+    conn.execute("CREATE SCHEMA IF NOT EXISTS ops")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.markets (
+            id BIGINT PRIMARY KEY,
+            gamma_market_id TEXT,
+            slug TEXT NOT NULL UNIQUE,
+            condition_id TEXT NOT NULL UNIQUE,
+            question_id TEXT,
+            oracle TEXT,
+            yes_token_id TEXT NOT NULL,
+            no_token_id TEXT NOT NULL,
+            title TEXT,
+            description TEXT,
+            enable_neg_risk BOOLEAN NOT NULL DEFAULT FALSE,
+            end_date TIMESTAMPTZ,
+            raw_end_date TEXT,
+            created_at TIMESTAMPTZ,
+            raw_created_at TEXT,
+            category TEXT,
+            tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+            clob_token_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute(
+        """
+        COMMENT ON COLUMN core.markets.id IS
+        'Local surrogate market id for internal joins. Do not use for Gamma API /markets/{id}.'
+        """
+    )
+    conn.execute(
+        """
+        COMMENT ON COLUMN core.markets.gamma_market_id IS
+        'Gamma API market id. Use this value for gamma-api.polymarket.com/markets/{id}.'
+        """
+    )
+    conn.execute(
+        """
+        COMMENT ON COLUMN core.markets.condition_id IS
+        'CTF/CLOB condition id. Use this for CLOB market identity and websocket market subscriptions.'
+        """
+    )
+    conn.execute(
+        """
+        COMMENT ON COLUMN core.markets.yes_token_id IS
+        'YES outcome ERC1155/CLOB token id. Use token ids for orderbook, price history, and trade matching.'
+        """
+    )
+    conn.execute(
+        """
+        COMMENT ON COLUMN core.markets.no_token_id IS
+        'NO outcome ERC1155/CLOB token id. Use token ids for orderbook, price history, and trade matching.'
+        """
+    )
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS core.markets_id_seq")
+    conn.execute("ALTER SEQUENCE core.markets_id_seq OWNED BY core.markets.id")
+    conn.execute("ALTER TABLE core.markets ALTER COLUMN id SET DEFAULT nextval('core.markets_id_seq')")
+    conn.execute(
+        """
+        SELECT setval(
+            'core.markets_id_seq',
+            GREATEST(
+                (SELECT COALESCE(MAX(id), 0) + 1 FROM core.markets),
+                (SELECT last_value FROM core.markets_id_seq),
+                1
+            ),
+            false
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_status_snapshot (
+            market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
+            has_settle BOOLEAN NOT NULL DEFAULT FALSE,
+            has_propose BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_resolution_fast (
+            market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
+            settlement_code SMALLINT NOT NULL CHECK (settlement_code IN (0, 1, 2, 3)),
+            condition_id TEXT,
+            slug TEXT,
+            closed_time TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_tokens (
+            id BIGINT PRIMARY KEY,
+            market_id BIGINT NOT NULL REFERENCES core.markets(id),
+            condition_id TEXT NOT NULL,
+            token_id TEXT NOT NULL UNIQUE,
+            outcome TEXT NOT NULL,
+            outcome_index INTEGER NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            end_date TIMESTAMPTZ,
+            raw_end_date TEXT,
+            created_at TIMESTAMPTZ,
+            raw_created_at TEXT,
+            updated_at TIMESTAMPTZ,
+            raw_updated_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ops.sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            last_block BIGINT,
+            updated_at TIMESTAMPTZ
+        )
+        """
+    )
+    for table, index_name, cols in (
+        ("core.markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
+        ("core.markets", "idx_markets_question_id", ["question_id"]),
+        ("core.markets", "idx_markets_yes_token_id", ["yes_token_id"]),
+        ("core.markets", "idx_markets_no_token_id", ["no_token_id"]),
+        ("core.markets", "idx_markets_end_date", ["end_date"]),
+        ("core.markets", "idx_markets_created_at", ["created_at"]),
+        ("core.market_resolution_fast", "idx_mrf_settlement_code", ["settlement_code"]),
+        ("core.market_resolution_fast", "idx_mrf_condition_id", ["condition_id"]),
+        ("core.market_resolution_fast", "idx_mrf_slug", ["slug"]),
+        ("core.market_resolution_fast", "idx_mrf_closed_time", ["closed_time"]),
+    ):
+        create_index_if_not_exists(conn, table, index_name, cols)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_tags_gin ON core.markets USING GIN (tags)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_clob_token_ids_gin ON core.markets USING GIN (clob_token_ids)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_category_lower ON core.markets (lower(category))")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_markets_search_text_simple_gin
+          ON core.markets USING GIN (
+            to_tsvector(
+              'simple',
+              (((coalesce(title, '') || ' ') || coalesce(slug, '')) || ' ') || coalesce(category, '')
+            )
+          )
+        """
+    )
+
+
 def init_schema(conn=None, db_path: str = DEFAULT_DB_PATH) -> None:
     close_after = False
     if conn is None:
@@ -521,6 +973,8 @@ def init_schema(conn=None, db_path: str = DEFAULT_DB_PATH) -> None:
     try:
         if isinstance(conn, sqlite3.Connection):
             _init_sqlite_schema(conn)
+        elif isinstance(conn, PostgresConnectionWrapper):
+            _init_postgres_schema(conn)
         else:
             _init_mysql_schema(conn)
         conn.commit()

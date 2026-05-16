@@ -131,24 +131,36 @@ def _save_resume_id(conn, key: str, last_id: int) -> None:
     conn.commit()
 
 
-def _select_candidates(conn, start_id: int, batch_size: int) -> List[Tuple[Any, ...]]:
+def _select_candidates(
+    conn,
+    start_id: int,
+    batch_size: int,
+    max_id: Optional[int] = None,
+) -> List[Tuple[Any, ...]]:
     cur = conn.cursor()
+    max_filter = ""
+    params: List[Any] = [int(start_id)]
+    if max_id is not None:
+        max_filter = "AND id <= ?"
+        params.append(int(max_id))
+    params.append(int(batch_size))
     cur.execute(
-        """
+        f"""
         SELECT id, slug, condition_id, title, gamma_market_id, question_id, oracle, created_at, end_date
         FROM markets
         WHERE id > ?
+          {max_filter}
           AND (
                 gamma_market_id IS NULL OR TRIM(gamma_market_id) = ''
              OR question_id IS NULL OR TRIM(question_id) = ''
              OR oracle IS NULL OR TRIM(oracle) = ''
-             OR created_at IS NULL OR TRIM(created_at) = ''
-             OR end_date IS NULL OR TRIM(end_date) = ''
+             OR created_at IS NULL
+             OR end_date IS NULL
           )
         ORDER BY id ASC
         LIMIT ?
         """,
-        (int(start_id), int(batch_size)),
+        tuple(params),
     )
     return [tuple(row) for row in cur.fetchall()]
 
@@ -244,6 +256,7 @@ def run_backfill(
     workers: int,
     limit: Optional[int],
     start_id: int,
+    max_id: Optional[int],
     resume: bool,
     sync_state_key: str,
     dry_run: bool,
@@ -270,7 +283,7 @@ def run_backfill(
             if remaining == 0:
                 break
             fetch_size = batch_size if remaining is None else min(batch_size, remaining)
-            rows = _select_candidates(conn, last_seen_id, fetch_size)
+            rows = _select_candidates(conn, last_seen_id, fetch_size, max_id=max_id)
             if not rows:
                 break
 
@@ -329,6 +342,7 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help=f"并发请求数（default: {DEFAULT_WORKERS}）")
     parser.add_argument("--limit", type=int, default=None, help="最多处理多少条候选记录")
     parser.add_argument("--start-id", type=int, default=0, help="只处理 markets.id 大于该值的记录")
+    parser.add_argument("--max-id", type=int, default=None, help="只处理 markets.id 小于等于该值的记录")
     parser.add_argument("--resume", action="store_true", help="从 sync_state 中记录的上次进度继续")
     parser.add_argument("--sync-state-key", default=DEFAULT_SYNC_STATE_KEY, help=f"resume 进度键名（default: {DEFAULT_SYNC_STATE_KEY}）")
     parser.add_argument("--dry-run", action="store_true", help="只扫描和请求，不写回数据库")
@@ -343,6 +357,7 @@ def main() -> None:
         workers=args.workers,
         limit=args.limit,
         start_id=args.start_id,
+        max_id=args.max_id,
         resume=args.resume,
         sync_state_key=args.sync_state_key,
         dry_run=args.dry_run,
