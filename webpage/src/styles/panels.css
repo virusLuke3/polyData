@@ -5017,108 +5017,122 @@
   white-space: nowrap;
 }
 
-.wm-weather-map-canvas {
+.wm-weather-deck-map {
   position: relative;
-  min-height: 174px;
-  border: 1px solid #252525;
-  background: #101417;
+  height: 320px;
+  min-height: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #030405;
   overflow: hidden;
 }
 
-.wm-weather-map-svg {
-  width: 100%;
-  height: 174px;
-  display: block;
-}
-
-.wm-weather-map-svg rect {
-  fill: #0e171b;
-}
-
-.wm-weather-map-grid {
-  fill: none;
-  stroke: rgba(122, 146, 151, 0.16);
-  stroke-width: 0.7;
-}
-
-.wm-weather-map-land {
-  fill: #1d2422;
-  stroke: rgba(136, 154, 148, 0.2);
-  stroke-width: 0.8;
-}
-
-.wm-weather-marker {
+.wm-weather-deck-basemap {
   position: absolute;
-  z-index: 2;
-  min-width: 0;
-  max-width: 112px;
-  padding: 0 0 0 13px;
-  border: 0;
-  background: transparent;
-  color: #d7dbd6;
+  inset: 0;
+}
+
+.wm-weather-deck-map-loading {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 168, 0, 0.86);
   font-family: var(--font-mono);
-  text-align: left;
-  transform: translate(-6px, -7px);
-  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  background:
+    linear-gradient(rgba(31, 132, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 132, 255, 0.08) 1px, transparent 1px),
+    #030405;
+  background-size: 34px 34px;
 }
 
-.wm-weather-marker span {
-  position: absolute;
-  left: 0;
-  top: 4px;
-  width: 8px;
-  height: 8px;
-  border: 1px solid currentColor;
-  background: currentColor;
-  box-shadow: 0 0 12px currentColor;
+.wm-weather-deck-map .maplibregl-map,
+.wm-weather-deck-map .maplibregl-canvas,
+.wm-weather-deck-map canvas {
+  background: #030405 !important;
 }
 
-.wm-weather-marker strong,
-.wm-weather-marker em {
+.wm-weather-deck-map .maplibregl-control-container {
   display: none;
-  max-width: 94px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.wm-weather-deck-status {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  padding: 2px 6px;
+  border: 1px solid rgba(68, 255, 136, 0.18);
+  background: rgba(0, 200, 100, 0.15);
+  color: #44ff88;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wm-weather-deck-legend {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 96px);
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.78);
+  color: #a8aca8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+}
+
+.wm-weather-deck-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
 }
 
-.wm-weather-marker.selected strong,
-.wm-weather-marker.selected em,
-.wm-weather-marker:hover strong,
-.wm-weather-marker:hover em {
-  display: block;
+.wm-weather-deck-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ffa620;
+  box-shadow: 0 0 10px currentColor;
 }
 
-.wm-weather-marker strong {
-  color: #f4f6f4;
-  font-size: 9px;
-  font-weight: 900;
-  line-height: 1.1;
+.wm-weather-deck-legend i.hot {
+  background: #ff7948;
 }
 
-.wm-weather-marker em {
-  color: #8f9692;
-  font-size: 8px;
-  font-style: normal;
-  font-weight: 800;
-  line-height: 1.1;
+.wm-weather-deck-legend i.cool {
+  background: #48d7be;
 }
 
-.wm-weather-marker.hot {
-  color: #ee8a6c;
+.wm-weather-deck-legend i.market {
+  background: #ffb023;
+  outline: 2px solid rgba(190, 154, 255, 0.65);
 }
 
-.wm-weather-marker.cool {
-  color: #76c7a4;
+.wm-weather-deck-tooltip {
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(255, 170, 0, 0.35);
+  color: #f1f4f1;
+  padding: 7px 9px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
-.wm-weather-marker.market {
-  color: #bfa9ef;
-}
-
-.wm-weather-marker.selected {
-  z-index: 3;
-  filter: brightness(1.3);
+.wm-weather-deck-tooltip strong {
+  color: #73d8ff;
 }
 
 .wm-weather-detail,

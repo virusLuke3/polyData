@@ -116,9 +116,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
   title: 'Weather News',
   eyebrow: 'weather',
   description: 'City weather headlines from seeded Google News RSS.',
-  defaultEnabled: false,
+  defaultEnabled: true,
 }, {
   tier: 'slow',
   fetchData: () => fetchRuntimeWeatherNews(24),
 });
-
