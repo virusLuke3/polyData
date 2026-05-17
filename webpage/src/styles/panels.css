@@ -4955,12 +4955,135 @@
   background: #181818;
 }
 
+.wm-global-temperature-monitor-panel .wm-panel-body,
 .wm-global-weather-map-panel .wm-panel-body,
 .wm-weather-news-panel .wm-panel-body {
   display: grid;
   align-content: start;
   gap: 8px;
   overflow-x: hidden;
+}
+
+.wm-global-temperature-monitor-panel .wm-panel-body {
+  overflow: hidden;
+}
+
+.wm-weather-table-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #9a9a9a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.wm-weather-table-meta span {
+  padding: 3px 7px;
+  border: 1px solid #252525;
+  background: #151515;
+}
+
+.wm-weather-table-shell {
+  min-width: 0;
+  max-height: 540px;
+  overflow: auto;
+  border: 1px solid #222;
+  background: #050505;
+}
+
+.wm-weather-table {
+  width: 100%;
+  min-width: 1320px;
+  border-collapse: collapse;
+  color: #e8e9e8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.wm-weather-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 9px;
+  border-bottom: 2px solid #ff9f00;
+  background: #050505;
+  color: #ff9f00;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.wm-weather-table td {
+  padding: 9px;
+  border-bottom: 1px solid #1f1f1f;
+  vertical-align: middle;
+}
+
+.wm-weather-table tr.hot td {
+  background: rgba(255, 102, 52, 0.035);
+}
+
+.wm-weather-table tr.cool td {
+  background: rgba(72, 215, 190, 0.035);
+}
+
+.wm-weather-table strong {
+  color: #6bd7ff;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.wm-weather-table-icon,
+.wm-weather-table-open {
+  min-width: 38px;
+  height: 28px;
+  border: 1px solid #ff9f00;
+  background: #090909;
+  color: #ff9f00;
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.wm-weather-table-open.muted {
+  border-color: #303030;
+  color: #777;
+}
+
+.wm-weather-table-mini {
+  width: 112px;
+  height: 30px;
+  color: #ff9f00;
+  border: 1px solid #262626;
+  background: #080808;
+}
+
+.wm-weather-table-mini circle {
+  fill: #6bd7ff;
+}
+
+.wm-weather-table-mini-empty,
+.wm-weather-table-empty {
+  color: #808580;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wm-weather-live {
+  color: #6bd7ff;
+}
+
+.wm-weather-closed {
+  color: #ffd166;
 }
 
 .wm-weather-summary {

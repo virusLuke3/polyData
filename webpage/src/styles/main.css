@@ -2193,6 +2193,31 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+.wm-flatmap.clickable {
+  cursor: pointer;
+}
+
+.wm-flatmap.clickable:focus-visible {
+  outline: 2px solid #39ff73;
+  outline-offset: 4px;
+}
+
+.wm-flatmap-open-hint {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  padding: 6px 9px;
+  border: 1px solid rgba(115, 216, 255, 0.28);
+  background: rgba(0, 0, 0, 0.72);
+  color: #73d8ff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
 .wm-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2222,6 +2247,98 @@ body {
 .wm-command-modal,
 .wm-settings-modal {
   padding-bottom: 18px;
+}
+
+.wm-weather-map-backdrop {
+  padding: 18px;
+}
+
+.wm-weather-map-modal {
+  width: min(1440px, 100%);
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.wm-weather-map-modal-header,
+.wm-weather-map-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #252525;
+  background: #111;
+  padding: 9px 11px;
+  font-family: var(--font-mono);
+}
+
+.wm-weather-map-modal-header div,
+.wm-weather-map-modal-footer {
+  min-width: 0;
+}
+
+.wm-weather-map-modal-header span,
+.wm-weather-map-modal-footer span,
+.wm-weather-map-modal-footer em {
+  color: #8e948e;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.wm-weather-map-modal-header strong,
+.wm-weather-map-modal-footer strong {
+  display: block;
+  color: #f3f5f3;
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+}
+
+.wm-weather-map-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wm-weather-map-modal-actions span,
+.wm-weather-map-modal-actions button {
+  padding: 6px 9px;
+  border: 1px solid #303030;
+  background: #181818;
+  color: #ff9f00;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-weather-map-modal-actions button {
+  cursor: pointer;
+}
+
+.wm-weather-map-modal .wm-weather-deck-map {
+  height: min(620px, calc(100vh - 210px)) !important;
+  min-height: 420px;
+}
+
+.wm-weather-map-modal-footer {
+  justify-content: flex-start;
+}
+
+.wm-weather-map-modal-error {
+  border: 1px solid rgba(255, 92, 92, 0.35);
+  background: rgba(255, 92, 92, 0.08);
+  color: #ff8b8b;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .wm-command-input {

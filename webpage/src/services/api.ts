@@ -201,6 +201,10 @@ export function fetchRuntimeGlobalWeatherMap(limit = 34) {
   return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/global-map?limit=${limit}`);
 }
 
+export function fetchRuntimeGlobalTemperatureMonitor(limit = 34) {
+  return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/temperature-monitor?limit=${limit}`);
+}
+
 export function fetchRuntimeWeatherNews(limit = 24) {
   return apiGet<RuntimeWeatherNewsPayload>(`/runtime/weather/news?limit=${limit}`);
 }

@@ -12,6 +12,7 @@ type WorldFlatMapProps = {
   contentItems: ContentItem[];
   region: string;
   zoomLevel: number;
+  onOpenWeatherMap?: () => void;
 };
 
 type FlatPoint = {
@@ -122,7 +123,7 @@ function projectPoint(projection: GeoProjection, lat: number, lng: number, seed:
   return applyJitter(projected[0], projected[1], seed, magnitude);
 }
 
-export function WorldFlatMap({ markets, selectedMarket, recentTrades, recentOracle, contentItems, region, zoomLevel }: WorldFlatMapProps) {
+export function WorldFlatMap({ markets, selectedMarket, recentTrades, recentOracle, contentItems, region, zoomLevel, onOpenWeatherMap }: WorldFlatMapProps) {
   const { projection, transform, world } = useMemo(
     () => buildProjection(region, zoomLevel),
     [region, zoomLevel],
@@ -193,7 +194,20 @@ export function WorldFlatMap({ markets, selectedMarket, recentTrades, recentOrac
   }, [contentItems, markets, projection, recentOracle, recentTrades, selectedMarket?.id]);
 
   return (
-    <div className="wm-flatmap">
+    <div
+      className={`wm-flatmap ${onOpenWeatherMap ? 'clickable' : ''}`}
+      role={onOpenWeatherMap ? 'button' : undefined}
+      tabIndex={onOpenWeatherMap ? 0 : undefined}
+      onClick={onOpenWeatherMap}
+      onKeyDown={(event) => {
+        if (!onOpenWeatherMap) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpenWeatherMap();
+        }
+      }}
+      aria-label={onOpenWeatherMap ? 'Open global weather map' : undefined}
+    >
       <svg className="wm-flatmap-svg" viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <defs>
           <linearGradient id="wmFlatSea" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -212,6 +226,7 @@ export function WorldFlatMap({ markets, selectedMarket, recentTrades, recentOrac
           ))}
         </g>
       </svg>
+      {onOpenWeatherMap ? <span className="wm-flatmap-open-hint">Weather Map</span> : null}
     </div>
   );
 }

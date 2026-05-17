@@ -28,7 +28,7 @@ import { panel as fedReactionGrowthRiskBoard } from './fed-reaction-growth-risk-
 import { panel as polymarketMacroMap } from './polymarket-macro-map';
 import { panel as cpiReleaseCalendar } from './cpi-release-calendar';
 import { panel as energyGasolineShock } from './energy-gasoline-shock';
-import { panel as globalWeatherMap } from './global-weather-map';
+import { panel as globalTemperatureMonitor } from './global-weather-map';
 import { panel as weatherNews } from './weather-news';
 import { panel as foodRetailBasketPressure } from './food-retail-basket-pressure';
 import { panel as supplyTariffImportWatch } from './supply-tariff-import-watch';
@@ -79,7 +79,7 @@ export const PANEL_MODULES: PanelModule[] = [
   polymarketMacroMap,
   cpiReleaseCalendar,
   energyGasolineShock,
-  globalWeatherMap,
+  globalTemperatureMonitor,
   weatherNews,
   foodRetailBasketPressure,
   supplyTariffImportWatch,

@@ -1,13 +1,9 @@
-import { lazy, Suspense } from 'preact/compat';
-import { useEffect, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { fetchRuntimeGlobalWeatherMap } from '@/services/api';
+import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-
-const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 
 function statusBadge(status?: string | null) {
   const text = String(status || '').toLowerCase();
@@ -21,197 +17,185 @@ function panelStatus(status?: string | null): 'live' | 'muted' {
   return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }
 
+function num(value?: string | number | null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function tempLabel(value?: string | number | null, unit?: string | null) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return '--';
-  return `${Math.round(n)}°${unit || ''}`;
+  const parsed = num(value);
+  if (parsed === null) return '--';
+  return `${Math.round(parsed)}°${unit || ''}`;
 }
 
-function probLabel(value?: string | number | null) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return '--';
-  return `${Math.round(n * 100)}%`;
+function priceLabel(value?: string | number | null) {
+  const parsed = num(value);
+  if (parsed === null) return '--';
+  return `${Math.round(parsed * 100)}%`;
 }
 
-function cityTone(city?: RuntimeGlobalWeatherCity | null) {
-  const temp = Number(city?.forecastHigh ?? city?.currentTemp);
-  if (Number.isFinite(temp)) {
-    if (String(city?.unit || '').toUpperCase() === 'F') {
-      if (temp >= 90) return 'hot';
-      if (temp <= 45) return 'cool';
-    } else {
-      if (temp >= 32) return 'hot';
-      if (temp <= 7) return 'cool';
-    }
+function coverageRank(value?: string | null) {
+  const parts = String(value || '').split('/').map((part) => Number(part));
+  const quoted = parts[0] ?? NaN;
+  const total = parts[1] ?? NaN;
+  if (!Number.isFinite(quoted) || !Number.isFinite(total) || total <= 0) return 0;
+  return quoted / total;
+}
+
+function citySortValue(city: RuntimeGlobalWeatherCity) {
+  return num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp) ?? -999;
+}
+
+function cityTone(city: RuntimeGlobalWeatherCity) {
+  const high = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp);
+  if (high === null) return 'neutral';
+  if (String(city.unit || '').toUpperCase() === 'F') {
+    if (high >= 90) return 'hot';
+    if (high <= 45) return 'cool';
+  } else {
+    if (high >= 32) return 'hot';
+    if (high <= 7) return 'cool';
   }
-  if (city?.eventSlug) return 'market';
   return 'neutral';
 }
 
-function quoteTone(city?: RuntimeGlobalWeatherCity | null) {
-  if (!city?.eventSlug) return 'neutral';
-  const [quoted, total] = String(city.quoteCoverage || '').split('/').map((part) => Number(part));
-  const quotedCount = Number.isFinite(quoted) ? Number(quoted) : 0;
-  const totalCount = Number.isFinite(total) ? Number(total) : 0;
-  if (totalCount > 0 && quotedCount / totalCount >= 0.7) return 'market';
-  return 'watch';
+function eventStatus(city: RuntimeGlobalWeatherCity) {
+  const status = String(city.eventStatus || '').toLowerCase();
+  if (!city.eventSlug) return '--';
+  if (status === 'closed' || status === 'resolved') return 'Event Closed';
+  return 'Live';
 }
 
-function sourceTone(value?: string | null) {
-  const text = String(value || '').toLowerCase();
-  if (text === 'ok') return 'ok';
-  if (text === 'empty') return 'neutral';
-  return 'bad';
+function bestBin(city: RuntimeGlobalWeatherCity): RuntimeWeatherQuoteBin | null {
+  if (city.topBin) return city.topBin;
+  const bins = city.bins || [];
+  let best: RuntimeWeatherQuoteBin | null = null;
+  for (const bin of bins) {
+    if ((num(bin.midPriceYes) ?? -1) > (num(best?.midPriceYes) ?? -1)) best = bin;
+  }
+  return best;
 }
 
-function Sparkline({ bins }: { bins?: RuntimeWeatherQuoteBin[] }) {
-  const points = (bins || []).filter((bin) => Number.isFinite(Number(bin.midPriceYes))).slice(0, 14);
-  if (points.length < 2) return <span className="wm-weather-spark-empty">NO CURVE</span>;
-  const d = points.map((bin, index) => {
-    const x = (index / Math.max(1, points.length - 1)) * 100;
-    const y = 28 - (Number(bin.midPriceYes) * 26);
+function quoteCoverage(city: RuntimeGlobalWeatherCity) {
+  const coverage = city.quoteCoverage || (city.bins?.length ? `${city.bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${city.bins.length}` : '0/0');
+  return coverage;
+}
+
+function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
+  const hourly = (city.hourly || []).filter((point) => num(point.temp) !== null).slice(0, 12);
+  const points = hourly.length >= 2 ? hourly : (city.bins || []).filter((bin) => num(bin.midPriceYes) !== null).slice(0, 12).map((bin, index) => ({ time: String(index), temp: num(bin.midPriceYes)! * 100 }));
+  if (points.length < 2) return <span className="wm-weather-table-mini-empty">--</span>;
+  const values = points.map((point) => num(point.temp) ?? 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(1, max - min);
+  const polyline = values.map((value, index) => {
+    const x = (index / Math.max(1, values.length - 1)) * 112;
+    const y = 28 - ((value - min) / range) * 24;
     return `${x.toFixed(1)},${Math.max(2, Math.min(28, y)).toFixed(1)}`;
   }).join(' ');
   return (
-    <svg className="wm-weather-spark" viewBox="0 0 100 30" aria-hidden="true">
-      <polyline points={d} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+    <svg className="wm-weather-table-mini" viewBox="0 0 112 30" aria-hidden="true">
+      <polyline points={polyline} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {values.map((value, index) => {
+        const x = (index / Math.max(1, values.length - 1)) * 112;
+        const y = 28 - ((value - min) / range) * 24;
+        return <circle key={`${city.cityId}-mini-${index}`} cx={x} cy={Math.max(2, Math.min(28, y))} r="1.8" />;
+      })}
     </svg>
   );
 }
 
-function WeatherSummary({ payload, items }: { payload?: RuntimeGlobalWeatherMapPayload | null; items: RuntimeGlobalWeatherCity[] }) {
-  const hottest = payload?.summary?.hottestCity;
+function TemperatureRow({ city }: { city: RuntimeGlobalWeatherCity }) {
+  const top = bestBin(city);
+  const unit = city.unit || top?.unit || '';
+  const event = eventStatus(city);
   return (
-    <div className="wm-weather-summary">
-      <div>
-        <span>Mapped Cities</span>
-        <strong>{payload?.summary?.mappedCount ?? items.length}/{payload?.summary?.cityCount ?? items.length}</strong>
-      </div>
-      <div>
-        <span>PMKT Events</span>
-        <strong>{payload?.summary?.liveMarketCount ?? 0}</strong>
-      </div>
-      <div>
-        <span>Hotspot</span>
-        <strong>{hottest?.city || '--'} {hottest ? tempLabel(hottest.forecastHigh ?? hottest.currentTemp, hottest.unit) : ''}</strong>
-      </div>
-    </div>
+    <tr className={cityTone(city)}>
+      <td><button className="wm-weather-table-icon" type="button" aria-label={`Watch ${city.city || 'city'}`}>+</button></td>
+      <td>{city.marketUrl ? <a className="wm-weather-table-open" href={city.marketUrl} target="_blank" rel="noreferrer">OPEN</a> : <span className="wm-weather-table-open muted">--</span>}</td>
+      <td><strong>{city.city || '--'}</strong></td>
+      <td><MiniSpark city={city} /></td>
+      <td>{city.condition || '--'}</td>
+      <td>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)} or below</td>
+      <td>{tempLabel(city.todayHigh ?? city.daily?.[0]?.high, unit)}</td>
+      <td>{tempLabel(city.forecastHigh ?? city.todayHigh, unit)}</td>
+      <td>{top?.label || '--'}</td>
+      <td><span className={event === 'Live' ? 'wm-weather-live' : 'wm-weather-closed'}>{event}</span></td>
+      <td>{quoteCoverage(city)}</td>
+      <td>{formatRelative(city.updatedAt || city.hourly?.[0]?.time || null)}</td>
+      <td>{priceLabel(top?.midPriceYes)}</td>
+    </tr>
   );
 }
 
-function CityDetail({ city }: { city?: RuntimeGlobalWeatherCity | null }) {
-  if (!city) return <div className="wm-registry-empty"><strong>Weather seed warming</strong></div>;
-  const states = city.sourceStates || {};
-  return (
-    <div className={`wm-weather-detail ${cityTone(city)}`}>
-      <div className="wm-weather-detail-main">
-        <span className="wm-weather-glyph">WX</span>
-        <div>
-          <span>{city.region || city.country || 'Weather city'}</span>
-          <strong>{city.city} {tempLabel(city.currentTemp, city.unit)}</strong>
-          <em>{city.condition || 'Condition pending'} · high {tempLabel(city.todayHigh, city.unit)} · METAR {tempLabel(city.metarTemp, city.unit)}</em>
-        </div>
-      </div>
-      <div className="wm-weather-quote">
-        <Sparkline bins={city.bins} />
-        <div>
-          <span>PMKT top bin</span>
-          <strong>{city.topBin?.label || 'No event'}</strong>
-          <em>{probLabel(city.topBin?.midPriceYes)} · {city.quoteCoverage || '0/0'}</em>
-        </div>
-      </div>
-      <div className="wm-weather-source-row">
-        <span className={`wm-weather-source ${sourceTone(states.openMeteo)}`}>OPEN {String(states.openMeteo || 'unknown').toUpperCase()}</span>
-        <span className={`wm-weather-source ${sourceTone(states.metar)}`}>METAR {String(states.metar || 'unknown').toUpperCase()}</span>
-        <span className={`wm-weather-source ${sourceTone(states.polymarket)}`}>PMKT {String(states.polymarket || 'unknown').toUpperCase()}</span>
-        {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">OPEN PMKT</a> : null}
-      </div>
-    </div>
-  );
-}
-
-function RankedRows({ items }: { items: RuntimeGlobalWeatherCity[] }) {
-  const hot = [...items].sort((a, b) => Number(b.forecastHigh ?? b.currentTemp ?? -999) - Number(a.forecastHigh ?? a.currentTemp ?? -999)).slice(0, 3);
-  const stale = items.filter((item) => Object.values(item.sourceStates || {}).includes('error')).slice(0, 2);
-  const rows = [...hot, ...stale.filter((row) => !hot.some((hotRow) => hotRow.cityId === row.cityId))].slice(0, 5);
-  return (
-    <div className="wm-weather-ranked">
-      {rows.map((city) => (
-        <div key={`rank-${city.cityId}`} className={cityTone(city)}>
-          <span className="wm-weather-row-glyph">{city.eventSlug ? 'PM' : 'WX'}</span>
-          <strong>{city.city}</strong>
-          <em>{city.condition || city.region || '--'}</em>
-          <b>{tempLabel(city.forecastHigh ?? city.currentTemp, city.unit)}</b>
-          <i className={`wm-weather-source ${quoteTone(city)}`}>{city.quoteCoverage || 'NO PMKT'}</i>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WeatherMapFallback() {
-  return (
-    <div className="wm-weather-deck-map wm-weather-deck-map-loading" aria-busy="true">
-      <span>LOADING BASEMAP</span>
-    </div>
-  );
-}
-
-function GlobalWeatherMapPanel({ payload }: { payload?: RuntimeGlobalWeatherMapPayload | null }) {
-  const [showHelp, setShowHelp] = useState(false);
-  const items = payload?.items || [];
-  const [selectedCityId, setSelectedCityId] = useState<string | null>(items[0]?.cityId ? String(items[0].cityId) : null);
-  useEffect(() => {
-    if (!selectedCityId && items[0]?.cityId) {
-      setSelectedCityId(String(items[0].cityId));
-    }
-  }, [items, selectedCityId]);
-  const selected = items.find((item) => item.cityId === selectedCityId) || items[0];
+function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMapPayload | null }) {
+  const items = [...(payload?.items || [])].sort((a, b) => {
+    const coverageDelta = coverageRank(b.quoteCoverage) - coverageRank(a.quoteCoverage);
+    if (Math.abs(coverageDelta) > 0.001) return coverageDelta;
+    return citySortValue(b) - citySortValue(a);
+  });
+  const summary = payload?.summary;
   return (
     <Panel
-      title="GLOBAL WEATHER MAP"
-      titleControls={(
-        <button type="button" className="wm-panel-help-button" aria-label="Explain global weather map" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>
-      )}
+      title="GLOBAL TEMP MONITOR"
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
-      count={`${payload?.summary?.mappedCount ?? items.length}/${payload?.summary?.cityCount ?? items.length}`}
-      headerOverlay={showHelp ? (
-        <div className="wm-panel-help-popover">
-          <strong>Global Weather Map</strong>
-          <p>Combines seeded Open-Meteo forecasts, METAR observations, and Polymarket temperature events. Marker color tracks hot/cool weather and purple marks active PMKT quote coverage.</p>
-        </div>
-      ) : null}
-      className="wm-market-panel wm-global-weather-map-panel"
-      dataPanelId="global-weather-map"
+      count={`${summary?.mappedCount ?? items.length}/${summary?.cityCount ?? items.length}`}
+      className="wm-market-panel wm-global-temperature-monitor-panel"
+      dataPanelId="global-temperature-monitor"
     >
-      <WeatherSummary payload={payload} items={items} />
-      <Suspense fallback={<WeatherMapFallback />}>
-        <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={setSelectedCityId} height={320} />
-      </Suspense>
-      <CityDetail city={selected} />
-      <RankedRows items={items} />
-      <div className="wm-weather-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
-        <span>{payload?.cacheMode || 'seed'}</span>
+      <div className="wm-weather-table-meta">
+        <span>Selected date: {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '--'}</span>
+        <span>Last snapshot: {formatRelative(payload?.generatedAt)}</span>
+        <span>Sources: {Object.entries(payload?.sources || {}).map(([key, value]) => `${key}=${value}`).join(' / ') || '--'}</span>
+      </div>
+      <div className="wm-weather-table-shell">
+        <table className="wm-weather-table">
+          <thead>
+            <tr>
+              <th>WL</th>
+              <th>PM</th>
+              <th>City</th>
+              <th>Mini</th>
+              <th>Condition</th>
+              <th>Lowest</th>
+              <th>Peak</th>
+              <th>WU High Forecast</th>
+              <th>Highest</th>
+              <th>Event Status</th>
+              <th>Quote Coverage</th>
+              <th>Last Updated</th>
+              <th>Top Yes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length ? items.map((city) => <TemperatureRow key={String(city.cityId || city.city)} city={city} />) : (
+              <tr>
+                <td colSpan={13} className="wm-weather-table-empty">Weather seed warming. The map will return stale or seed data while the background builder runs.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </Panel>
   );
 }
 
 const renderers: PanelRenderMap = {
-  'global-weather-map': {
-    render: (ctx) => <GlobalWeatherMapPanel payload={ctx.runtimeData['global-weather-map'] as RuntimeGlobalWeatherMapPayload | undefined} />,
+  'global-temperature-monitor': {
+    size: 'wide',
+    render: (ctx) => <TemperatureMonitorPanel payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined} />,
   },
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'global-weather-map',
-  title: 'Global Weather Map',
+  id: 'global-temperature-monitor',
+  title: 'Global Temp Monitor',
   eyebrow: 'weather',
-  description: 'Global city weather, METAR freshness, and Polymarket temperature quote coverage.',
+  description: 'Live global city temperatures, forecast highs, and Polymarket quote coverage in a monitor table.',
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  fetchData: () => fetchRuntimeGlobalWeatherMap(34),
+  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(34),
 });

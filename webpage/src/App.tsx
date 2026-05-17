@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { WorldFlatMap } from '@/components/WorldFlatMap';
@@ -13,6 +14,7 @@ import {
   fetchMarketGroups,
   fetchRecentOracle,
   fetchRecentTrades,
+  fetchRuntimeGlobalWeatherMap,
   fetchSystemHealth,
   fetchWorkspaceBundle,
 } from '@/services/api';
@@ -31,6 +33,7 @@ import type {
   OracleEvent,
   PanelRenderContext,
   RuntimeF1Payload,
+  RuntimeGlobalWeatherMapPayload,
   RuntimeInflationNowcastPayload,
   RuntimeJin10Payload,
   RuntimeMarketGroup,
@@ -88,6 +91,7 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
 const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled']);
+const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 
 function clampMapZoom(value: unknown) {
   const numeric = Number(value);
@@ -112,6 +116,59 @@ function currentUtcClock(now: Date) {
     timeZone: 'UTC',
     hour12: false,
   }).replace(',', '').toUpperCase() + ' UTC';
+}
+
+function weatherTempLabel(value?: string | number | null, unit?: string | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${Math.round(numeric)}°${unit || ''}`;
+}
+
+function WeatherMapModal({
+  payload,
+  loading,
+  error,
+  selectedCityId,
+  onSelectCity,
+  onClose,
+  onRefresh,
+}: {
+  payload?: RuntimeGlobalWeatherMapPayload | null;
+  loading: boolean;
+  error?: string | null;
+  selectedCityId: string | null;
+  onSelectCity: (cityId: string) => void;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const items = payload?.items || [];
+  const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
+  return (
+    <div className="wm-modal-backdrop wm-weather-map-backdrop" onClick={onClose}>
+      <div className="wm-modal wm-weather-map-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="wm-weather-map-modal-header">
+          <div>
+            <span>Global Weather Map</span>
+            <strong>{payload?.summary?.mappedCount ?? items.length}/{payload?.summary?.cityCount ?? items.length} cities</strong>
+          </div>
+          <div className="wm-weather-map-modal-actions">
+            <span>{payload?.cacheMode || (loading ? 'loading' : 'seed')}</span>
+            <button type="button" onClick={onRefresh}>Refresh</button>
+            <button type="button" onClick={onClose}>Close</button>
+          </div>
+        </div>
+        {error ? <div className="wm-weather-map-modal-error">{error}</div> : null}
+        <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
+          <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={onSelectCity} height={620} />
+        </Suspense>
+        <div className="wm-weather-map-modal-footer">
+          <span>{selected?.city || 'Weather city'}</span>
+          <strong>{weatherTempLabel(selected?.currentTemp, selected?.unit)}</strong>
+          <em>{selected?.condition || 'Condition pending'} / high {weatherTempLabel(selected?.forecastHigh ?? selected?.todayHigh, selected?.unit)} / {selected?.quoteCoverage || '0/0'} quotes</em>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function sanitizePanelIds(panelIds: string[]) {
@@ -274,6 +331,11 @@ export function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showWeatherMap, setShowWeatherMap] = useState(false);
+  const [weatherMapPayload, setWeatherMapPayload] = useState<RuntimeGlobalWeatherMapPayload | null>(null);
+  const [weatherMapLoading, setWeatherMapLoading] = useState(false);
+  const [weatherMapError, setWeatherMapError] = useState<string | null>(null);
+  const [selectedWeatherCityId, setSelectedWeatherCityId] = useState<string | null>(null);
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
@@ -850,6 +912,39 @@ export function App() {
     setNotice(nextMode === '2d' ? '2D map enabled' : '3D globe enabled');
   };
 
+  const loadWeatherMap = async (force = false) => {
+    const panelPayload = runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined;
+    if (!force && panelPayload?.items?.length) {
+      setWeatherMapPayload(panelPayload);
+      setSelectedWeatherCityId((current) => current || String(panelPayload.items?.[0]?.cityId || ''));
+      return;
+    }
+    setWeatherMapLoading(true);
+    setWeatherMapError(null);
+    try {
+      const payload = await fetchRuntimeGlobalWeatherMap(34);
+      setWeatherMapPayload(payload);
+      setRuntimeData((current) => mergeRuntimeData(current, { 'global-temperature-monitor': payload }));
+      setSelectedWeatherCityId((current) => current || String(payload.items?.[0]?.cityId || ''));
+    } catch (loadError) {
+      setWeatherMapError(loadError instanceof Error ? loadError.message : 'Failed to load weather map.');
+    } finally {
+      setWeatherMapLoading(false);
+    }
+  };
+
+  const openWeatherMap = () => {
+    setShowWeatherMap(true);
+    void loadWeatherMap(false);
+  };
+
+  const openWeather2d = () => {
+    setViewMode('2d');
+    setMapZoom((current) => clampMapZoom(Math.min(2, current)));
+    setNotice('Weather map opened');
+    openWeatherMap();
+  };
+
   const zoomIn = () => setMapZoom((current) => clampMapZoom(current + 1));
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
 
@@ -893,7 +988,7 @@ export function App() {
             <div className="wm-map-title">Global Situation</div>
             <div className="wm-map-clock">{currentUtcClock(now)}</div>
             <div className="wm-map-view-toggle">
-              <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={() => changeViewMode('2d')}>2D</button>
+              <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={openWeather2d}>2D</button>
               <button type="button" className={viewMode === '3d' ? 'active' : ''} onClick={() => changeViewMode('3d')}>3D</button>
             </div>
           </div>
@@ -955,6 +1050,7 @@ export function App() {
                     contentItems={currentLatestContent}
                     region={region}
                     zoomLevel={mapZoom}
+                    onOpenWeatherMap={openWeatherMap}
                   />
                 )}
 
@@ -1095,6 +1191,18 @@ export function App() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {showWeatherMap ? (
+        <WeatherMapModal
+          payload={weatherMapPayload}
+          loading={weatherMapLoading}
+          error={weatherMapError}
+          selectedCityId={selectedWeatherCityId}
+          onSelectCity={setSelectedWeatherCityId}
+          onClose={() => setShowWeatherMap(false)}
+          onRefresh={() => void loadWeatherMap(true)}
+        />
       ) : null}
     </div>
   );
