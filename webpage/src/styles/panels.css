@@ -2,12 +2,35 @@
   position: relative;
   height: 100%;
   min-height: 200px;
-  background: #161616;
-  border: 1px solid #232323;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  background: linear-gradient(180deg, #181818 0%, #111315 100%);
+  border: 1px solid #30343a;
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(88, 126, 170, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    inset 0 -18px 30px rgba(38, 70, 112, 0.08);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.wm-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.035);
+  pointer-events: none;
+}
+
+.wm-panel-slot:hover .wm-panel,
+.wm-panel-slot.panel-drop-target .wm-panel {
+  border-color: #4a5868;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(105, 165, 235, 0.18),
+    0 0 24px rgba(35, 78, 129, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .wm-panel-header {
@@ -16,8 +39,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #232323;
-  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid #2b3036;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.018) 100%);
+  cursor: grab;
+  user-select: none;
+}
+
+.wm-panel-header:active {
+  cursor: grabbing;
 }
 
 .wm-panel-title-wrap {
@@ -151,6 +180,139 @@
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #3a3a3a transparent;
+}
+
+.wm-panel-slot.is-layout-managed {
+  position: relative;
+  min-width: 0;
+  grid-row: span var(--wm-panel-row-span, 1);
+  grid-column: span var(--wm-panel-col-span, 1);
+}
+
+.wm-panel-slot.dragging-source {
+  opacity: 0.35;
+  transform: scale(0.985);
+  pointer-events: none;
+}
+
+.wm-panel-slot.panel-drop-target .wm-panel {
+  outline: 2px dashed #7fb6ff;
+  outline-offset: -4px;
+}
+
+.wm-panel-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  opacity: 0.86;
+  transform: scale(1.015);
+  filter: drop-shadow(0 22px 42px rgba(0, 0, 0, 0.55));
+  border: 1px solid #78b7ff;
+}
+
+.wm-panel-drag-ghost .wm-panel-resize-handle,
+.wm-panel-drag-ghost .wm-panel-col-resize-handle {
+  display: none;
+}
+
+.wm-panel-drop-indicator {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  height: 4px;
+  border-radius: 999px;
+  background: #78b7ff;
+  box-shadow: 0 0 10px rgba(120, 183, 255, 0.95), 0 0 28px rgba(57, 255, 115, 0.28);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.wm-panel-resize-handle,
+.wm-panel-col-resize-handle {
+  position: absolute;
+  z-index: 8;
+  border: 0;
+  padding: 0;
+  opacity: 0;
+  background: transparent;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+.wm-panel-resize-handle {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18px;
+  cursor: ns-resize;
+  background: linear-gradient(to top, rgba(120, 183, 255, 0.18), transparent);
+}
+
+.wm-panel-col-resize-handle {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  cursor: ew-resize;
+  background: linear-gradient(to left, rgba(120, 183, 255, 0.18), transparent);
+}
+
+.wm-panel-resize-handle::after {
+  content: '...';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #9cb7d8;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.wm-panel-col-resize-handle::after {
+  content: '...';
+  position: absolute;
+  top: 50%;
+  right: -1px;
+  transform: translateY(-50%) rotate(90deg);
+  color: #9cb7d8;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+.wm-panel-slot:hover .wm-panel-resize-handle,
+.wm-panel-slot:hover .wm-panel-col-resize-handle,
+.wm-panel-slot.resizing .wm-panel-resize-handle,
+.wm-panel-slot.col-resizing .wm-panel-col-resize-handle {
+  opacity: 1;
+}
+
+.wm-panel-slot.resizing,
+.wm-panel-slot.resizing * {
+  cursor: ns-resize !important;
+  user-select: none;
+}
+
+.wm-panel-slot.col-resizing,
+.wm-panel-slot.col-resizing * {
+  cursor: ew-resize !important;
+  user-select: none;
+}
+
+body.panel-resize-active iframe {
+  pointer-events: none !important;
+}
+
+@media (max-width: 1500px) {
+  .wm-panel-slot.is-layout-managed {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .wm-panel-col-resize-handle {
+    display: none;
+  }
 }
 
 .wm-panel-body::-webkit-scrollbar {
