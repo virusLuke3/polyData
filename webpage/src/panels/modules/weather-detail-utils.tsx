@@ -2,6 +2,7 @@ import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeW
 import { formatRelative } from '../shared/formatters';
 
 export function num(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }

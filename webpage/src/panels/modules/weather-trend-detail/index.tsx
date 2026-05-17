@@ -10,34 +10,45 @@ type TrendPoint = {
   high: number;
 };
 
+function movingAverage(values: number[], index: number) {
+  const start = Math.max(0, index - 2);
+  const slice = values.slice(start, index + 1);
+  return slice.reduce((sum, value) => sum + value, 0) / Math.max(1, slice.length);
+}
+
 function oneDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
-  return (city?.hourly || [])
+  const hourly = (city?.hourly || [])
     .filter((point) => num(point.temp) !== null)
-    .slice(0, 24)
-    .map((point) => {
-      const value = num(point.temp) || 0;
-      const date = String(point.time || '');
-      return {
-        label: date.slice(11, 16) || date.slice(5, 10) || '--',
-        avg: value,
-        high: value,
-      };
-    });
+    .slice(0, 24);
+  const values = hourly.map((point) => num(point.temp) || 0);
+  return hourly.map((point, index) => {
+    const value = num(point.temp) || 0;
+    const date = String(point.time || '');
+    return {
+      label: date.slice(11, 16) || date.slice(5, 10) || '--',
+      avg: movingAverage(values, index),
+      high: value,
+    };
+  });
 }
 
 function sevenDayPoints(city?: RuntimeGlobalWeatherCity | null): TrendPoint[] {
-  return (city?.daily || [])
+  const days = (city?.daily || [])
     .filter((point) => num(point.high) !== null || num(point.low) !== null)
-    .slice(0, 7)
-    .map((point) => {
-      const high = num(point.high) ?? num(point.low) ?? 0;
-      const low = num(point.low) ?? high;
-      return {
-        label: String(point.date || '').slice(5) || '--',
-        avg: (high + low) / 2,
-        high,
-      };
-    });
+    .slice(0, 7);
+  const points: TrendPoint[] = [];
+  for (const day of days) {
+    const high = num(day.high) ?? num(day.low) ?? 0;
+    const low = num(day.low) ?? high;
+    const avg = (high + low) / 2;
+    const label = String(day.date || '').slice(5) || '--';
+    points.push(
+      { label: '', avg: avg - (avg - low) * 0.55, high: low },
+      { label, avg, high },
+      { label: '', avg: avg - (avg - low) * 0.35, high: low + (high - low) * 0.18 },
+    );
+  }
+  return points;
 }
 
 function pathFor(values: number[], min: number, range: number, width = 260) {
@@ -98,7 +109,8 @@ function TrendChart({
         <text className="last-label" x="305" y="70">Max {tempLabel(max, unit)}</text>
         <text className="last-label" x="305" y="86">Last {tempLabel(last?.high, unit)}</text>
         {points.map((point, index) => {
-          if (index !== 0 && index !== points.length - 1 && index % 2 !== 1) return null;
+          if (!point.label) return null;
+          if (index !== 0 && index !== points.length - 1 && index % 3 !== 1) return null;
           const x = 38 + (index / Math.max(1, points.length - 1)) * 260;
           return <text key={`${title}-x-${point.label}`} className="x-label" x={x} y="178" textAnchor="middle">{point.label}</text>;
         })}
@@ -117,17 +129,14 @@ function WeatherTrendDetailPanel({
   const city = selectedWeatherCity(payload, selectedCityId);
   return (
     <Panel
-      title="WEATHER TREND"
+      title="WU 1 DAY"
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
-      className="wm-market-panel wm-weather-trend-detail-panel"
+      className="wm-market-panel wm-weather-trend-detail-panel wm-weather-trend-single-panel"
       dataPanelId="weather-trend-detail"
     >
       {city ? (
-        <div className="wm-weather-trend-grid">
-          <TrendChart title="WU 1 Day" city={city} points={oneDayPoints(city)} />
-          <TrendChart title="WU 7 Day" city={city} points={sevenDayPoints(city)} />
-        </div>
+        <TrendChart title="WU 1 Day" city={city} points={oneDayPoints(city)} />
       ) : (
         <div className="wm-weather-detail-empty">Select a city to inspect temperature trend.</div>
       )}
@@ -137,7 +146,7 @@ function WeatherTrendDetailPanel({
 
 const renderers: PanelRenderMap = {
   'weather-trend-detail': {
-    size: 'large',
+    size: 'wide',
     render: (ctx) => (
       <WeatherTrendDetailPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}
@@ -149,8 +158,10 @@ const renderers: PanelRenderMap = {
 
 export const panel = panelFromRenderer(renderers, {
   id: 'weather-trend-detail',
-  title: 'Weather Trend',
+  title: 'WU 1 Day',
   eyebrow: 'weather',
-  description: 'Selected city 1D and 7D temperature trend charts.',
+  description: 'Selected city 1D temperature trend chart.',
   defaultEnabled: true,
 });
+
+export { sevenDayPoints, TrendChart };

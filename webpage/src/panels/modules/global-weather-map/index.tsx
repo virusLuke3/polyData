@@ -18,6 +18,7 @@ function panelStatus(status?: string | null): 'live' | 'muted' {
 }
 
 function num(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
