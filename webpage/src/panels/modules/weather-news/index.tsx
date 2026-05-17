@@ -48,23 +48,47 @@ function modeLabel(mode: SortMode) {
   return 'City';
 }
 
+function displaySeverity(severity: string) {
+  if (severity === 'warning') return 'Alert';
+  if (severity === 'watch') return 'Watch';
+  return 'Forecast';
+}
+
+function HighlightedText({ text, city }: { text?: string | null; city?: string | null }) {
+  const value = text || '';
+  const cityName = String(city || '').trim();
+  if (!cityName) return <>{value}</>;
+  const pattern = new RegExp(`(${cityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+  return (
+    <>
+      {value.split(pattern).map((part, index) => (
+        part.toLowerCase() === cityName.toLowerCase()
+          ? <span className="wm-weather-news-title-city" key={`${part}-${index}`}>{part}</span>
+          : part
+      ))}
+    </>
+  );
+}
+
 function NewsItem({ item }: { item: RuntimeWeatherNewsItem }) {
   const severity = String(item.severity || 'normal').toLowerCase();
-  const tags = (item.tags || []).slice(0, 3);
+  const tags = (item.tags || []).slice(0, 2);
+  const city = item.city || 'Global';
   return (
     <a className={`wm-weather-news-item ${severity}`} href={item.url || '#'} target="_blank" rel="noreferrer">
       <div className="wm-weather-news-card-head">
-        <div>
-          <span className="wm-weather-news-city">{item.city || 'Global'}</span>
+        <div className="wm-weather-news-meta">
+          <span className="wm-weather-news-dot" aria-hidden="true" />
+          <span className="wm-weather-news-city">{city}</span>
           <span className="wm-weather-news-source">{item.source || 'Weather source'}</span>
+          <span className={`wm-weather-news-severity ${severity}`}>{displaySeverity(severity)}</span>
+          {tags.map((tag) => <span className="wm-weather-news-tag" key={tag}>{tag}</span>)}
         </div>
-        <span className="wm-weather-news-severity">{severity === 'warning' ? 'Alert' : severity === 'watch' ? 'Watch' : 'Forecast'}</span>
       </div>
-      <strong>{item.title || 'Weather update'}</strong>
-      <em>{item.summary || 'Weather summary pending'}</em>
+      <strong><HighlightedText text={item.title || 'Weather update'} city={city} /></strong>
+      <em><HighlightedText text={item.summary || 'Weather summary pending'} city={city} /></em>
       <div className="wm-weather-news-card-foot">
         <span>{formatRelative(item.publishedAt)}</span>
-        {tags.length ? <i>{tags.join(' / ')}</i> : <i>forecast</i>}
         <b>Read source</b>
       </div>
     </a>
