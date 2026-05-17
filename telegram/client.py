@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -7,6 +8,7 @@ import requests
 
 MAX_TELEGRAM_TEXT_LENGTH = 4096
 SAFE_TEXT_LENGTH = 3900
+MAX_SEND_ATTEMPTS = 3
 
 
 def split_message(text: str, *, limit: int = SAFE_TEXT_LENGTH) -> List[str]:
@@ -27,6 +29,25 @@ def split_message(text: str, *, limit: int = SAFE_TEXT_LENGTH) -> List[str]:
         chunks.append(remaining[:cut].strip())
         remaining = remaining[cut:].strip()
     return [chunk for chunk in chunks if chunk]
+
+
+def _retry_after_seconds(response: requests.Response, body: Dict[str, Any]) -> int:
+    parameters = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
+    values = [parameters.get("retry_after"), response.headers.get("Retry-After")]
+    for value in values:
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError):
+            continue
+        return max(1, seconds)
+    return 5
+
+
+def _telegram_error_message(response: requests.Response, body: Dict[str, Any]) -> str:
+    description = body.get("description") if isinstance(body, dict) else ""
+    if description:
+        return f"Telegram sendMessage failed HTTP {response.status_code}: {description}"
+    return f"Telegram sendMessage failed HTTP {response.status_code}"
 
 
 class TelegramClient:
@@ -57,15 +78,27 @@ class TelegramClient:
             }
             if message_thread_id is not None:
                 payload["message_thread_id"] = message_thread_id
-            response = self.session.post(
-                f"{self.api_base}/bot{self.bot_token}/sendMessage",
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            body = response.json()
+            body: Dict[str, Any] = {}
+            response: Optional[requests.Response] = None
+            for attempt in range(MAX_SEND_ATTEMPTS):
+                response = self.session.post(
+                    f"{self.api_base}/bot{self.bot_token}/sendMessage",
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                )
+                try:
+                    body = response.json()
+                except ValueError:
+                    body = {}
+                if response.status_code == 429 and attempt < MAX_SEND_ATTEMPTS - 1:
+                    time.sleep(_retry_after_seconds(response, body) + 1)
+                    continue
+                break
+            if response is None:
+                raise RuntimeError("Telegram sendMessage failed before request was sent")
+            if response.status_code >= 400:
+                raise RuntimeError(_telegram_error_message(response, body))
             if not body.get("ok"):
                 raise RuntimeError(f"Telegram sendMessage failed: {body}")
             results.append(body)
         return results
-

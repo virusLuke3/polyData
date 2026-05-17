@@ -8,6 +8,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from telegram.api_client import resolve_polydata_api_base
+from telegram.client import TelegramClient
 from telegram.config import TelegramSettings, TopicConfig
 from telegram.formatters import (
     format_alpha_signal,
@@ -29,6 +30,26 @@ class FakeTelegram:
     def send_message(self, **kwargs):
         self.calls.append(kwargs)
         return [{"ok": True}]
+
+
+class FakeSendResponse:
+    def __init__(self, status_code, payload, headers=None):
+        self.status_code = status_code
+        self.payload = payload
+        self.headers = headers or {}
+
+    def json(self):
+        return self.payload
+
+
+class FakeSendSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def post(self, url, json, timeout):
+        self.calls.append({"url": url, "json": json, "timeout": timeout})
+        return self.responses.pop(0)
 
 
 def make_settings(state_path: str) -> TelegramSettings:
@@ -170,6 +191,37 @@ def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
     assert second.sent == 0
     assert second.skipped_seen == 1
     assert telegram.calls[0]["chat_id"] == "@nba"
+
+
+def test_telegram_client_retries_429_and_redacts_token(monkeypatch):
+    sleeps = []
+    client = TelegramClient(bot_token="secret-token")
+    client.session = FakeSendSession(
+        [
+            FakeSendResponse(429, {"ok": False, "description": "Too Many Requests", "parameters": {"retry_after": 2}}),
+            FakeSendResponse(200, {"ok": True, "result": {"message_id": 1}}),
+        ]
+    )
+    monkeypatch.setattr("telegram.client.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    result = client.send_message(chat_id="@news", text="hello")
+
+    assert result[0]["ok"] is True
+    assert sleeps == [3]
+    assert len(client.session.calls) == 2
+
+    failing_client = TelegramClient(bot_token="secret-token")
+    failing_client.session = FakeSendSession([FakeSendResponse(500, {"ok": False, "description": "Server exploded"})])
+
+    try:
+        failing_client.send_message(chat_id="@news", text="hello")
+    except RuntimeError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected send failure")
+
+    assert "Server exploded" in error
+    assert "secret-token" not in error
 
 
 class FakeHealthResponse:
