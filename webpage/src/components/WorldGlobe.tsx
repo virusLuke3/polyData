@@ -28,22 +28,22 @@ type WorldGlobeProps = {
   zoomLevel: number;
 };
 
-const GLOBAL_VIEW = { lat: 18, lng: 12, altitude: 2.18 };
+const GLOBAL_VIEW = { lat: 20, lng: 6, altitude: 1.54 };
 const REGION_VIEW: Record<string, { lat: number; lng: number; altitude: number }> = {
-  global: { lat: 18, lng: 12, altitude: 2.18 },
-  america: { lat: 22, lng: -85, altitude: 1.95 },
-  mena: { lat: 27, lng: 32, altitude: 1.7 },
-  eu: { lat: 50, lng: 12, altitude: 1.28 },
-  asia: { lat: 27, lng: 98, altitude: 1.82 },
-  latam: { lat: -12, lng: -68, altitude: 1.96 },
-  africa: { lat: 6, lng: 20, altitude: 1.88 },
-  oceania: { lat: -26, lng: 140, altitude: 1.98 },
+  global: { lat: 20, lng: 6, altitude: 1.54 },
+  america: { lat: 22, lng: -85, altitude: 1.34 },
+  mena: { lat: 27, lng: 38, altitude: 1.06 },
+  eu: { lat: 50, lng: 12, altitude: 0.96 },
+  asia: { lat: 27, lng: 98, altitude: 1.24 },
+  latam: { lat: -12, lng: -68, altitude: 1.35 },
+  africa: { lat: 6, lng: 20, altitude: 1.28 },
+  oceania: { lat: -26, lng: 140, altitude: 1.36 },
 };
 
 function resolveAltitude(baseAltitude: number, zoomLevel: number) {
-  if (zoomLevel >= 4) return Math.max(0.45, baseAltitude * 0.28);
-  if (zoomLevel >= 3) return Math.max(0.7, baseAltitude * 0.46);
-  if (zoomLevel >= 2) return Math.max(1.0, baseAltitude * 0.66);
+  if (zoomLevel >= 4) return Math.max(0.36, baseAltitude * 0.28);
+  if (zoomLevel >= 3) return Math.max(0.58, baseAltitude * 0.46);
+  if (zoomLevel >= 2) return Math.max(0.82, baseAltitude * 0.66);
   return baseAltitude;
 }
 
@@ -193,33 +193,34 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .globeImageUrl('/textures/earth-topo-bathy.jpg')
         .backgroundImageUrl('')
         .showAtmosphere(true)
-        .atmosphereColor('#4c75ff')
-        .atmosphereAltitude(0.18)
+        .atmosphereColor('#5a8dff')
+        .atmosphereAltitude(0.2)
         .pointAltitude(((point: object) => (point as GlobePoint).altitude) as any)
         .pointRadius(((point: object) => (point as GlobePoint).size) as any)
         .pointColor(((point: object) => (point as GlobePoint).color) as any)
         .pointResolution(18)
         .pointsMerge(false)
-        .arcStroke(0.45)
-        .arcAltitudeAutoScale(0.32)
+        .arcStroke(0.58)
+        .arcAltitudeAutoScale(0.36)
         .arcDashLength(0.85)
         .arcDashGap(3.5)
         .arcDashAnimateTime(5000)
         .arcColor(((arc: object) => (arc as GlobeArc).color) as any)
         .ringColor(() => (t: number) => `rgba(255,186,33,${Math.max(0, 1 - t)})`)
-        .ringMaxRadius(4.6)
-        .ringPropagationSpeed(1.7)
-        .ringRepeatPeriod(1400)
+        .ringMaxRadius(5.4)
+        .ringPropagationSpeed(1.9)
+        .ringRepeatPeriod(1280)
         .htmlElementsData([]);
 
       const controls = globe.controls();
       controls.autoRotate = true;
-      controls.autoRotateSpeed = 0.22;
+      controls.autoRotateSpeed = 0.3;
       controls.enablePan = false;
       controls.enableZoom = true;
       controls.zoomSpeed = 1.4;
       controls.minDistance = 101;
       controls.maxDistance = 600;
+      controls.enableDamping = true;
 
       const glCanvas = containerRef.current.querySelector('canvas');
       if (glCanvas) {

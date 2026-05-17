@@ -63,6 +63,7 @@ const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
+const APP_VERSION = 'v0.2.1';
 const FAST_MARKETS_PAGE_SIZE = 80;
 const SEARCH_MARKETS_PAGE_SIZE = 120;
 const INTERVAL_RUNTIME_PANELS = RUNTIME_PANEL_MODULES.filter(
@@ -1321,7 +1322,7 @@ export function App() {
     <div className="wm-shell">
       <div className="wm-promo">
         <span className="wm-pro-badge">PRO</span>
-        <span className="wm-promo-copy">Pro is coming - More Signal, Less Noise. More AI Briefings. A Geopolitical & Equity Researcher just for you.</span>
+        <span className="wm-promo-copy">PolyMonitor Pro is coming - sharper Polymarket signal, less noise, AI briefs for flow, oracle risk, and macro context.</span>
         <button className="wm-promo-cta" type="button">Reserve your spot</button>
       </div>
 
@@ -1334,7 +1335,7 @@ export function App() {
             <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>
             <button className="wm-nav-icon" type="button" onClick={cycleRegion} title="Cycle region">◌</button>
           </div>
-          <div className="wm-brand">MONITOR <span>v0.2.0</span></div>
+          <div className="wm-brand">POLYDATA MONITOR <span>{APP_VERSION}</span></div>
           <div className="wm-live-dot">Live</div>
           <button className="wm-select-pill" type="button" onClick={cycleRegion}>
             {REGION_OPTIONS.find((item) => item.value === region)?.label || 'Global'} ▾
@@ -1354,8 +1355,14 @@ export function App() {
         <div className="wm-main-content">
         <section className="wm-map-section">
           <div className="wm-map-header">
-            <div className="wm-map-title">Global Situation</div>
-            <div className="wm-map-clock">{currentUtcClock(now)}</div>
+            <div className="wm-map-heading">
+              <span className="wm-map-kicker">Market Intelligence Map</span>
+              <div className="wm-map-title">Global Situation</div>
+            </div>
+            <div className="wm-map-status-strip" aria-label="Global map status">
+              <span className="wm-status-chip">POLYDATA MONITOR</span>
+              <div className="wm-map-clock">{currentUtcClock(now)}</div>
+            </div>
             <div className="wm-map-view-toggle">
               <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={() => changeViewMode('2d')}>2D</button>
               <button type="button" className={viewMode === '3d' ? 'active' : ''} onClick={() => changeViewMode('3d')}>3D</button>
@@ -1394,7 +1401,7 @@ export function App() {
                   ))}
                 </div>
 
-                <div className="wm-sidebar-footer">polyData • world terminal</div>
+                <div className="wm-sidebar-footer">polyData Monitor • live terminal</div>
               </aside>
 
               <div className="wm-globe-hero">
