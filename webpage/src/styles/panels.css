@@ -3,12 +3,13 @@
   height: 100%;
   min-height: 200px;
   background: linear-gradient(180deg, #181818 0%, #111315 100%);
-  border: 1px solid #30343a;
+  border: 1px solid #3a414d;
   box-shadow:
-    0 16px 34px rgba(0, 0, 0, 0.34),
-    0 0 0 1px rgba(88, 126, 170, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.055),
-    inset 0 -18px 30px rgba(38, 70, 112, 0.08);
+    0 18px 36px rgba(0, 0, 0, 0.5),
+    12px 0 28px rgba(25, 55, 94, 0.18),
+    0 0 0 1px rgba(118, 155, 196, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -22px 34px rgba(30, 64, 110, 0.11);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -19,18 +20,23 @@
   content: '';
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 1px 0 0 rgba(137, 181, 229, 0.08),
+    inset -1px 0 0 rgba(33, 66, 108, 0.26),
+    inset 0 -1px 0 rgba(45, 83, 128, 0.28);
   pointer-events: none;
 }
 
 .wm-panel-slot:hover .wm-panel,
 .wm-panel-slot.panel-drop-target .wm-panel {
-  border-color: #4a5868;
+  border-color: #4e5d6f;
   box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.42),
-    0 0 0 1px rgba(105, 165, 235, 0.18),
-    0 0 24px rgba(35, 78, 129, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 20px 42px rgba(0, 0, 0, 0.54),
+    12px 0 30px rgba(32, 68, 112, 0.2),
+    0 0 0 1px rgba(123, 170, 224, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.078),
+    inset 0 -22px 34px rgba(35, 70, 118, 0.12);
 }
 
 .wm-panel-header {
