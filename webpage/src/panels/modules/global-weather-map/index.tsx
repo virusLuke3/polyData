@@ -127,10 +127,6 @@ function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMa
   const items = [...(payload?.items || [])].sort((a, b) => {
     return citySortValue(b) - citySortValue(a);
   });
-  const summary = payload?.summary;
-  const hottest = summary?.hottestCity || items[0];
-  const hottestUnit = hottest?.unit || '';
-  const marketCount = Number(summary?.liveMarketCount || 0);
   return (
     <Panel
       title="GLOBAL TEMP MONITOR"
@@ -139,26 +135,6 @@ function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMa
       className="wm-market-panel wm-global-temperature-monitor-panel"
       dataPanelId="global-temperature-monitor"
     >
-      <div className="wm-temp-monitor-hero">
-        <div>
-          <span>Hottest</span>
-          <strong>{hottest?.city || '--'}</strong>
-        </div>
-        <div>
-          <span>Forecast high</span>
-          <strong>{tempLabel(hottest?.forecastHigh ?? hottest?.todayHigh ?? hottest?.currentTemp, hottestUnit)}</strong>
-        </div>
-        <div>
-          <span>Updated</span>
-          <strong>{formatRelative(payload?.generatedAt)}</strong>
-        </div>
-        {marketCount > 0 ? (
-          <div>
-            <span>Markets</span>
-            <strong>{marketCount} live</strong>
-          </div>
-        ) : null}
-      </div>
       <div className="wm-temp-city-list">
         {items.length ? items.map((city) => <TemperatureCard key={String(city.cityId || city.city)} city={city} />) : (
           <div className="wm-weather-table-empty">Weather seed warming. Live city temperatures will appear automatically.</div>
@@ -184,5 +160,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 10000,
-  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(34),
+  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(33),
 });

@@ -4999,24 +4999,6 @@
   overflow: hidden;
 }
 
-.wm-temp-monitor-hero {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding-bottom: 2px;
-}
-
-.wm-temp-monitor-hero div {
-  min-width: 0;
-  padding: 7px 8px;
-  border: 1px solid #252525;
-  border-left: 2px solid #667c9a;
-  background: rgba(255, 255, 255, 0.025);
-  display: grid;
-  gap: 3px;
-}
-
-.wm-temp-monitor-hero span,
 .wm-temp-city-stats i,
 .wm-temp-city-stats span,
 .wm-temp-city-main span,
@@ -5029,21 +5011,6 @@
   letter-spacing: 0.45px;
   text-transform: uppercase;
   text-decoration: none;
-}
-
-.wm-temp-monitor-hero strong {
-  min-width: 0;
-  color: #f2f4f2;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 900;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wm-temp-monitor-hero div:first-child strong {
-  color: #7edcff;
 }
 
 .wm-temp-city-list {

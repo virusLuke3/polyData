@@ -11,6 +11,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import global_weather_map_service, weather_news_service
 from runtime import global_weather_map_watcher, weather_news_watcher
+from weather.cities import WEATHER_CITIES
 
 
 class FakeLogger:
@@ -39,6 +40,47 @@ class FakeStore:
     def set(self, namespace, cache_key, payload, ttl):
         self.set_calls.append((namespace, cache_key, payload, ttl))
         self.payload = payload
+
+
+def test_weather_city_watchlist_matches_polyweather_reference():
+    expected = [
+        "New York",
+        "Chicago",
+        "Dallas",
+        "Miami",
+        "Austin",
+        "Atlanta",
+        "Houston",
+        "Denver",
+        "Mexico City",
+        "Los Angeles",
+        "Seattle",
+        "Toronto",
+        "London",
+        "Paris",
+        "Madrid",
+        "Milan",
+        "Munich",
+        "Warsaw",
+        "Amsterdam",
+        "Tel Aviv",
+        "Ankara",
+        "Beijing",
+        "Shanghai",
+        "Shenzhen",
+        "Singapore",
+        "Tokyo",
+        "Seoul",
+        "Chengdu",
+        "Chongqing",
+        "Wuhan",
+        "Buenos Aires",
+        "Sao Paulo",
+        "Wellington",
+    ]
+
+    assert [city["city"] for city in WEATHER_CITIES] == expected
+    assert len(WEATHER_CITIES) == 33
 
 
 def make_settings(**kwargs):
