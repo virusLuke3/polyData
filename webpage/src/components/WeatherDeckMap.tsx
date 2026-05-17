@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { PickingInfo } from '@deck.gl/core';
+import { geoEquirectangular, geoGraticule, geoPath } from 'd3-geo';
+import { feature } from 'topojson-client';
+import countriesAtlas from 'world-atlas/countries-110m.json';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
 import type { RuntimeGlobalWeatherCity } from '@/types';
@@ -55,6 +58,9 @@ const IMPORTANT_CITY_IDS = new Set([
   'singapore',
   'sydney',
 ]);
+
+const FALLBACK_W = 1200;
+const FALLBACK_H = 620;
 
 function numberValue(value?: string | number | null) {
   const numeric = Number(value);
@@ -217,6 +223,57 @@ function tooltipFor(point: WeatherMapPoint) {
   `;
 }
 
+function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { points: WeatherMapPoint[]; selectedCityId?: string | null; onSelectCity?: (cityId: string) => void }) {
+  const { graticulePath, worldPath, projectedPoints } = useMemo(() => {
+    const projection = geoEquirectangular();
+    const world = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
+    projection.fitExtent([[24, 20], [FALLBACK_W - 24, FALLBACK_H - 24]], world);
+    const pathBuilder = geoPath(projection);
+    const graticule = geoGraticule().step([30, 30])();
+    return {
+      graticulePath: pathBuilder(graticule) || '',
+      worldPath: pathBuilder(world) || '',
+      projectedPoints: points.flatMap((point) => {
+        const projected = projection([point.lon, point.lat]);
+        return projected ? [{ ...point, x: projected[0], y: projected[1] }] : [];
+      }),
+    };
+  }, [points]);
+
+  return (
+    <div className="wm-weather-static-fallback" data-weather-map-fallback="true">
+      <svg viewBox={`0 0 ${FALLBACK_W} ${FALLBACK_H}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <defs>
+          <radialGradient id="weatherFallbackSea" cx="50%" cy="46%" r="70%">
+            <stop offset="0%" stopColor="#101a1f" />
+            <stop offset="100%" stopColor="#030405" />
+          </radialGradient>
+        </defs>
+        <rect x="0" y="0" width={FALLBACK_W} height={FALLBACK_H} fill="url(#weatherFallbackSea)" />
+        <path className="wm-weather-static-grid" d={graticulePath} />
+        <path className="wm-weather-static-land" d={worldPath} />
+        {projectedPoints.map((point) => {
+          const selected = point.id === selectedCityId;
+          const showLabel = shouldShowLabel(point, selectedCityId);
+          return (
+            <g key={`static-${point.id}`} className={`wm-weather-static-point ${point.temperatureTone} ${point.marketTone} ${selected ? 'selected' : ''}`}>
+              <circle className="ring" cx={point.x} cy={point.y} r={selected ? 11 : 8} />
+              <circle className="dot" cx={point.x} cy={point.y} r={selected ? 5 : 4} onClick={() => onSelectCity?.(point.id)} />
+              {showLabel ? (
+                <g transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}>
+                  <rect x="-4" y="-13" width={Math.max(58, point.city.length * 8)} height="27" rx="3" />
+                  <text x="0" y="-2">{point.city}</text>
+                  <text x="0" y="10" className="sub">{point.sublabel}</text>
+                </g>
+              ) : null}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, height = 320, interactive = true }: WeatherDeckMapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
@@ -224,6 +281,8 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectRef = useRef(onSelectCity);
   const fallbackAppliedRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
   const points = useMemo(() => normalizePoints(items), [items]);
 
   useEffect(() => {
@@ -233,6 +292,8 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
   useEffect(() => {
     const host = mapHostRef.current;
     if (!host || mapRef.current) return undefined;
+    setMapReady(false);
+    setMapFailed(false);
     const map = new maplibregl.Map({
       container: host,
       style: getWeatherMapStyle('dark'),
@@ -249,7 +310,7 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     mapRef.current = map;
 
     const overlay = new MapboxOverlay({
-      interleaved: true,
+      interleaved: false,
       layers: buildLayers(points, selectedCityId),
       pickingRadius: 10,
       getTooltip: (info: PickingInfo<WeatherMapPoint>) => info.object ? { html: tooltipFor(info.object) } : null,
@@ -264,9 +325,20 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
 
     map.on('load', () => {
       map.addControl(overlay as unknown as maplibregl.IControl);
+      map.resize();
+    });
+
+    map.on('idle', () => {
+      setMapReady(true);
     });
 
     let tileErrorCount = 0;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!mapRef.current || fallbackAppliedRef.current) return;
+      if (!map.loaded()) {
+        setMapFailed(true);
+      }
+    }, 4500);
     const onError = (event: { error?: Error; message?: string }) => {
       const message = event.error?.message || event.message || '';
       if (!message || fallbackAppliedRef.current) return;
@@ -274,6 +346,7 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
         tileErrorCount += 1;
         if (tileErrorCount >= 2) {
           fallbackAppliedRef.current = true;
+          setMapFailed(true);
           map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
         }
       }
@@ -284,6 +357,7 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     if (rootRef.current) resizeObserver.observe(rootRef.current);
 
     return () => {
+      window.clearTimeout(fallbackTimer);
       resizeObserver.disconnect();
       map.off('error', onError);
       overlay.finalize();
@@ -305,7 +379,8 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
 
   return (
     <div ref={rootRef} className="wm-weather-deck-map" style={{ height: `${height}px` }}>
-      <div ref={mapHostRef} className="wm-weather-deck-basemap" />
+      {(!mapReady || mapFailed) ? <WeatherStaticFallback points={points} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
+      <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady && !mapFailed ? 'ready' : ''}`} />
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>

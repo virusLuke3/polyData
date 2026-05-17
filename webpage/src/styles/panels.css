@@ -5029,6 +5029,13 @@
 .wm-weather-deck-basemap {
   position: absolute;
   inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.wm-weather-deck-basemap.ready {
+  opacity: 1;
 }
 
 .wm-weather-deck-map-loading {
@@ -5054,6 +5061,79 @@
 
 .wm-weather-deck-map .maplibregl-control-container {
   display: none;
+}
+
+.wm-weather-static-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #030405;
+}
+
+.wm-weather-static-fallback svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wm-weather-static-grid {
+  fill: none;
+  stroke: rgba(255, 168, 0, 0.22);
+  stroke-width: 0.75;
+}
+
+.wm-weather-static-land {
+  fill: #0b141a;
+  stroke: rgba(255, 168, 0, 0.52);
+  stroke-width: 0.8;
+}
+
+.wm-weather-static-point .ring {
+  fill: none;
+  stroke: rgba(255, 168, 0, 0.35);
+  stroke-width: 4;
+}
+
+.wm-weather-static-point .dot {
+  fill: #ffa620;
+  stroke: #ffe7a3;
+  stroke-width: 1.2;
+  cursor: pointer;
+}
+
+.wm-weather-static-point.hot .dot {
+  fill: #ff7948;
+}
+
+.wm-weather-static-point.cool .dot {
+  fill: #48d7be;
+}
+
+.wm-weather-static-point.watch .ring,
+.wm-weather-static-point.market .ring {
+  stroke: rgba(190, 154, 255, 0.52);
+}
+
+.wm-weather-static-point.selected .ring {
+  stroke: rgba(255, 245, 190, 0.78);
+}
+
+.wm-weather-static-point rect {
+  fill: rgba(0, 0, 0, 0.76);
+  stroke: rgba(255, 168, 0, 0.18);
+}
+
+.wm-weather-static-point text {
+  fill: #73d8ff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+}
+
+.wm-weather-static-point text.sub {
+  fill: #ffd772;
+  font-size: 9px;
 }
 
 .wm-weather-deck-status {

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from weather.cities import load_weather_cities
 from weather.temperature_bins import parse_temperature_bin
@@ -15,6 +17,12 @@ GLOBAL_WEATHER_MAP_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 34
 
 WEATHER_MARKET_TERMS = ("temperature", "highest temperature", "high temperature", "weather")
+GAMMA_QUERY_TIMEOUT_SECONDS = 6
+GAMMA_QUERIES_PER_CITY = 2
+GAMMA_QUERY_PAUSE_SECONDS = 0.03
+
+_LIVE_REFRESH_LOCK = threading.Lock()
+_LIVE_REFRESHING: set[str] = set()
 
 
 def _utc_now_iso(ctx: dict) -> str:
@@ -188,30 +196,50 @@ def _metar_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[st
     return result
 
 
-def _fetch_gamma_events(ctx: dict, queries: Iterable[str]) -> List[Dict[str, Any]]:
+def _fetch_gamma_events_for_query(ctx: dict, query: str) -> Tuple[List[Dict[str, Any]], str]:
     base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
     if not base_url:
-        return []
-    events: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for query in queries:
+        return [], "empty"
+    try:
         payload = ctx["http_json_get"](
             f"{base_url}/events",
-            params={"active": "true", "closed": "false", "limit": 100, "q": query},
-            timeout=12,
+            params={"active": "true", "closed": "false", "limit": 80, "q": query},
+            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
             headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
         )
-        rows = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
-        if not isinstance(rows, list):
-            continue
+    except Exception as exc:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("global weather map gamma query failed query=%s error=%s", query, exc)
+        return [], "error"
+    rows = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
+    if not isinstance(rows, list):
+        return [], "empty"
+    events = [event for event in rows if isinstance(event, dict)]
+    return events, "ok" if events else "empty"
+
+
+def _fetch_gamma_events(ctx: dict, queries: Iterable[str]) -> Tuple[List[Dict[str, Any]], str]:
+    events: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    statuses: List[str] = []
+    for query in queries:
+        rows, status = _fetch_gamma_events_for_query(ctx, query)
+        statuses.append(status)
         for event in rows:
-            if not isinstance(event, dict):
-                continue
             identity = str(event.get("id") or event.get("slug") or "")
             if identity and identity not in seen:
                 seen.add(identity)
                 events.append(event)
-    return events
+        if GAMMA_QUERY_PAUSE_SECONDS > 0:
+            time.sleep(GAMMA_QUERY_PAUSE_SECONDS)
+    if events:
+        return events, "ok"
+    if statuses and all(status == "error" for status in statuses):
+        return [], "error"
+    if any(status == "error" for status in statuses):
+        return [], "partial"
+    return [], "empty"
 
 
 def _market_label(event_title: str, market: Dict[str, Any]) -> str:
@@ -261,19 +289,24 @@ def _clob_yes_quote(ctx: dict, market: Dict[str, Any]) -> Dict[str, Optional[flo
     base_url = str(getattr(ctx["SETTINGS"], "clob_api_base", "") or "").rstrip("/")
     if not base_url:
         return {"bestBidYes": None, "bestAskYes": None}
+    stats = ctx.setdefault("_weather_clob_stats", {"attempts": 0, "errors": 0, "quoted": 0})
+    stats["attempts"] = int(stats.get("attempts") or 0) + 1
     try:
         book = ctx["http_json_get"](
             f"{base_url}/book",
             params={"token_id": token_ids[0]},
-            timeout=int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8),
+            timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
             headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
         )
     except Exception:
+        stats["errors"] = int(stats.get("errors") or 0) + 1
         return {"bestBidYes": None, "bestAskYes": None}
     bids = book.get("bids") if isinstance(book, dict) and isinstance(book.get("bids"), list) else []
     asks = book.get("asks") if isinstance(book, dict) and isinstance(book.get("asks"), list) else []
     best_bid = max((_float(row.get("price") if isinstance(row, dict) else None) for row in bids), default=None)
     best_ask = min((_float(row.get("price") if isinstance(row, dict) else None) for row in asks), default=None)
+    if best_bid is not None or best_ask is not None:
+        stats["quoted"] = int(stats.get("quoted") or 0) + 1
     return {"bestBidYes": best_bid, "bestAskYes": best_ask}
 
 
@@ -319,16 +352,27 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
     }
 
 
-def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def _market_source_status(stats: Dict[str, Any]) -> str:
+    if stats.get("match"):
+        return "ok"
+    query_statuses = list(stats.get("queryStatuses") or [])
+    if query_statuses and all(status == "error" for status in query_statuses):
+        return "error"
+    if any(status == "error" for status in query_statuses):
+        return "partial"
+    return "empty"
+
+
+def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     dates = _date_labels(ctx, int(getattr(ctx["SETTINGS"], "global_weather_market_days", 4) or 4))
-    queries = []
-    for city in cities:
-        name = str(city.get("city") or "").strip()
-        queries.extend([f"{name} temperature", f"{name} highest temperature", f"{name} weather"])
-    events = _fetch_gamma_events(ctx, queries)
     result: Dict[str, Dict[str, Any]] = {}
+    source_states: Dict[str, str] = {}
     for city in cities:
         city_id = str(city["city_id"])
+        name = str(city.get("city") or "").strip()
+        queries = [f"{name} temperature", f"{name} highest temperature"][:GAMMA_QUERIES_PER_CITY]
+        events, query_status = _fetch_gamma_events(ctx, queries)
+        stats = {"queryStatuses": [query_status], "match": False}
         matches: List[Dict[str, Any]] = []
         for event in events:
             haystack = _normalize_text(event.get("title"), event.get("slug"), " ".join(str((market or {}).get("question") or "") for market in event.get("markets") or []))
@@ -339,7 +383,22 @@ def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[
         if matches:
             matches.sort(key=lambda row: (_parse_ts(row.get("updatedAt")), len(row.get("bins") or [])), reverse=True)
             result[city_id] = matches[0]
-    return result
+            stats["match"] = True
+        source_states[city_id] = _market_source_status(stats)
+    return result, source_states
+
+
+def _aggregate_source(values: Iterable[str], *, empty_value: str = "empty") -> str:
+    states = [str(value or "") for value in values if value]
+    if not states:
+        return empty_value
+    if any(state == "ok" for state in states):
+        return "partial" if any(state in {"error", "partial"} for state in states) else "ok"
+    if any(state == "partial" for state in states):
+        return "partial"
+    if all(state == "error" for state in states):
+        return "error"
+    return empty_value
 
 
 def _source_status(value: bool) -> str:
@@ -382,11 +441,23 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         if logger is not None:
             logger.exception("global weather map metar fetch failed error=%s", exc)
     try:
-        markets = _markets_by_city(ctx, cities)
-        sources["gamma"] = "ok" if markets else "empty"
-        sources["clob"] = "partial" if markets else "empty"
+        markets, market_source_states = _markets_by_city(ctx, cities)
+        sources["gamma"] = _aggregate_source(market_source_states.values())
+        clob_stats = ctx.get("_weather_clob_stats") or {}
+        clob_attempts = int(clob_stats.get("attempts") or 0)
+        clob_errors = int(clob_stats.get("errors") or 0)
+        clob_quoted = int(clob_stats.get("quoted") or 0)
+        if clob_attempts == 0:
+            sources["clob"] = "empty"
+        elif clob_quoted > 0 and clob_errors == 0:
+            sources["clob"] = "ok"
+        elif clob_quoted > 0:
+            sources["clob"] = "partial"
+        else:
+            sources["clob"] = "error"
     except Exception as exc:
         markets = {}
+        market_source_states = {str(city["city_id"]): "error" for city in cities}
         sources["gamma"] = "error"
         sources["clob"] = "error"
         logger = getattr(ctx.get("app"), "logger", None)
@@ -417,7 +488,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
             "sourceStates": {
                 "openMeteo": "ok" if weather_row else "error",
                 "metar": "ok" if metar_row else "empty",
-                "polymarket": "ok" if market_row else "empty",
+                "polymarket": "ok" if market_row else market_source_states.get(city_id, "empty"),
             },
             "updatedAt": weather_row.get("updatedAt") or metar_row.get("updatedAt") or market_row.get("updatedAt") or _utc_now_iso(ctx),
         }
@@ -494,15 +565,43 @@ def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None
         setter(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY, payload, ttl_seconds)
 
 
+def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+    refresh_key = f"{GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE}:{GLOBAL_WEATHER_MAP_CACHE_KEY}"
+    with _LIVE_REFRESH_LOCK:
+        if refresh_key in _LIVE_REFRESHING:
+            return False
+        _LIVE_REFRESHING.add(refresh_key)
+
+    def refresh() -> None:
+        logger = getattr(ctx.get("app"), "logger", None)
+        try:
+            payload = _with_cache_mode(build_global_weather_map_payload(ctx, limit=limit), "live-build")
+            if payload.get("items"):
+                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                if logger is not None and hasattr(logger, "info"):
+                    logger.info("global weather map async refresh stored reason=%s items=%s", reason, len(payload.get("items") or []))
+            elif logger is not None and hasattr(logger, "warning"):
+                logger.warning("global weather map async refresh skipped empty payload reason=%s", reason)
+        except Exception:
+            if logger is not None:
+                logger.exception("global weather map async refresh failed reason=%s", reason)
+        finally:
+            with _LIVE_REFRESH_LOCK:
+                _LIVE_REFRESHING.discard(refresh_key)
+
+    thread = threading.Thread(target=refresh, name="global-weather-map-refresh", daemon=True)
+    thread.start()
+    return True
+
+
 def get_global_weather_map_snapshot(ctx: dict, limit: int = DEFAULT_ITEM_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
     ttl_seconds = max(60, int(getattr(ctx["SETTINGS"], "global_weather_map_ttl_seconds", 300) or 300))
     seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
     if seeded is not None:
+        if allow_live_build and seeded.get("cacheMode") == "stale-seed":
+            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
         return normalize_global_weather_map_payload(seeded, ctx=ctx, limit=limit)
     if not allow_live_build:
         return normalize_global_weather_map_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
-    payload = _with_cache_mode(build_global_weather_map_payload(ctx, limit=limit), "live-build")
-    if payload.get("items"):
-        _store_live(ctx, payload, ttl_seconds=ttl_seconds)
-    return normalize_global_weather_map_payload(payload, ctx=ctx, limit=limit)
-
+    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
+    return normalize_global_weather_map_payload({**_empty_payload(ctx), "cacheMode": "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"}, ctx=ctx, limit=limit)

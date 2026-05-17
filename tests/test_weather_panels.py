@@ -17,6 +17,12 @@ class FakeLogger:
     def exception(self, *args, **kwargs):
         return None
 
+    def info(self, *args, **kwargs):
+        return None
+
+    def warning(self, *args, **kwargs):
+        return None
+
 
 class FakeStore:
     def __init__(self, payload=None, stale=None):
@@ -144,6 +150,72 @@ def test_global_weather_map_failure_returns_warming_payload():
     assert payload["status"] == "warming"
     assert payload["items"] == []
     assert payload["cacheMode"] == "seed-miss"
+
+
+def test_global_weather_map_cold_start_returns_fast_and_schedules_refresh(monkeypatch):
+    scheduled = {}
+
+    def schedule(ctx, *, limit, ttl_seconds, reason):
+        scheduled.update({"limit": limit, "ttl": ttl_seconds, "reason": reason})
+        return True
+
+    monkeypatch.setattr(global_weather_map_service, "_schedule_live_refresh", schedule)
+    ctx = make_ctx()
+    payload = global_weather_map_service.get_global_weather_map_snapshot(ctx, limit=2)
+
+    assert payload["status"] == "warming"
+    assert payload["items"] == []
+    assert payload["cacheMode"] == "seed-miss-refreshing"
+    assert scheduled == {"limit": 2, "ttl": 300, "reason": "seed-miss"}
+    assert ctx["_calls"]["json"] == 0
+
+
+def test_global_weather_map_market_discovery_is_city_tolerant(monkeypatch):
+    monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bestBidYes": 0.41, "bestAskYes": 0.45})
+
+    def http_json_get(url, *, params=None, **kwargs):
+        if "open.example" in url:
+            return [
+                {
+                    "current": {"temperature_2m": 22.0, "weather_code": 2, "time": "2026-05-12T12:00"},
+                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [22.0]},
+                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [27.0], "temperature_2m_min": [16.0]},
+                },
+                {
+                    "current": {"temperature_2m": 18.0, "weather_code": 1, "time": "2026-05-12T12:00"},
+                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [18.0]},
+                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [24.0], "temperature_2m_min": [14.0]},
+                },
+            ]
+        if "aviation.example" in url:
+            return [{"icaoId": "KNYC", "temp": 21, "reportTime": "2026-05-12T11:50:00Z"}]
+        if "gamma.example" in url:
+            query = str((params or {}).get("q") or "")
+            if "Chicago" in query:
+                raise RuntimeError("gamma temporary miss")
+            return [
+                {
+                    "id": "evt-1",
+                    "slug": "highest-temperature-in-new-york-on-may-12-2026",
+                    "title": "Highest temperature in New York on May 12?",
+                    "active": True,
+                    "closed": False,
+                    "markets": [
+                        {"id": "m1", "question": "Highest temperature in New York on May 12? 80°F or higher", "slug": "ny-80", "outcomePrices": ["0.40", "0.60"], "active": True}
+                    ],
+                }
+            ]
+        return []
+
+    ctx = make_ctx(http_json_get=http_json_get)
+    payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=2)
+    by_city = {item["cityId"]: item for item in payload["items"]}
+
+    assert payload["summary"]["mappedCount"] == 2
+    assert payload["summary"]["liveMarketCount"] == 1
+    assert payload["sources"]["gamma"] == "partial"
+    assert by_city["new-york"]["sourceStates"]["polymarket"] == "ok"
+    assert by_city["chicago"]["sourceStates"]["polymarket"] == "error"
 
 
 def test_weather_news_builds_filters_dedupes_and_ranks():
