@@ -2140,7 +2140,16 @@ body {
   grid-row: span 2;
 }
 
+.wm-panel-slot.size-large {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
 .wm-panel-slot.size-tall .wm-panel {
+  min-height: 100%;
+}
+
+.wm-panel-slot.size-large .wm-panel {
   min-height: 100%;
 }
 

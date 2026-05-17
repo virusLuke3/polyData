@@ -1110,7 +1110,7 @@ export type PanelDefinition = {
   title: string;
   eyebrow: string;
   description: string;
-  size?: 'default' | 'wide' | 'tall';
+  size?: 'default' | 'wide' | 'tall' | 'large';
 };
 
 export type PanelRenderContext = {

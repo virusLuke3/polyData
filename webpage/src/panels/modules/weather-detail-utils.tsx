@@ -34,6 +34,38 @@ export function bestQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWea
   return best;
 }
 
+export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
+  if (!city) return [];
+  const unit = city.unit || '';
+  const anchor = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp);
+  if (anchor === null) return [];
+  const center = Math.round(anchor);
+  const start = center - 5;
+  return Array.from({ length: 11 }, (_, index) => {
+    const value = start + index;
+    const label = index === 0
+      ? `${value}°${unit} or below`
+      : index === 10
+        ? `${value}°${unit} or higher`
+        : `${value}°${unit}`;
+    return {
+      label,
+      bucketType: index === 0 ? 'lte' : index === 10 ? 'gte' : 'eq',
+      minTemp: value,
+      maxTemp: value,
+      unit,
+      bestBidYes: null,
+      bestAskYes: 0.001,
+      midPriceYes: null,
+      marketStatus: 'Missing Quote',
+    };
+  });
+}
+
+export function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
+  return city?.bins?.length ? city.bins : expectedQuoteBins(city);
+}
+
 export function quoteCoverage(city?: RuntimeGlobalWeatherCity | null) {
   if (!city) return '0/0';
   if (city.quoteCoverage) return city.quoteCoverage;

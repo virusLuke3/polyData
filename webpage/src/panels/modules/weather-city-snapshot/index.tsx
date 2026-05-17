@@ -73,6 +73,7 @@ function WeatherCitySnapshotPanel({
 
 const renderers: PanelRenderMap = {
   'weather-city-snapshot': {
+    size: 'wide',
     render: (ctx) => (
       <WeatherCitySnapshotPanel
         payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}
