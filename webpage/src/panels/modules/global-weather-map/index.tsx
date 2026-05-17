@@ -136,7 +136,6 @@ function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMa
       title="GLOBAL TEMP MONITOR"
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
-      count={tempLabel(hottest?.forecastHigh ?? hottest?.todayHigh ?? hottest?.currentTemp, hottestUnit)}
       className="wm-market-panel wm-global-temperature-monitor-panel"
       dataPanelId="global-temperature-monitor"
     >
