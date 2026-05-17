@@ -42,18 +42,31 @@ function nextMode(mode: SortMode): SortMode {
   return 'latest';
 }
 
+function modeLabel(mode: SortMode) {
+  if (mode === 'latest') return 'Latest';
+  if (mode === 'severity') return 'Alerts';
+  return 'City';
+}
+
 function NewsItem({ item }: { item: RuntimeWeatherNewsItem }) {
   const severity = String(item.severity || 'normal').toLowerCase();
+  const tags = (item.tags || []).slice(0, 3);
   return (
     <a className={`wm-weather-news-item ${severity}`} href={item.url || '#'} target="_blank" rel="noreferrer">
-      <span className="wm-weather-news-glyph">{severity === 'warning' ? 'AL' : severity === 'watch' ? 'WX' : 'FC'}</span>
-      <div>
-        <span>{item.city || 'Global'} · {item.source || 'News'}</span>
-        <strong>{item.title || 'Weather update'}</strong>
-        <em>{item.summary || 'Weather summary pending'}</em>
-        <i>{(item.tags || []).slice(0, 3).join(' / ') || 'forecast'}</i>
+      <div className="wm-weather-news-card-head">
+        <div>
+          <span className="wm-weather-news-city">{item.city || 'Global'}</span>
+          <span className="wm-weather-news-source">{item.source || 'Weather source'}</span>
+        </div>
+        <span className="wm-weather-news-severity">{severity === 'warning' ? 'Alert' : severity === 'watch' ? 'Watch' : 'Forecast'}</span>
       </div>
-      <b>{formatRelative(item.publishedAt)}</b>
+      <strong>{item.title || 'Weather update'}</strong>
+      <em>{item.summary || 'Weather summary pending'}</em>
+      <div className="wm-weather-news-card-foot">
+        <span>{formatRelative(item.publishedAt)}</span>
+        {tags.length ? <i>{tags.join(' / ')}</i> : <i>forecast</i>}
+        <b>Read source</b>
+      </div>
     </a>
   );
 }
@@ -70,7 +83,7 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
         <button type="button" className="wm-panel-help-button" aria-label="Explain weather news source" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>
       )}
       controls={(
-        <button type="button" className="wm-weather-sort-button" aria-label="Change weather news sort" onClick={() => setSortMode((current) => nextMode(current))}>{sortMode}</button>
+        <button type="button" className="wm-weather-sort-button" aria-label="Change weather news sort" onClick={() => setSortMode((current) => nextMode(current))}>{modeLabel(sortMode)}</button>
       )}
       badge={statusBadge(payload?.status)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
@@ -85,11 +98,17 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
       dataPanelId="weather-news"
     >
       <div className={`wm-weather-news-hero ${String(hero?.severity || 'normal').toLowerCase()}`}>
-        <span className="wm-weather-news-glyph">{hero?.severity === 'warning' ? 'AL' : 'WX'}</span>
         <div>
-          <span>{payload?.summary?.warningCount ?? 0} warnings · {payload?.summary?.cityCount ?? 0} cities</span>
-          <strong>{hero?.title || 'Weather news seed warming'}</strong>
-          <em>{hero?.city || payload?.summary?.topCity || 'Global'} · {formatRelative(hero?.publishedAt || payload?.generatedAt)}</em>
+          <span>Latest</span>
+          <strong>{payload?.summary?.warningCount ?? 0} warnings</strong>
+        </div>
+        <div>
+          <span>Cities</span>
+          <strong>{payload?.summary?.cityCount ?? 0}</strong>
+        </div>
+        <div>
+          <span>Top city</span>
+          <strong>{hero?.city || payload?.summary?.topCity || 'Global'}</strong>
         </div>
       </div>
       <div className="wm-weather-news-list">
