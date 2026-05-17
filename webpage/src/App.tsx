@@ -487,6 +487,7 @@ function PanelWorkspaceSlot({
         state.started = true;
         slotRef.current.classList.add('dragging-source');
         const ghost = slotRef.current.cloneNode(true) as HTMLElement;
+        ghost.classList.remove('dragging-source');
         ghost.classList.add('wm-panel-drag-ghost');
         ghost.style.width = `${sourceRect.width}px`;
         ghost.style.height = `${sourceRect.height}px`;
