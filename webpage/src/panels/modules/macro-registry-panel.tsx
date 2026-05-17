@@ -1,8 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroRegistryItem, RuntimeMacroRegistryPayload } from '@/types';
-import { formatRelative } from '../shared/formatters';
-import { MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
+import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
 
 export type MacroRegistryConfig = {
@@ -99,13 +98,9 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
             <strong>{summary?.signal || config.emptyTitle}</strong>
           </div>
         </div>
-        <em>{`${summary?.hotCount ?? 0} hot / ${summary?.coolCount ?? 0} cool / ${summary?.watchCount ?? 0} watch`}</em>
+        <em>{config.badge}</em>
       </div>
-      <div className="wm-macro-driver-strip">
-        <StatusBadge tone="hot">{`HOT ${summary?.hotCount ?? 0}`}</StatusBadge>
-        <StatusBadge tone="cool">{`COOL ${summary?.coolCount ?? 0}`}</StatusBadge>
-        <StatusBadge tone="watch">{`WATCH ${summary?.watchCount ?? 0}`}</StatusBadge>
-      </div>
+      <MacroAlertStrip hot={summary?.hotCount} cool={summary?.coolCount} watch={summary?.watchCount} />
       <div className="wm-macro-registry-list">
         {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} />) : (
           <div className="wm-empty-state">
@@ -113,18 +108,6 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
             <em>Seed cache has not composed this registry yet.</em>
           </div>
         )}
-      </div>
-      {summary?.topMover ? (
-        <div className="wm-macro-driver-top">
-          <RowGlyph icon={rowGlyph(summary.topMover)} tone={rowTone(summary.topMover)} label="Top mover" />
-          <span>TOP MOVER</span>
-          <strong>{summary.topMover.label || 'Macro row'}</strong>
-          <em>{summary.topMover.changeLabel || '--'} / {formatRelative(summary.topMover.date)}</em>
-        </div>
-      ) : null}
-      <MarketImplicationStrip items={config.implicationItems} />
-      <div className="wm-macro-driver-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );

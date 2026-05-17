@@ -102,6 +102,24 @@ export function StatusBadge({ children, tone = 'neutral' }: { children: string |
   return <span className={`wm-status-badge ${tone}`}>{children}</span>;
 }
 
+export function MacroAlertStrip({
+  hot = 0,
+  cool = 0,
+  watch = 0,
+}: {
+  hot?: string | number | null;
+  cool?: string | number | null;
+  watch?: string | number | null;
+}) {
+  return (
+    <div className="wm-macro-alert-strip">
+      <span className="wm-macro-alert-chip alert"><strong>ALERT</strong><em>{Number(hot) || 0}</em></span>
+      <span className="wm-macro-alert-chip cool"><strong>COOL</strong><em>{Number(cool) || 0}</em></span>
+      <span className="wm-macro-alert-chip watch"><strong>WATCH</strong><em>{Number(watch) || 0}</em></span>
+    </div>
+  );
+}
+
 export function SourceStack({ sources, labels }: { sources?: Record<string, string>; labels?: Record<string, string> }) {
   const entries = Object.entries(sources || {});
   if (!entries.length) return null;

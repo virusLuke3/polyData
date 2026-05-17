@@ -3,7 +3,7 @@ import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { MarketImplicationStrip, PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
+import { PanelGlyph, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -15,14 +15,6 @@ function badgeLabel(status?: string | null) {
 
 function panelTone(status?: string | null): 'live' | 'muted' {
   return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
-}
-
-function toneLabel(level?: string | null) {
-  const normalized = String(level || '').toLowerCase();
-  if (normalized === 'critical') return 'Critical';
-  if (normalized === 'elevated') return 'Elevated';
-  if (normalized === 'guarded') return 'Guarded';
-  return normalized ? normalized[0]?.toUpperCase() + normalized.slice(1) : '--';
 }
 
 function upperMetric(value?: string | null) {
@@ -77,20 +69,6 @@ function formatAge(value?: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function sourceHealthLabel(sources?: Record<string, string>) {
-  if (!sources) return 'SOURCES WARMING';
-  const values = Object.values(sources);
-  if (values.length === 0) return 'SOURCES WARMING';
-  const okCount = values.filter((value) => String(value || '').toLowerCase() === 'ok').length;
-  return `${okCount}/${values.length} SOURCES OK`;
-}
-
-function conflictFeedLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
-  const provider = upperMetric(payload?.conflictProvider || 'conflict');
-  const state = upperMetric(payload?.conflictState || payload?.sources?.conflictFeed || 'warming');
-  return `${provider} ${state}`;
-}
-
 function geoSignalLabel(payload?: RuntimeGeoSanctionsShockPayload | null) {
   const summary = payload?.summary;
   const nuclear = String(summary?.nuclearRisk || '').toLowerCase();
@@ -107,33 +85,11 @@ function geoSignalTone(payload?: RuntimeGeoSanctionsShockPayload | null) {
   return signalToneClass('quiet');
 }
 
-function GeoLinkedMarketRegistry({ payload }: { payload?: RuntimeGeoSanctionsShockPayload | null }) {
-  const markets = payload?.linkedMarkets || [];
-  return (
-    <div className="wm-linked-market-registry">
-      <div className="wm-linked-market-header">
-        <span>PMKT geo markets</span>
-        <em>{markets.length ? `${markets.length} linked` : 'No linked market seeded'}</em>
-      </div>
-      {markets.slice(0, 3).map((market, index) => (
-        <div className="wm-linked-market-row" key={`${market.marketId || market.slug || 'geo-market'}-${index}`}>
-          <div>
-            <span>{upperMetric(market.matchedBy || 'GEO')} / SCORE {market.score ?? '--'}</span>
-            <strong>{market.title || 'Linked geopolitical market'}</strong>
-          </div>
-          <em>{market.gammaActive ? 'LIVE' : 'WATCH'}</em>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
   const summary = payload?.summary;
   const items = payload?.items || [];
-  const targetBreakdown = payload?.targetBreakdown || [];
   const signal = geoSignalLabel(payload);
 
   return (
@@ -154,7 +110,7 @@ function GeoShockPanel({ payload }: {
               <strong>{signal}</strong>
             </div>
           </div>
-          <em>OFAC / Federal Register / conflict fallback linked to macro risk</em>
+          <em>{`${summary?.newSanctionsCount ?? 0} sanctions / ${summary?.hotspotCount ?? 0} hotspots`}</em>
         </div>
 
         <section className="wm-geo-shock-section compact">
@@ -175,12 +131,7 @@ function GeoShockPanel({ payload }: {
                       <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
                     </div>
                     <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>
-                    <div className="wm-geo-shock-row-bottom">
-                      <span className="wm-geo-shock-summary">{item.summary || 'No detail yet.'}</span>
-                      {targetLabel && targetLabel !== '--' ? (
-                        <span className="wm-geo-shock-target-mini">{targetLabel}</span>
-                      ) : null}
-                    </div>
+                    {targetLabel && targetLabel !== '--' ? <span className="wm-geo-shock-target-mini">{targetLabel}</span> : null}
                   </div>
                 </article>
               );
@@ -189,68 +140,6 @@ function GeoShockPanel({ payload }: {
             )}
           </div>
         </section>
-
-        <section className="wm-geo-shock-summary-grid compact">
-          <article className="wm-geo-shock-metric">
-            <span><i>!</i> HOTSPOTS</span>
-            <strong>{summary?.hotspotCount ?? 0}</strong>
-          </article>
-          <article className="wm-geo-shock-metric">
-            <span><i>S</i> NEW SANCTIONS</span>
-            <strong>{summary?.newSanctionsCount ?? 0}</strong>
-          </article>
-          <article className="wm-geo-shock-metric wide">
-            <span><i>◎</i> TARGETS</span>
-            <strong>{upperMetric(summary?.targetSummary || 'MONITORING')}</strong>
-          </article>
-          <article className="wm-geo-shock-metric tone-critical">
-            <span><i>☢</i> NUCLEAR RISK</span>
-            <strong>{upperMetric(toneLabel(summary?.nuclearRisk))}</strong>
-          </article>
-          <article className="wm-geo-shock-metric tone-warning">
-            <span><i>▦</i> MILITARY FEED</span>
-            <strong>{upperMetric(summary?.militaryFeed || 'standby')}</strong>
-          </article>
-        </section>
-
-        <MarketImplicationStrip items={['Sanctions', 'Energy risk', 'Safe-haven flow', 'CPI tail risk']} />
-
-        <section className="wm-geo-shock-section">
-          <header className="wm-geo-shock-section-header">
-            <span>TARGET BREAKDOWN</span>
-          </header>
-          <div className="wm-geo-shock-breakdown">
-            {targetBreakdown.length ? targetBreakdown.map((target) => (
-              <article key={target.label || 'target'} className="wm-geo-shock-breakdown-row">
-                <div className="wm-geo-shock-breakdown-main">
-                  <div className="wm-geo-shock-breakdown-top">
-                    <strong>{upperMetric(target.label || 'MONITORING')}</strong>
-                    <span>{target.count ?? 0}</span>
-                  </div>
-                  <div className="wm-geo-shock-breakdown-meta">
-                    <span>{target.latestHeadline || 'No recent linked event.'}</span>
-                    <em>
-                      {upperMetric(target.latestSource || 'SOURCE')}
-                      {target.latestOccurredAt ? ` / ${formatAge(target.latestOccurredAt)}` : ''}
-                    </em>
-                  </div>
-                </div>
-              </article>
-            )) : (
-              <div className="wm-geo-shock-empty">No target concentration yet.</div>
-            )}
-          </div>
-        </section>
-
-        <GeoLinkedMarketRegistry payload={payload} />
-        <SourceStack sources={payload?.sources} labels={{ ofac: 'OFAC SLS', federalRegister: 'Federal Register', conflictFeed: upperMetric(payload?.conflictProvider || 'Conflict') }} />
-
-        <footer className="wm-geo-shock-footer">
-          <span>{sourceHealthLabel(payload?.sources)}</span>
-          <span>{conflictFeedLabel(payload)}</span>
-          <span>{upperMetric(payload?.cacheMode || 'warming')}</span>
-          <span>{formatAge(payload?.generatedAt)}</span>
-        </footer>
       </div>
     </Panel>
   );

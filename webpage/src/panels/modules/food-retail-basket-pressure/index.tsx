@@ -2,10 +2,9 @@ import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFoodRetailBasket } from '@/services/api';
 import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePolymarketMacroMapPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
@@ -70,12 +69,11 @@ function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
   );
 }
 
-function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoodRetailBasketPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeFoodRetailBasketPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const topMover = summary?.topMover;
-  const linkedMarkets = linkedMacroMarkets(macroPayload, ['cpi']);
   const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
@@ -111,10 +109,9 @@ function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoo
             <strong>{summary?.signal || 'FOOD WARMING'}</strong>
           </div>
         </div>
-        <em>Food basket pressure / retail proxy optional</em>
+        <em>{`Coverage ${summary?.coverage ?? items.length}`}</em>
       </div>
       <div className="wm-food-basket-metrics">
-        <StatusBadge tone={signalTone}>{summary?.signal || 'FOOD WARMING'}</StatusBadge>
         <StatusBadge tone={Number(summary?.pressureScore) > 0 ? 'hot' : Number(summary?.pressureScore) < 0 ? 'cool' : 'neutral'}>{`PRESSURE ${pctLabel(summary?.pressureScore)}`}</StatusBadge>
         <StatusBadge tone="official">{`COVERAGE ${summary?.coverage ?? items.length}`}</StatusBadge>
       </div>
@@ -132,11 +129,6 @@ function FoodRetailBasketPanel({ payload, macroPayload }: { payload?: RuntimeFoo
         <span>Top mover</span>
         <strong>{topMover?.label || 'Awaiting CPI component data'}</strong>
         <em>{topMover ? `${pctLabel(topMover.momPct)} MoM / ${indexLabel(topMover.value)} idx` : '--'}</em>
-      </div>
-      <MarketImplicationStrip items={['Headline CPI', 'Food-at-home', 'CPI bucket risk', 'Retail proxy optional']} />
-      <LinkedMarketRegistry title="PMKT CPI markets" items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <div className="wm-food-basket-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );

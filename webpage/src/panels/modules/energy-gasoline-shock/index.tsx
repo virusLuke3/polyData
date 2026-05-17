@@ -1,10 +1,9 @@
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
 import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, RuntimePolymarketMacroMapPayload } from '@/types';
-import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badge(status?: string | null) {
@@ -52,10 +51,9 @@ function EnergyRow({ item }: { item: RuntimeEnergyShockItem }) {
   );
 }
 
-function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: RuntimeEnergyGasolineShockPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+function EnergyGasolineShockPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeEnergyGasolineShockPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const summary = payload?.summary;
   const items = payload?.items || [];
-  const linkedMarkets = linkedMacroMarkets(macroPayload, ['energy', 'cpi', 'fed']);
   const signalTone = signalToneClass(summary?.signal);
   return (
     <Panel
@@ -76,29 +74,8 @@ function EnergyGasolineShockPanel({ payload, macroPayload }: { payload?: Runtime
         </div>
         <em>Headline CPI impulse {summary?.headlineImpulsePp ?? '--'}pp</em>
       </div>
-      <div className="wm-energy-driver-strip">
-        <StatusBadge tone={signalTone}>{`CPI impulse ${summary?.headlineImpulsePp ?? '--'}pp`}</StatusBadge>
-      </div>
       <div className="wm-energy-grid">
         {items.map((item) => <EnergyRow key={item.key || item.label || 'energy'} item={item} />)}
-      </div>
-      <div className="wm-energy-event-log">
-        {items.slice(0, 3).map((item) => (
-          <div key={`${item.key || item.label}-event`}>
-            <RowGlyph icon={energyIcon(item)} tone={itemTone(item.changeWeek) === 'flat' ? 'neutral' : itemTone(item.changeWeek)} label={item.label || 'Energy move'} />
-            <span>{String(item.key || 'energy').toUpperCase()}</span>
-            <strong>{item.label || 'Energy series'} {changeLabel(item.changeWeek)}W</strong>
-            <em>{item.date || 'date pending'}</em>
-          </div>
-        ))}
-      </div>
-      <div className="wm-energy-links">
-        {(summary?.linkedMarkets || ['CPI headline', 'oil', 'Fed']).slice(0, 4).map((label) => <span key={label}>{label}</span>)}
-      </div>
-      <MarketImplicationStrip items={['Headline CPI', 'Oil markets', 'Gasoline pressure', 'Fed reaction']} />
-      <LinkedMarketRegistry title="PMKT energy / CPI" items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <div className="wm-energy-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );

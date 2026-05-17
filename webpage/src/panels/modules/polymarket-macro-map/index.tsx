@@ -2,14 +2,13 @@ import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimePolymarketMacroMap } from '@/services/api';
 import type {
-  RuntimePolymarketMacroMapCategory,
   RuntimePolymarketMacroMapItem,
   RuntimePolymarketMacroMapPayload,
 } from '@/types';
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { MarketImplicationStrip, PanelGlyph, RowGlyph, SourceStack, StatusBadge, signalToneClass } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
@@ -45,20 +44,6 @@ function catalystLabel(payload?: RuntimePolymarketMacroMapPayload | null) {
   return formatRelative(catalyst.endDate);
 }
 
-function categoryTone(index: number) {
-  return ['green', 'amber', 'blue', 'violet', 'red'][index % 5];
-}
-
-function shortCategoryLabel(category?: RuntimePolymarketMacroMapCategory | null) {
-  const id = String(category?.id || '').toLowerCase();
-  if (id === 'cpi') return 'CPI';
-  if (id === 'fed') return 'FED';
-  if (id === 'growth') return 'GROWTH';
-  if (id === 'labor') return 'LABOR';
-  if (id === 'energy') return 'ENERGY';
-  return (String(category?.label || 'MACRO').split('/')[0] || 'MACRO').trim().toUpperCase();
-}
-
 function categoryIcon(value?: string | null): PanelGlyphName {
   const text = String(value || '').toLowerCase();
   if (text.includes('energy') || text.includes('oil')) return 'energy';
@@ -79,23 +64,6 @@ function signalLabel(value?: string | null) {
 
 function clusterLabel(value?: string | null) {
   return signalLabel(value).replace(' CLUSTER ACTIVE', '');
-}
-
-function MacroCategoryMatrix({ categories }: { categories: RuntimePolymarketMacroMapCategory[] }) {
-  return (
-    <div className="wm-macro-map-category-grid">
-      {categories.map((category, index) => (
-        <div key={category.id || category.label || index} className={`wm-macro-map-category ${categoryTone(index)}`}>
-          <RowGlyph icon={categoryIcon(category.label || category.id)} tone={signalToneClass(category.label || category.id)} label={shortCategoryLabel(category)} />
-          <div>
-            <span>{shortCategoryLabel(category)}</span>
-            <strong>{category.activeCount ?? 0}</strong>
-          </div>
-          <em>{category.marketType || 'Market cluster'}</em>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
@@ -147,10 +115,8 @@ function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) 
 
 function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacroMapPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
-  const categories = payload?.categories || [];
   const items = payload?.items || [];
   const summary = payload?.summary;
-  const topMarkets = items.slice(0, 3).map((item) => item.categoryLabels?.[0] || 'PMKT');
   return (
     <Panel
       title="PMKT MACRO MAP"
@@ -201,15 +167,7 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
           <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
       </div>
-      <MacroCategoryMatrix categories={categories} />
-      <MarketImplicationStrip items={topMarkets.length ? topMarkets : ['CPI', 'Fed', 'Growth']} />
       <MacroMarketList items={items} />
-      <SourceStack sources={payload?.sources} labels={{ gammaEvents: 'Gamma', gammaSearch: 'Search' }} />
-      <div className="wm-macro-map-footer">
-        <span>{(payload?.sources?.gammaEvents || payload?.status || 'warming').toUpperCase()}</span>
-        <span>{(payload?.cacheMode || 'snapshot').toUpperCase()}</span>
-        <span>{formatRelative(payload?.generatedAt)}</span>
-      </div>
     </Panel>
   );
 }

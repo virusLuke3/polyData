@@ -5,7 +5,7 @@ import type { RuntimeCpiCalendarItem, RuntimeCpiReleaseCalendarPayload, RuntimeP
 import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from '../macro-intel';
+import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from '../macro-intel';
 import type { PanelGlyphName } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
@@ -62,16 +62,6 @@ function compactHours(value?: string | number | null) {
   return `${Math.round(hours / 24)}d`;
 }
 
-function EventMini({ label, item }: { label: string; item?: RuntimeCpiCalendarItem | null }) {
-  return (
-    <div className="wm-cpi-calendar-mini">
-      <span>{label}</span>
-      <strong>{item ? dateShortLabel(item.releaseAt) : '--'}</strong>
-      <em>{item?.referencePeriod || item?.title || 'No upcoming release'}</em>
-    </div>
-  );
-}
-
 function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
   const kind = String(item.kind || '').toLowerCase();
   return (
@@ -94,11 +84,10 @@ function EventRow({ item }: { item: RuntimeCpiCalendarItem }) {
   );
 }
 
-function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeCpiReleaseCalendarPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+function CpiReleaseCalendarPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeCpiReleaseCalendarPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
-  const linkedMarkets = linkedMacroMarkets(macroPayload, ['cpi', 'fed']);
   const riskTone = signalToneClass(summary?.signal || summary?.risk);
   return (
     <Panel
@@ -158,22 +147,6 @@ function CpiReleaseCalendarPanel({ payload, macroPayload }: { payload?: RuntimeC
           <em>No upcoming CPI/PCE/FOMC/NFP rows are cached yet.</em>
         </div>
       )}
-      <MarketImplicationStrip items={['CPI bucket', 'PCE/Core PCE', 'Fed decision', `${probabilityLabel(summary?.baselineProbability)} PMKT baseline`]} />
-      <div className="wm-cpi-calendar-mini-grid">
-        <EventMini label="Next CPI" item={summary?.nextCpi} />
-        <EventMini label="Next PCE" item={summary?.nextPce} />
-        <EventMini label="NFP" item={summary?.nextNfp} />
-        <EventMini label="FOMC" item={summary?.nextFomc} />
-      </div>
-      <div className="wm-cpi-calendar-baseline">
-        <span>CONSENSUS</span>
-        <strong>{payload?.consensus?.status === 'optional-unavailable' ? 'Consensus unavailable' : payload?.consensus?.label || 'Unavailable'}</strong>
-        <em>{payload?.baseline?.label || 'No active CPI Polymarket baseline'}</em>
-      </div>
-      <LinkedMarketRegistry title="PMKT release markets" items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <div className="wm-cpi-calendar-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
-      </div>
     </Panel>
   );
 }

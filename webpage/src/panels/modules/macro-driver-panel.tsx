@@ -1,8 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeMacroDriverItem, RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
-import { formatRelative } from '../shared/formatters';
-import { LinkedMarketRegistry, MarketImplicationStrip, PanelGlyph, RowGlyph, StatusBadge, linkedMacroMarkets, signalToneClass } from './macro-intel';
+import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass } from './macro-intel';
 import type { PanelGlyphName } from './macro-intel';
 
 export type MacroDriverConfig = {
@@ -74,12 +73,11 @@ function MacroDriverRow({ item }: { item: RuntimeMacroDriverItem }) {
   );
 }
 
-export function MacroDriverPanel({ config, payload, macroPayload }: { config: MacroDriverConfig; payload?: RuntimeMacroDriverPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload }: { config: MacroDriverConfig; payload?: RuntimeMacroDriverPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const signalTone = signalToneClass(summary?.signal || summary?.bias || payload?.status);
-  const linkedMarkets = linkedMacroMarkets(macroPayload, summary?.linkedMarketCategories?.length ? summary.linkedMarketCategories : config.linkedCategories);
   const status = String(payload?.status || 'warming').toLowerCase();
   const badge = status === 'ok' ? undefined : status === 'degraded' ? 'PARTIAL' : 'WARMING';
   return (
@@ -116,13 +114,9 @@ export function MacroDriverPanel({ config, payload, macroPayload }: { config: Ma
             <strong>{summary?.signal || config.emptyTitle}</strong>
           </div>
         </div>
-        <em>{`${summary?.hotCount ?? 0} hot / ${summary?.coolCount ?? 0} cool / ${summary?.watchCount ?? 0} watch`}</em>
+        <em>{config.badge}</em>
       </div>
-      <div className="wm-macro-driver-strip">
-        <StatusBadge tone={signalTone}>{`HOT ${summary?.hotCount ?? 0}`}</StatusBadge>
-        <StatusBadge tone="cool">{`COOL ${summary?.coolCount ?? 0}`}</StatusBadge>
-        <StatusBadge tone="watch">{`WATCH ${summary?.watchCount ?? 0}`}</StatusBadge>
-      </div>
+      <MacroAlertStrip hot={summary?.hotCount} cool={summary?.coolCount} watch={summary?.watchCount} />
       <div className="wm-macro-driver-list">
         {items.length ? items.map((item) => <MacroDriverRow key={item.key || item.seriesId || item.label || 'macro-driver'} item={item} />) : (
           <div className="wm-empty-state">
@@ -130,19 +124,6 @@ export function MacroDriverPanel({ config, payload, macroPayload }: { config: Ma
             <em>Seed cache has not warmed this panel yet.</em>
           </div>
         )}
-      </div>
-      {summary?.topMover ? (
-        <div className="wm-macro-driver-top">
-          <RowGlyph icon={asGlyph(summary.topMover.icon)} tone={rowTone(summary.topMover)} label="Top mover" />
-          <span>TOP MOVER</span>
-          <strong>{summary.topMover.label || 'Macro driver'}</strong>
-          <em>{changeLabel(summary.topMover)} / {formatRelative(summary.topMover.date)}</em>
-        </div>
-      ) : null}
-      <MarketImplicationStrip items={config.implicationItems} />
-      <LinkedMarketRegistry title={config.linkedTitle} items={linkedMarkets} emptyLabel="Awaiting macro map" />
-      <div className="wm-macro-driver-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
       </div>
     </Panel>
   );
