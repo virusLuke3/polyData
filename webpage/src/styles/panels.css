@@ -228,9 +228,21 @@
   will-change: transform, opacity, box-shadow;
 }
 
+.wm-panel.wm-panel-drag-ghost {
+  height: auto;
+  min-height: 0;
+  border-color: rgba(183, 215, 255, 0.72);
+  background: linear-gradient(180deg, rgba(34, 37, 42, 0.95) 0%, rgba(16, 19, 23, 0.92) 100%);
+}
+
 .wm-panel-drag-ghost.dragging-source {
   opacity: 0.96;
   filter: saturate(1.12) brightness(1.14);
+}
+
+.wm-panel.wm-panel-drag-ghost,
+.wm-panel.wm-panel-drag-ghost * {
+  opacity: 1;
 }
 
 .wm-panel-drag-ghost .wm-panel {
