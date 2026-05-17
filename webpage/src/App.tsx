@@ -844,6 +844,8 @@ export function App() {
     selectedMarketGroupChartRange,
     setSelectedMarketGroupChartRange,
     selectedMarket,
+    selectedWeatherCityId,
+    setSelectedWeatherCityId,
     bundle,
     health,
     globalTrades: currentGlobalTrades,

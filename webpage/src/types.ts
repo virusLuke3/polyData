@@ -1130,6 +1130,8 @@ export type PanelRenderContext = {
   selectedMarketGroupChartRange: MarketGroupChartRange;
   setSelectedMarketGroupChartRange: (range: MarketGroupChartRange) => void;
   selectedMarket: MarketSummary | null;
+  selectedWeatherCityId: string | null;
+  setSelectedWeatherCityId: (cityId: string | null) => void;
   bundle: WorkspaceBundle | null;
   health: SystemHealth | null;
   globalTrades: TradeRow[];

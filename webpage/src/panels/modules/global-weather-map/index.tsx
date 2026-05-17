@@ -91,13 +91,36 @@ function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
   );
 }
 
-function TemperatureCard({ city }: { city: RuntimeGlobalWeatherCity }) {
+function TemperatureCard({
+  city,
+  selected,
+  onSelectCity,
+}: {
+  city: RuntimeGlobalWeatherCity;
+  selected: boolean;
+  onSelectCity: (cityId: string) => void;
+}) {
   const top = bestBin(city);
   const unit = city.unit || top?.unit || '';
   const coverage = quoteCoverage(city);
   const hasMarket = Boolean(city.marketUrl || top);
+  const cityId = String(city.cityId || '');
+  const selectCity = () => {
+    if (cityId) onSelectCity(cityId);
+  };
   return (
-    <article className={`wm-temp-city-card ${cityTone(city)}`}>
+    <article
+      className={`wm-temp-city-card ${cityTone(city)} ${selected ? 'selected' : ''}`.trim()}
+      role="button"
+      tabIndex={0}
+      onClick={selectCity}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectCity();
+        }
+      }}
+    >
       <div className="wm-temp-city-main">
         <div>
           <strong>{city.city || '--'}</strong>
@@ -123,10 +146,19 @@ function TemperatureCard({ city }: { city: RuntimeGlobalWeatherCity }) {
   );
 }
 
-function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMapPayload | null }) {
+function TemperatureMonitorPanel({
+  payload,
+  selectedWeatherCityId,
+  onSelectCity,
+}: {
+  payload?: RuntimeGlobalWeatherMapPayload | null;
+  selectedWeatherCityId?: string | null;
+  onSelectCity: (cityId: string | null) => void;
+}) {
   const items = [...(payload?.items || [])].sort((a, b) => {
     return citySortValue(b) - citySortValue(a);
   });
+  const selectedId = selectedWeatherCityId || items[0]?.cityId || null;
   return (
     <Panel
       title="GLOBAL TEMP MONITOR"
@@ -136,7 +168,14 @@ function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMa
       dataPanelId="global-temperature-monitor"
     >
       <div className="wm-temp-city-list">
-        {items.length ? items.map((city) => <TemperatureCard key={String(city.cityId || city.city)} city={city} />) : (
+        {items.length ? items.map((city) => (
+          <TemperatureCard
+            key={String(city.cityId || city.city)}
+            city={city}
+            selected={String(city.cityId || '') === String(selectedId || '')}
+            onSelectCity={onSelectCity}
+          />
+        )) : (
           <div className="wm-weather-table-empty">Weather seed warming. Live city temperatures will appear automatically.</div>
         )}
       </div>
@@ -147,7 +186,13 @@ function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMa
 const renderers: PanelRenderMap = {
   'global-temperature-monitor': {
     size: 'wide',
-    render: (ctx) => <TemperatureMonitorPanel payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined} />,
+    render: (ctx) => (
+      <TemperatureMonitorPanel
+        payload={ctx.runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined}
+        selectedWeatherCityId={ctx.selectedWeatherCityId}
+        onSelectCity={ctx.setSelectedWeatherCityId}
+      />
+    ),
   },
 };
 

@@ -29,6 +29,8 @@ import { panel as polymarketMacroMap } from './polymarket-macro-map';
 import { panel as cpiReleaseCalendar } from './cpi-release-calendar';
 import { panel as energyGasolineShock } from './energy-gasoline-shock';
 import { panel as globalTemperatureMonitor } from './global-weather-map';
+import { panel as weatherCitySnapshot } from './weather-city-snapshot';
+import { panel as weatherQuoteDetail } from './weather-quote-detail';
 import { panel as weatherNews } from './weather-news';
 import { panel as foodRetailBasketPressure } from './food-retail-basket-pressure';
 import { panel as supplyTariffImportWatch } from './supply-tariff-import-watch';
@@ -80,6 +82,8 @@ export const PANEL_MODULES: PanelModule[] = [
   cpiReleaseCalendar,
   energyGasolineShock,
   globalTemperatureMonitor,
+  weatherCitySnapshot,
+  weatherQuoteDetail,
   weatherNews,
   foodRetailBasketPressure,
   supplyTariffImportWatch,
