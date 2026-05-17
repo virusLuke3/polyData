@@ -9,7 +9,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from telegram.api_client import resolve_polydata_api_base
 from telegram.config import TelegramSettings, TopicConfig
-from telegram.formatters import format_nba_scoreboard, format_panel_snapshot, format_weather_map, format_weather_news
+from telegram.formatters import (
+    format_alpha_signal,
+    format_latest_content,
+    format_nba_scoreboard,
+    format_panel_snapshot,
+    format_weather_map,
+    format_weather_news,
+)
 from telegram.models import MessageCandidate
 from telegram.publisher import publish_candidates
 from telegram.state import PublishState
@@ -101,6 +108,47 @@ def test_weather_formatters_emit_market_and_warning_only():
     assert any(message.priority == "high" and "YES 37c" in message.text for message in map_messages)
     assert len(news_messages) == 1
     assert news_messages[0].priority == "high"
+
+
+def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
+    news_message = format_latest_content(
+        {
+            "items": [
+                {
+                    "id": "n1",
+                    "title": "Fed decision moves markets",
+                    "source": "Reuters",
+                    "summary": "Stocks and rates reacted after the decision.",
+                    "url": "https://news.example/fed",
+                }
+            ]
+        }
+    )[0]
+    alpha_message = format_alpha_signal(
+        {
+            "items": [
+                {
+                    "marketId": "m1",
+                    "title": "12 accounts put $400 on YES: Bitcoin above $100k?",
+                    "marketTitle": "Bitcoin above $100k?",
+                    "summary": "Clustered smart-wallet buying detected.",
+                    "outcome": "YES",
+                    "sourceTag": "whale-flow",
+                }
+            ]
+        }
+    )[0]
+
+    assert "#News" in news_message.text
+    assert "Vibe:" in news_message.text
+    assert "Source: https://news.example/fed" in news_message.text
+    assert news_message.link_preview is True
+
+    assert "#Alpha" in alpha_message.text
+    assert "#Polymarket" in alpha_message.text
+    assert "Vibe:" in alpha_message.text
+    assert "Market: https://polymarket.com/search?query=Bitcoin+above+%24100k%3F" in alpha_message.text
+    assert alpha_message.link_preview is True
 
 
 def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
