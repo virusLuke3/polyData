@@ -2912,6 +2912,148 @@ body.panel-resize-active iframe {
   text-transform: uppercase;
 }
 
+.wm-content-feed-panel .wm-panel-body {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  overflow-x: hidden;
+}
+
+.wm-content-feed-panel .wm-intel-list {
+  gap: 0;
+}
+
+.wm-content-feed-panel .wm-intel-card {
+  position: relative;
+  min-width: 0;
+  padding: 9px 0 10px;
+  border: 0;
+  border-bottom: 1px solid #252525;
+  border-left: 2px solid transparent;
+  background: transparent;
+  display: grid;
+  gap: 6px;
+}
+
+.wm-content-feed-panel .wm-intel-card:last-child {
+  border-bottom: 0;
+}
+
+.wm-content-feed-panel .wm-intel-card.news,
+.wm-content-feed-panel .wm-intel-card.report,
+.wm-content-feed-panel .wm-intel-card.research {
+  border-left-color: #ff3b3b;
+  margin-left: -8px;
+  padding-left: 8px;
+}
+
+.wm-content-feed-panel .wm-intel-card.video {
+  border-left-color: #ff9f00;
+  margin-left: -8px;
+  padding-left: 8px;
+}
+
+.wm-content-feed-panel .wm-intel-card:hover {
+  border-left-color: #00d4ff;
+  background: rgba(0, 212, 255, 0.025);
+}
+
+.wm-content-feed-panel .wm-intel-topline {
+  justify-content: flex-start;
+}
+
+.wm-content-feed-panel .wm-intel-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 6px;
+}
+
+.wm-content-feed-panel .wm-intel-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(0, 212, 255, 0.42);
+  border-radius: 2px;
+  background: rgba(0, 212, 255, 0.18);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.18);
+}
+
+.wm-content-feed-panel .wm-news-source {
+  min-width: 0;
+  max-width: 19ch;
+  color: #7edcff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 10px rgba(126, 220, 255, 0.18);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-content-feed-panel .wm-intel-type {
+  padding: 1px 5px 2px;
+  border: 1px solid rgba(255, 59, 59, 0.75);
+  background: #ff3b3b;
+  color: #050505;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.wm-content-feed-panel .wm-intel-type.video {
+  border-color: rgba(255, 159, 0, 0.55);
+  background: rgba(255, 159, 0, 0.16);
+  color: #ffb13b;
+}
+
+.wm-content-feed-panel .wm-news-title {
+  display: -webkit-box;
+  color: #eef1ee;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.38;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-content-feed-panel .wm-intel-summary {
+  display: -webkit-box;
+  color: #c9c9c9;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-content-feed-panel .wm-news-meta {
+  gap: 8px;
+  color: #929292;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-transform: none;
+}
+
+.wm-content-feed-panel .wm-news-meta b {
+  color: #7edcff;
+  font-weight: 900;
+  text-decoration: underline;
+}
+
 .wm-oracle-event-top strong,
 .wm-oracle-header strong,
 .wm-score-card-head strong {
@@ -3682,23 +3824,160 @@ body.panel-resize-active iframe {
   font-size: 15px;
 }
 
+.wm-alpha-signal-panel .wm-panel-body {
+  font-family: var(--font-mono);
+}
+
+.wm-whale-feed {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  gap: 0;
+  font-family: var(--font-mono);
+}
+
+.wm-whale-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 0 7px;
+  border-bottom: 1px solid #252525;
+  color: #858b87;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+
+.wm-whale-tabs span {
+  padding-bottom: 7px;
+  margin-bottom: -8px;
+}
+
+.wm-whale-tabs .active {
+  border-bottom: 2px solid #7edcff;
+  color: #f2f4f2;
+}
+
+.wm-whale-list {
+  min-width: 0;
+  display: grid;
+  gap: 0;
+}
+
+.wm-whale-row {
+  min-width: 0;
+  padding: 9px 0 10px;
+  border: 0;
+  border-bottom: 1px solid #252525;
+  border-left: 2px solid transparent;
+  background: transparent;
+  display: grid;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.wm-whale-row.buy {
+  border-left-color: #ff3b3b;
+  margin-left: -8px;
+  padding-left: 8px;
+}
+
+.wm-whale-row.sell {
+  border-left-color: #ff9f00;
+  margin-left: -8px;
+  padding-left: 8px;
+}
+
+.wm-whale-row:last-child {
+  border-bottom: 0;
+}
+
+.wm-whale-row:hover {
+  border-left-color: #00d4ff;
+  background: rgba(0, 212, 255, 0.025);
+}
+
+.wm-whale-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #929292;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  text-transform: none;
+}
+
+.wm-whale-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(0, 212, 255, 0.42);
+  border-radius: 2px;
+  background: rgba(0, 212, 255, 0.18);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.18);
+}
+
+.wm-whale-meta i {
+  color: rgba(255, 255, 255, 0.22);
+  font-style: normal;
+}
+
+.wm-whale-meta strong {
+  color: #ff3b3b;
+  font-weight: 900;
+}
+
+.wm-whale-row.sell .wm-whale-meta strong {
+  color: #ffb13b;
+}
+
+.wm-whale-meta b {
+  margin-left: auto;
+  color: #f2f4f2;
+  font-size: 12px;
+}
+
+.wm-whale-title {
+  display: -webkit-box;
+  min-width: 0;
+  color: #eef1ee;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.38;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .wm-flow-watch-panel .wm-panel-body {
   padding: 8px;
+  display: grid;
+  align-content: start;
+  gap: 0;
+  overflow-x: hidden;
 }
 
 .wm-flow-watch-panel .wm-signal-list {
-  gap: 5px;
+  gap: 0;
 }
 
 .wm-flow-watch-panel .wm-trade-signal-card {
   grid-template-columns: 2px minmax(0, 1fr);
-  min-height: 95px;
-  border-color: #242424;
-  background-color: #141414;
+  min-height: 0;
+  border: 0;
+  border-bottom: 1px solid #252525;
+  background: transparent;
 }
 
 .wm-flow-watch-panel .wm-trade-signal-content {
-  padding: 8px 9px 7px 10px;
+  padding: 9px 0 10px 8px;
   gap: 6px;
 }
 
@@ -3711,23 +3990,35 @@ body.panel-resize-active iframe {
 }
 
 .wm-flow-watch-panel .wm-chip {
-  padding: 3px 8px;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 59, 59, 0.75);
+  border-radius: 0;
+  background: #ff3b3b;
+  color: #050505;
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  line-height: 1;
+}
+
+.wm-flow-watch-panel .wm-chip.critical {
+  border-color: rgba(255, 159, 0, 0.55);
+  background: rgba(255, 159, 0, 0.16);
+  color: #ffb13b;
 }
 
 .wm-flow-watch-panel .wm-trade-outcome {
-  color: #9b9f9c;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.8px;
+  color: #929292;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
 }
 
 .wm-flow-watch-panel .wm-signal-severity {
-  min-height: 20px;
-  padding: 0 7px;
+  min-height: 19px;
+  padding: 0 8px;
+  border-radius: 999px;
   font-size: 9px;
   letter-spacing: 0.9px;
 }
@@ -3737,30 +4028,35 @@ body.panel-resize-active iframe {
 }
 
 .wm-flow-watch-panel .wm-trade-signal-notional {
-  font-size: 17px;
-  letter-spacing: -0.25px;
+  color: #f2f4f2;
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .wm-flow-watch-panel .wm-trade-signal-market {
   display: -webkit-box;
   overflow: hidden;
-  color: #e2e4e3;
+  color: #eef1ee;
+  font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: 800;
-  line-height: 1.28;
-  letter-spacing: -0.1px;
+  font-weight: 900;
+  line-height: 1.38;
+  letter-spacing: 0;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
 .wm-flow-watch-panel .wm-trade-signal-meta {
-  gap: 7px;
-  color: #8d918e;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.55px;
+  gap: 8px;
+  color: #929292;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
   white-space: nowrap;
   overflow: hidden;
+  text-transform: none;
 }
 
 .wm-flow-watch-panel .wm-trade-signal-meta span {
@@ -3772,9 +4068,11 @@ body.panel-resize-active iframe {
 .wm-flow-watch-panel .wm-trade-signal-summary {
   display: -webkit-box;
   overflow: hidden;
-  color: #929793;
-  font-size: 11px;
-  line-height: 1.32;
+  color: #c9c9c9;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }

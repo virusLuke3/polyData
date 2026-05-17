@@ -255,17 +255,21 @@ function contentList(items: ContentItem[], emptyMessage: string) {
     <div className="wm-intel-list">
       {items.slice(0, 8).map((item, index) => {
         const tone = contentTone(item.contentType);
+        const typeLabel = (item.contentType || tone).toUpperCase();
         return (
           <a className={`wm-intel-card ${tone}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
             <div className="wm-intel-topline">
-              <div className="wm-news-source">{item.source || item.contentType || 'intel'}</div>
-              <span className={`wm-status-pill ${tone === 'news' ? 'positive' : 'muted'}`}>{(item.contentType || tone).toUpperCase()}</span>
+              <div className="wm-intel-meta">
+                <span className="wm-intel-dot" aria-hidden="true" />
+                <span className="wm-news-source">{item.source || item.contentType || 'intel'}</span>
+                <span className={`wm-intel-type ${tone}`}>{typeLabel}</span>
+              </div>
             </div>
             <div className="wm-news-title">{item.title || 'Untitled item'}</div>
             {item.summary ? <p className="wm-intel-summary">{item.summary}</p> : null}
             <div className="wm-news-meta">
               <span>{formatDate(item.publishedAt || null)}</span>
-              <span>{tone}</span>
+              <b>Read source</b>
             </div>
           </a>
         );
@@ -360,7 +364,7 @@ function signalAction(item: RuntimeTradeSignal) {
 function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
   return (
-    <div style={{ fontFamily: 'monospace', width: '100%' }}>
+    <div style={{ fontFamily: 'var(--font-mono), monospace', width: '100%' }}>
       {items.map((item, index) => {
         const isCluster = (item.addresses?.length || 0) > 1 || String(item.sourceLabel || '').toLowerCase().includes('cluster');
         const icon = isCluster ? '👥' : '🐳';
@@ -425,27 +429,28 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
               
               {/* Row 1: Header */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
-                <span style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255,255,255,0.5)' }}>
+                <span style={{ fontFamily: 'var(--font-mono), monospace', fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'rgba(255,255,255,0.54)' }}>
                   {sourceName}
                 </span>
-                <span style={{ fontSize: '10px', fontWeight: 'bold', color: dirColor }}>
+                <span style={{ fontFamily: 'var(--font-mono), monospace', fontSize: '10px', fontWeight: 900, color: dirColor }}>
                   {dirArrow} {bias.toUpperCase()}
                 </span>
-                <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto', flexShrink: 0 }}>
+                <span style={{ fontFamily: 'var(--font-mono), monospace', fontSize: '10px', fontWeight: 800, color: 'rgba(255,255,255,0.36)', marginLeft: 'auto', flexShrink: 0 }}>
                   {timeStr}
                 </span>
               </div>
 
               {/* Row 2: Summary */}
-              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.2, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'var(--font-mono), monospace', fontSize: '11px', fontWeight: 800, color: 'rgba(255,255,255,0.84)', lineHeight: 1.28, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3, overflow: 'hidden' }}>
                 {item.headline || item.summary || item.title || 'Signal activity detected'}
               </div>
 
               {/* Row 3: Market/Outcome Box */}
               {(item.marketTitle || (action.outcome && action.outcome !== 'Yes' && action.outcome !== 'No')) && (
                 <div style={{
+                  fontFamily: 'var(--font-mono), monospace',
                   fontSize: '10px',
-                  fontWeight: 'bold',
+                  fontWeight: 900,
                   marginTop: '2px',
                   padding: '2px 4px',
                   display: 'inline-block',
@@ -466,19 +471,19 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
                 {Number(volume) > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>${formatCompact(volume)}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900 }}>${formatCompact(volume)}</span>
                     <span style={{ marginTop: '-2px' }}>vol</span>
                   </div>
                 )}
                 {Number(count) > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>{count}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900 }}>{count}</span>
                     <span style={{ marginTop: '-2px' }}>trades</span>
                   </div>
                 )}
                 {Number(wallets) > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', fontSize: '10px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.8)' }}>{wallets}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 900 }}>{wallets}</span>
                     <span style={{ marginTop: '-2px' }}>wallet(s)</span>
                   </div>
                 )}
@@ -490,7 +495,8 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
                 <button style={{
                   marginLeft: 'auto',
                   fontSize: '9px',
-                  fontWeight: 'bold',
+                  fontFamily: 'var(--font-mono), monospace',
+                  fontWeight: 900,
                   padding: '4px 6px',
                   borderRadius: '2px',
                   cursor: 'pointer',
@@ -513,26 +519,14 @@ function alphaSignalList(items: RuntimeTradeSignal[], emptyMessage: string, onMa
 function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
   if (!items.length) return emptyState(emptyMessage);
   return (
-    <div style={{ fontFamily: 'monospace', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Tabs Header */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '16px', 
-        fontSize: '13px', 
-        color: '#888', 
-        borderBottom: '1px solid rgba(255,255,255,0.1)', 
-        padding: '0 12px',
-        marginBottom: '4px'
-      }}>
-        <div style={{ color: '#fff', borderBottom: '2px solid #22c55e', paddingBottom: '8px', marginBottom: '-1px', fontWeight: 'bold' }}>
-          Trades
-        </div>
-        <div style={{ cursor: 'pointer', paddingBottom: '8px' }}>Flow</div>
-        <div style={{ cursor: 'pointer', paddingBottom: '8px' }}>Signals</div>
+    <div className="wm-whale-feed">
+      <div className="wm-whale-tabs">
+        <span className="active">Trades</span>
+        <span>Flow</span>
+        <span>Signals</span>
       </div>
 
-      {/* Trades List */}
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="wm-whale-list">
         {items.map((item, index) => {
            let timeStr = formatRelative(item.timestamp || null);
            // clean up time format to look like '14m ago'
@@ -544,50 +538,25 @@ function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string, onM
            
            const side = String(item.side || 'BUY').toUpperCase();
            const isBuy = side === 'BUY';
-           const color = isBuy ? '#22c55e' : '#ef4444';
            const addressFull = item.txHash || item.addresses?.[0]?.address || 'unknown';
            const address = shortHash(addressFull, 5, 0).replace('...', '');
            
            return (
              <div
                key={`${item.txHash || 'trade'}-${index}`}
-               style={{ 
-                 borderLeft: `3px solid ${color}`, 
-                 borderBottom: '1px solid rgba(255,255,255,0.05)',
-                 padding: '10px 12px',
-                 cursor: 'pointer',
-                 display: 'flex',
-                 flexDirection: 'column',
-                 gap: '8px',
-                 background: 'transparent',
-                 transition: 'background 0.2s',
-               }}
+               className={`wm-whale-row ${isBuy ? 'buy' : 'sell'}`}
                onClick={() => item.marketId && onMarketSelect?.(item.marketId)}
              >
-               {/* Meta Row */}
-               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
-                 <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: color }} />
-                 <span style={{ fontFamily: 'monospace' }}>{address}</span>
-                 <span style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
+               <div className="wm-whale-meta">
+                 <span className="wm-whale-dot" />
+                 <span>{address}</span>
+                 <i>·</i>
                  <span>{timeStr}</span>
-                 <span style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
-                 <strong style={{ color: color }}>{side}</strong>
-                 <strong style={{ marginLeft: 'auto', color: '#fff', fontSize: '13px' }}>
-                   ${formatCompact(item.notional || 0)}
-                 </strong>
+                 <i>·</i>
+                 <strong>{side}</strong>
+                 <b>${formatCompact(item.notional || 0)}</b>
                </div>
-
-               {/* Title Row */}
-               <strong style={{ 
-                 fontSize: '14px', 
-                 lineHeight: 1.3, 
-                 color: 'rgba(255,255,255,0.9)',
-                 fontFamily: 'sans-serif',
-                 display: '-webkit-box', 
-                 WebkitBoxOrient: 'vertical', 
-                 WebkitLineClamp: 2, 
-                 overflow: 'hidden' 
-               }}>
+               <strong className="wm-whale-title">
                  {item.marketTitle || 'Unknown Market'}
                </strong>
              </div>
