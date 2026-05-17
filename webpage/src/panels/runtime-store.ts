@@ -28,5 +28,28 @@ export async function fetchPanelRuntimeData(
 
 export function mergeRuntimeData(current: PanelRuntimeData, patch: PanelRuntimeData): PanelRuntimeData {
   if (!Object.keys(patch).length) return current;
-  return { ...current, ...patch };
+  const next = { ...current };
+  for (const [panelId, value] of Object.entries(patch)) {
+    const previous = current[panelId];
+    if (panelId === 'global-temperature-monitor' && hasItems(previous) && isEmptyWarming(value)) {
+      continue;
+    }
+    next[panelId] = value;
+  }
+  return next;
+}
+
+function hasItems(value: unknown): boolean {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    Array.isArray((value as { items?: unknown[] }).items) &&
+    ((value as { items?: unknown[] }).items?.length || 0) > 0,
+  );
+}
+
+function isEmptyWarming(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as { items?: unknown[]; status?: unknown };
+  return (!Array.isArray(payload.items) || payload.items.length === 0) && String(payload.status || '').toLowerCase() === 'warming';
 }
