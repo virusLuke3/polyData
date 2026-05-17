@@ -99,7 +99,6 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('latest');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload?.items, sortMode]);
-  const hero = items[0];
   return (
     <Panel
       title="WEATHER NEWS"
@@ -121,28 +120,10 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
       className="wm-market-panel wm-weather-news-panel"
       dataPanelId="weather-news"
     >
-      <div className={`wm-weather-news-hero ${String(hero?.severity || 'normal').toLowerCase()}`}>
-        <div>
-          <span>Latest</span>
-          <strong>{payload?.summary?.warningCount ?? 0} warnings</strong>
-        </div>
-        <div>
-          <span>Cities</span>
-          <strong>{payload?.summary?.cityCount ?? 0}</strong>
-        </div>
-        <div>
-          <span>Top city</span>
-          <strong>{hero?.city || payload?.summary?.topCity || 'Global'}</strong>
-        </div>
-      </div>
       <div className="wm-weather-news-list">
         {items.length ? items.map((item) => <NewsItem key={item.id || `${item.city}-${item.title}`} item={item} />) : (
           <div className="wm-registry-empty"><strong>No weather headlines seeded</strong></div>
         )}
-      </div>
-      <div className="wm-weather-footer">
-        <span>{`Updated ${formatRelative(payload?.generatedAt)}`}</span>
-        <span>{payload?.cacheMode || 'seed'}</span>
       </div>
     </Panel>
   );

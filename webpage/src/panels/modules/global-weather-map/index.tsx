@@ -34,14 +34,6 @@ function priceLabel(value?: string | number | null) {
   return `${Math.round(parsed * 100)}%`;
 }
 
-function coverageRank(value?: string | null) {
-  const parts = String(value || '').split('/').map((part) => Number(part));
-  const quoted = parts[0] ?? NaN;
-  const total = parts[1] ?? NaN;
-  if (!Number.isFinite(quoted) || !Number.isFinite(total) || total <= 0) return 0;
-  return quoted / total;
-}
-
 function citySortValue(city: RuntimeGlobalWeatherCity) {
   return num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp) ?? -999;
 }
@@ -57,13 +49,6 @@ function cityTone(city: RuntimeGlobalWeatherCity) {
     if (high <= 7) return 'cool';
   }
   return 'neutral';
-}
-
-function eventStatus(city: RuntimeGlobalWeatherCity) {
-  const status = String(city.eventStatus || '').toLowerCase();
-  if (!city.eventSlug) return '--';
-  if (status === 'closed' || status === 'resolved') return 'Event Closed';
-  return 'Live';
 }
 
 function bestBin(city: RuntimeGlobalWeatherCity): RuntimeWeatherQuoteBin | null {
@@ -106,77 +91,79 @@ function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
   );
 }
 
-function TemperatureRow({ city }: { city: RuntimeGlobalWeatherCity }) {
+function TemperatureCard({ city }: { city: RuntimeGlobalWeatherCity }) {
   const top = bestBin(city);
   const unit = city.unit || top?.unit || '';
-  const event = eventStatus(city);
+  const coverage = quoteCoverage(city);
+  const hasMarket = Boolean(city.marketUrl || top);
   return (
-    <tr className={cityTone(city)}>
-      <td><button className="wm-weather-table-icon" type="button" aria-label={`Watch ${city.city || 'city'}`}>+</button></td>
-      <td>{city.marketUrl ? <a className="wm-weather-table-open" href={city.marketUrl} target="_blank" rel="noreferrer">OPEN</a> : <span className="wm-weather-table-open muted">--</span>}</td>
-      <td><strong>{city.city || '--'}</strong></td>
-      <td><MiniSpark city={city} /></td>
-      <td>{city.condition || '--'}</td>
-      <td>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)} or below</td>
-      <td>{tempLabel(city.todayHigh ?? city.daily?.[0]?.high, unit)}</td>
-      <td>{tempLabel(city.forecastHigh ?? city.todayHigh, unit)}</td>
-      <td>{top?.label || '--'}</td>
-      <td><span className={event === 'Live' ? 'wm-weather-live' : 'wm-weather-closed'}>{event}</span></td>
-      <td>{quoteCoverage(city)}</td>
-      <td>{formatRelative(city.updatedAt || city.hourly?.[0]?.time || null)}</td>
-      <td>{priceLabel(top?.midPriceYes)}</td>
-    </tr>
+    <article className={`wm-temp-city-card ${cityTone(city)}`}>
+      <div className="wm-temp-city-main">
+        <div>
+          <strong>{city.city || '--'}</strong>
+          <span>{city.condition || 'Weather update'}</span>
+        </div>
+        <b>{tempLabel(city.currentTemp ?? city.todayHigh, unit)}</b>
+      </div>
+      <MiniSpark city={city} />
+      <div className="wm-temp-city-stats">
+        <span><i>High</i>{tempLabel(city.forecastHigh ?? city.todayHigh, unit)}</span>
+        <span><i>Low</i>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</span>
+        <span><i>Updated</i>{formatRelative(city.updatedAt || city.hourly?.[0]?.time || null)}</span>
+      </div>
+      {hasMarket ? (
+        <div className="wm-temp-city-market">
+          {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Polymarket</a> : <span>Market</span>}
+          <span>{top?.label || 'Quote bins'}</span>
+          <b>{priceLabel(top?.midPriceYes)}</b>
+          <em>{coverage}</em>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
 function TemperatureMonitorPanel({ payload }: { payload?: RuntimeGlobalWeatherMapPayload | null }) {
   const items = [...(payload?.items || [])].sort((a, b) => {
-    const coverageDelta = coverageRank(b.quoteCoverage) - coverageRank(a.quoteCoverage);
-    if (Math.abs(coverageDelta) > 0.001) return coverageDelta;
     return citySortValue(b) - citySortValue(a);
   });
   const summary = payload?.summary;
+  const hottest = summary?.hottestCity || items[0];
+  const hottestUnit = hottest?.unit || '';
+  const marketCount = Number(summary?.liveMarketCount || 0);
   return (
     <Panel
       title="GLOBAL TEMP MONITOR"
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
-      count={`${summary?.mappedCount ?? items.length}/${summary?.cityCount ?? items.length}`}
+      count={tempLabel(hottest?.forecastHigh ?? hottest?.todayHigh ?? hottest?.currentTemp, hottestUnit)}
       className="wm-market-panel wm-global-temperature-monitor-panel"
       dataPanelId="global-temperature-monitor"
     >
-      <div className="wm-weather-table-meta">
-        <span>Selected date: {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '--'}</span>
-        <span>Last snapshot: {formatRelative(payload?.generatedAt)}</span>
-        <span>Sources: {Object.entries(payload?.sources || {}).map(([key, value]) => `${key}=${value}`).join(' / ') || '--'}</span>
+      <div className="wm-temp-monitor-hero">
+        <div>
+          <span>Hottest</span>
+          <strong>{hottest?.city || '--'}</strong>
+        </div>
+        <div>
+          <span>Forecast high</span>
+          <strong>{tempLabel(hottest?.forecastHigh ?? hottest?.todayHigh ?? hottest?.currentTemp, hottestUnit)}</strong>
+        </div>
+        <div>
+          <span>Updated</span>
+          <strong>{formatRelative(payload?.generatedAt)}</strong>
+        </div>
+        {marketCount > 0 ? (
+          <div>
+            <span>Markets</span>
+            <strong>{marketCount} live</strong>
+          </div>
+        ) : null}
       </div>
-      <div className="wm-weather-table-shell">
-        <table className="wm-weather-table">
-          <thead>
-            <tr>
-              <th>WL</th>
-              <th>PM</th>
-              <th>City</th>
-              <th>Mini</th>
-              <th>Condition</th>
-              <th>Lowest</th>
-              <th>Peak</th>
-              <th>WU High Forecast</th>
-              <th>Highest</th>
-              <th>Event Status</th>
-              <th>Quote Coverage</th>
-              <th>Last Updated</th>
-              <th>Top Yes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length ? items.map((city) => <TemperatureRow key={String(city.cityId || city.city)} city={city} />) : (
-              <tr>
-                <td colSpan={13} className="wm-weather-table-empty">Weather seed warming. The map will return stale or seed data while the background builder runs.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="wm-temp-city-list">
+        {items.length ? items.map((city) => <TemperatureCard key={String(city.cityId || city.city)} city={city} />) : (
+          <div className="wm-weather-table-empty">Weather seed warming. Live city temperatures will appear automatically.</div>
+        )}
       </div>
     </Panel>
   );
