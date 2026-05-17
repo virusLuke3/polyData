@@ -45,6 +45,7 @@ data/*.sqlite3-wal
 data/*.sqlite3-shm
 data/*.lock
 data/*.marker
+data/telegram_state.json
 
 runtime_logs/
 artifacts/

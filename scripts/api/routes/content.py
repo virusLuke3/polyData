@@ -3,6 +3,17 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 
 
+def _publish_latest_content(payload: dict) -> None:
+    try:
+        from telegram.runtime_bridge import publish_panel_snapshot
+    except Exception:
+        return
+    try:
+        publish_panel_snapshot("latest-content", payload)
+    except Exception:
+        return
+
+
 def create_content_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("content_routes", __name__)
 
@@ -17,6 +28,8 @@ def create_content_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/content/latest", methods=["GET"])
     def api_content_latest():
         limit = min(20, max(1, int(request.args.get("limit", 8))))
-        return jsonify(helpers["get_latest_content_payload"](limit=limit))
+        payload = helpers["get_latest_content_payload"](limit=limit)
+        _publish_latest_content(payload)
+        return jsonify(payload)
 
     return bp

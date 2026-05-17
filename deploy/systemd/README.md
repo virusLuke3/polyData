@@ -23,6 +23,7 @@ production services on one machine.
 - `polydata-whale-trades-seed.service`
 - `polydata-suspicious-trades-seed.service`
 - `polydata-bootstrap-seed.service`
+- `polydata-telegram-publisher.service`
 - `polydata.target`
 - `polydata.env.example`
 
@@ -92,6 +93,14 @@ journalctl --user-unit polydata-alpha-signal-seed -f
 journalctl --user-unit polydata-whale-trades-seed -f
 journalctl --user-unit polydata-suspicious-trades-seed -f
 journalctl --user-unit polydata-bootstrap-seed -f
+```
+
+The Telegram publisher is optional because it needs a bot token and channel
+ids. After filling `POLYDATA_TELEGRAM_*`, enable it explicitly:
+
+```bash
+systemctl --user enable --now polydata-telegram-publisher
+journalctl --user-unit polydata-telegram-publisher -f
 ```
 
 ## Notes
