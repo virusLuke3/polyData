@@ -1,7 +1,6 @@
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
-import { WorldFlatMap } from '@/components/WorldFlatMap';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
@@ -124,13 +123,12 @@ function weatherTempLabel(value?: string | number | null, unit?: string | null) 
   return `${Math.round(numeric)}°${unit || ''}`;
 }
 
-function WeatherMapModal({
+function WeatherInlineMap({
   payload,
   loading,
   error,
   selectedCityId,
   onSelectCity,
-  onClose,
   onRefresh,
 }: {
   payload?: RuntimeGlobalWeatherMapPayload | null;
@@ -138,34 +136,30 @@ function WeatherMapModal({
   error?: string | null;
   selectedCityId: string | null;
   onSelectCity: (cityId: string) => void;
-  onClose: () => void;
   onRefresh: () => void;
 }) {
   const items = payload?.items || [];
   const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
   return (
-    <div className="wm-modal-backdrop wm-weather-map-backdrop" onClick={onClose}>
-      <div className="wm-modal wm-weather-map-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="wm-weather-map-modal-header">
-          <div>
-            <span>Global Weather Map</span>
-            <strong>{payload?.summary?.mappedCount ?? items.length}/{payload?.summary?.cityCount ?? items.length} cities</strong>
-          </div>
-          <div className="wm-weather-map-modal-actions">
-            <span>{payload?.cacheMode || (loading ? 'loading' : 'seed')}</span>
-            <button type="button" onClick={onRefresh}>Refresh</button>
-            <button type="button" onClick={onClose}>Close</button>
-          </div>
+    <div className="wm-inline-weather-map">
+      <div className="wm-inline-weather-map-header">
+        <div>
+          <span>Global Weather Map</span>
+          <strong>{payload?.summary?.mappedCount ?? items.length}/{payload?.summary?.cityCount ?? items.length} cities</strong>
         </div>
-        {error ? <div className="wm-weather-map-modal-error">{error}</div> : null}
-        <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
-          <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={onSelectCity} height={620} />
-        </Suspense>
-        <div className="wm-weather-map-modal-footer">
-          <span>{selected?.city || 'Weather city'}</span>
-          <strong>{weatherTempLabel(selected?.currentTemp, selected?.unit)}</strong>
-          <em>{selected?.condition || 'Condition pending'} / high {weatherTempLabel(selected?.forecastHigh ?? selected?.todayHigh, selected?.unit)} / {selected?.quoteCoverage || '0/0'} quotes</em>
+        <div className="wm-inline-weather-map-actions">
+          <span>{payload?.cacheMode || (loading ? 'loading' : 'seed')}</span>
+          <button type="button" onClick={onRefresh}>Refresh</button>
         </div>
+      </div>
+      {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
+      <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
+        <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={onSelectCity} height={620} />
+      </Suspense>
+      <div className="wm-inline-weather-map-footer">
+        <span>{selected?.city || 'Weather city'}</span>
+        <strong>{weatherTempLabel(selected?.currentTemp, selected?.unit)}</strong>
+        <em>{selected?.condition || 'Condition pending'} / high {weatherTempLabel(selected?.forecastHigh ?? selected?.todayHigh, selected?.unit)} / {selected?.quoteCoverage || '0/0'} quotes</em>
       </div>
     </div>
   );
@@ -331,7 +325,6 @@ export function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showWeatherMap, setShowWeatherMap] = useState(false);
   const [weatherMapPayload, setWeatherMapPayload] = useState<RuntimeGlobalWeatherMapPayload | null>(null);
   const [weatherMapLoading, setWeatherMapLoading] = useState(false);
   const [weatherMapError, setWeatherMapError] = useState<string | null>(null);
@@ -933,17 +926,11 @@ export function App() {
     }
   };
 
-  const openWeatherMap = () => {
-    setShowWeatherMap(true);
-    void loadWeatherMap(false);
-  };
-
-  const openWeather2d = () => {
-    setViewMode('2d');
-    setMapZoom((current) => clampMapZoom(Math.min(2, current)));
-    setNotice('Weather map opened');
-    openWeatherMap();
-  };
+  useEffect(() => {
+    if (viewMode === '2d') {
+      void loadWeatherMap(false);
+    }
+  }, [viewMode]);
 
   const zoomIn = () => setMapZoom((current) => clampMapZoom(current + 1));
   const zoomOut = () => setMapZoom((current) => clampMapZoom(current - 1));
@@ -988,7 +975,7 @@ export function App() {
             <div className="wm-map-title">Global Situation</div>
             <div className="wm-map-clock">{currentUtcClock(now)}</div>
             <div className="wm-map-view-toggle">
-              <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={openWeather2d}>2D</button>
+              <button type="button" className={viewMode === '2d' ? 'active' : ''} onClick={() => changeViewMode('2d')}>2D</button>
               <button type="button" className={viewMode === '3d' ? 'active' : ''} onClick={() => changeViewMode('3d')}>3D</button>
             </div>
           </div>
@@ -1041,16 +1028,13 @@ export function App() {
                     zoomLevel={mapZoom}
                   />
                 ) : (
-                  <WorldFlatMap
-                    key={`flat:${region}`}
-                    markets={displayMarkets}
-                    selectedMarket={selectedMarket}
-                    recentTrades={currentGlobalTrades}
-                    recentOracle={currentGlobalOracle}
-                    contentItems={currentLatestContent}
-                    region={region}
-                    zoomLevel={mapZoom}
-                    onOpenWeatherMap={openWeatherMap}
+                  <WeatherInlineMap
+                    payload={weatherMapPayload || (runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+                    loading={weatherMapLoading}
+                    error={weatherMapError}
+                    selectedCityId={selectedWeatherCityId}
+                    onSelectCity={setSelectedWeatherCityId}
+                    onRefresh={() => void loadWeatherMap(true)}
                   />
                 )}
 
@@ -1193,17 +1177,6 @@ export function App() {
         </div>
       ) : null}
 
-      {showWeatherMap ? (
-        <WeatherMapModal
-          payload={weatherMapPayload}
-          loading={weatherMapLoading}
-          error={weatherMapError}
-          selectedCityId={selectedWeatherCityId}
-          onSelectCity={setSelectedWeatherCityId}
-          onClose={() => setShowWeatherMap(false)}
-          onRefresh={() => void loadWeatherMap(true)}
-        />
-      ) : null}
     </div>
   );
 }

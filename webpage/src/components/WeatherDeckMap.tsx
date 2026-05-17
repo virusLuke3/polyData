@@ -39,6 +39,7 @@ type WeatherDeckMapProps = {
   onSelectCity?: (cityId: string) => void;
   height?: number;
   interactive?: boolean;
+  showLabels?: boolean;
 };
 
 const IMPORTANT_CITY_IDS = new Set([
@@ -61,6 +62,12 @@ const IMPORTANT_CITY_IDS = new Set([
 
 const FALLBACK_W = 1200;
 const FALLBACK_H = 620;
+
+type WeatherScreenPoint = WeatherMapPoint & {
+  x: number;
+  y: number;
+  visible: boolean;
+};
 
 function numberValue(value?: string | number | null) {
   const numeric = Number(value);
@@ -124,6 +131,8 @@ function labelColor(point: WeatherMapPoint, selectedCityId?: string | null): [nu
 
 function shouldShowLabel(point: WeatherMapPoint, selectedCityId?: string | null) {
   return point.id === selectedCityId
+    || point.forecastHigh != null
+    || point.currentTemp != null
     || Boolean(point.topBinLabel)
     || point.temperatureTone === 'hot'
     || IMPORTANT_CITY_IDS.has(point.id);
@@ -223,6 +232,51 @@ function tooltipFor(point: WeatherMapPoint) {
   `;
 }
 
+function projectScreenPoints(map: MapLibreMap | null, points: WeatherMapPoint[]): WeatherScreenPoint[] {
+  if (!map) return [];
+  const canvas = map.getCanvas();
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  return points.map((point) => {
+    const projected = map.project([point.lon, point.lat]);
+    return {
+      ...point,
+      x: projected.x,
+      y: projected.y,
+      visible: projected.x > -90 && projected.x < width + 90 && projected.y > -60 && projected.y < height + 60,
+    };
+  });
+}
+
+function WeatherHtmlLabels({
+  points,
+  selectedCityId,
+  onSelectCity,
+}: {
+  points: WeatherScreenPoint[];
+  selectedCityId?: string | null;
+  onSelectCity?: (cityId: string) => void;
+}) {
+  return (
+    <div className="wm-weather-html-label-layer" aria-hidden="true">
+      {points.filter((point) => point.visible && shouldShowLabel(point, selectedCityId)).map((point) => (
+        <button
+          type="button"
+          key={`weather-label-${point.id}`}
+          className={`wm-weather-html-label ${point.temperatureTone} ${point.marketTone} ${point.id === selectedCityId ? 'selected' : ''}`}
+          style={{
+            transform: `translate(${Math.round(point.x + point.labelDx)}px, ${Math.round(point.y + point.labelDy)}px)`,
+          }}
+          onClick={() => onSelectCity?.(point.id)}
+        >
+          <strong>{point.city}</strong>
+          <span>{point.sublabel}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { points: WeatherMapPoint[]; selectedCityId?: string | null; onSelectCity?: (cityId: string) => void }) {
   const { graticulePath, worldPath, projectedPoints } = useMemo(() => {
     const projection = geoEquirectangular();
@@ -274,20 +328,26 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
   );
 }
 
-export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, height = 320, interactive = true }: WeatherDeckMapProps) {
+export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, height = 320, interactive = true, showLabels = true }: WeatherDeckMapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectRef = useRef(onSelectCity);
+  const pointsRef = useRef<WeatherMapPoint[]>([]);
   const fallbackAppliedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
+  const [screenPoints, setScreenPoints] = useState<WeatherScreenPoint[]>([]);
   const points = useMemo(() => normalizePoints(items), [items]);
 
   useEffect(() => {
     onSelectRef.current = onSelectCity;
   }, [onSelectCity]);
+
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
 
   useEffect(() => {
     const host = mapHostRef.current;
@@ -308,6 +368,9 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
       canvasContextAttributes: { powerPreference: 'high-performance' },
     });
     mapRef.current = map;
+    const syncScreenPoints = () => {
+      setScreenPoints(projectScreenPoints(map, pointsRef.current));
+    };
 
     const overlay = new MapboxOverlay({
       interleaved: false,
@@ -326,11 +389,17 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     map.on('load', () => {
       map.addControl(overlay as unknown as maplibregl.IControl);
       map.resize();
+      syncScreenPoints();
     });
 
     map.on('idle', () => {
       setMapReady(true);
+      syncScreenPoints();
     });
+
+    map.on('move', syncScreenPoints);
+    map.on('zoom', syncScreenPoints);
+    map.on('resize', syncScreenPoints);
 
     let tileErrorCount = 0;
     const fallbackTimer = window.setTimeout(() => {
@@ -360,6 +429,9 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
       window.clearTimeout(fallbackTimer);
       resizeObserver.disconnect();
       map.off('error', onError);
+      map.off('move', syncScreenPoints);
+      map.off('zoom', syncScreenPoints);
+      map.off('resize', syncScreenPoints);
       overlay.finalize();
       overlayRef.current = null;
       map.remove();
@@ -375,12 +447,14 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
         if (info.object?.id) onSelectRef.current?.(info.object.id);
       },
     });
+    setScreenPoints(projectScreenPoints(mapRef.current, points));
   }, [points, selectedCityId]);
 
   return (
     <div ref={rootRef} className="wm-weather-deck-map" style={{ height: `${height}px` }}>
       {(!mapReady || mapFailed) ? <WeatherStaticFallback points={points} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
       <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady && !mapFailed ? 'ready' : ''}`} />
+      {showLabels && mapReady && !mapFailed ? <WeatherHtmlLabels points={screenPoints} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>

@@ -5259,6 +5259,73 @@
   font-size: 9px;
 }
 
+.wm-weather-html-label-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.wm-weather-html-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-width: 58px;
+  max-width: 112px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 168, 0, 0.22);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #73d8ff;
+  font-family: var(--font-mono);
+  text-align: left;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+}
+
+.wm-weather-html-label strong,
+.wm-weather-html-label span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-weather-html-label strong {
+  color: #73d8ff;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+}
+
+.wm-weather-html-label span {
+  color: #ffd772;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  margin-top: 1px;
+}
+
+.wm-weather-html-label.hot span {
+  color: #ffb073;
+}
+
+.wm-weather-html-label.cool span {
+  color: #80eadc;
+}
+
+.wm-weather-html-label.market,
+.wm-weather-html-label.watch {
+  border-color: rgba(190, 154, 255, 0.48);
+}
+
+.wm-weather-html-label.selected {
+  border-color: rgba(255, 245, 190, 0.84);
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 4;
+}
+
 .wm-weather-deck-status {
   position: absolute;
   right: 8px;
