@@ -1114,13 +1114,23 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1 1 auto;
   min-height: 0;
+}
+
+.wm-focus-book {
+  gap: 9px;
+  overflow: hidden;
 }
 
 .wm-focus-panel .wm-panel-body {
   padding: 10px;
   display: flex;
   flex-direction: column;
+}
+
+.wm-focus-book-panel .wm-panel-body {
+  overflow: hidden;
 }
 
 .wm-focus-header-note {
@@ -1875,6 +1885,7 @@ body {
 }
 
 .wm-focus-book-topbar {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -1947,6 +1958,7 @@ body {
 }
 
 .wm-focus-book-overview {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
@@ -2007,9 +2019,10 @@ body {
 
 .wm-focus-book-ladder {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(30px, auto) minmax(0, 1fr);
+  gap: 7px;
+  flex: 1 1 auto;
   min-height: 0;
   padding: 7px;
   border: 1px solid rgba(126, 220, 255, 0.13);
@@ -2036,9 +2049,13 @@ body {
 .wm-focus-book-side {
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   border: 1px solid #202829;
   background: #0f1112;
+  overflow: hidden;
   animation: wm-book-side-enter 260ms ease both;
 }
 
@@ -2047,11 +2064,13 @@ body {
 }
 
 .wm-focus-book-side-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  min-height: 27px;
+  padding: 5px 8px;
   border-bottom: 1px solid #202829;
   font-family: var(--font-mono);
 }
@@ -2082,10 +2101,11 @@ body {
 }
 
 .wm-focus-book-header {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(58px, 0.8fr) minmax(62px, 1fr) minmax(72px, 1fr);
   gap: 8px;
-  padding: 5px 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid #1d2425;
   color: #6f7b7b;
   font-family: var(--font-mono);
@@ -2102,6 +2122,10 @@ body {
 
 .wm-focus-book-rows {
   display: grid;
+  grid-auto-rows: minmax(20px, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .wm-focus-book-row {
@@ -2110,7 +2134,7 @@ body {
   grid-template-columns: minmax(58px, 0.8fr) minmax(62px, 1fr) minmax(72px, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 26px;
+  min-height: 0;
   padding: 0 8px;
   overflow: hidden;
   font-family: var(--font-mono);
@@ -2192,11 +2216,13 @@ body {
 
 .wm-focus-book-mid {
   position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  min-height: 30px;
+  padding: 6px 10px;
   font-family: var(--font-mono);
   font-size: var(--wm-book-mid-size);
   border: 1px solid rgba(126, 220, 255, 0.15);
