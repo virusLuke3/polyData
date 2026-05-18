@@ -986,16 +986,34 @@ export function App() {
         ));
         setLoading(false);
 
+        const focusFirstGroupIfInitial = (groups: MarketGroupItem[]) => {
+          const selectionStillInitial = !selectedMarketGroupIdRef.current && selectedMarketIdRef.current === initialDefaultMarketId;
+          if (!selectionStillInitial) return false;
+          const firstGroup = pickDefaultMarketGroup(groups);
+          if (!firstGroup) return false;
+          focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
+          return true;
+        };
+
+        void fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSortRef.current)
+          .then((marketGroupsPayload) => {
+            if (cancelled) return;
+            const groups = marketGroupsPayload.items || [];
+            setMarketGroups(groups);
+            focusFirstGroupIfInitial(groups);
+          })
+          .catch(() => {
+            // The full runtime refresh below still retries market groups and keeps the workspace hydrated.
+          });
+
         void refreshRuntimePanels({ bootstrapPayload, activePanelIds: immediatePanelIds })
           .then(({ marketsPayload, marketGroupsPayload }) => {
             if (cancelled) return;
-            const selectionStillInitial = !selectedMarketGroupIdRef.current && selectedMarketIdRef.current === initialDefaultMarketId;
-            if (!selectionStillInitial) return;
-            const firstGroup = pickDefaultMarketGroup(marketGroupsPayload?.items || []);
-            if (firstGroup) {
-              focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
+            if (focusFirstGroupIfInitial(marketGroupsPayload?.items || [])) {
               return;
             }
+            const selectionStillInitial = !selectedMarketGroupIdRef.current && selectedMarketIdRef.current === initialDefaultMarketId;
+            if (!selectionStillInitial) return;
             const marketItems = marketsPayload?.items || bootstrapPayload.activeMarketsPreview || [];
             const nextMarketId = pickDefaultMarketId(marketItems, bootstrapPayload.featuredMarket);
             selectedMarketIdRef.current = nextMarketId;
