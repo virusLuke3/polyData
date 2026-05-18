@@ -10,10 +10,51 @@ type PanelProps = {
   headerOverlay?: ComponentChildren;
   className?: string;
   dataPanelId?: string;
+  loading?: boolean;
+  loadingLabel?: string;
+  loadingDetail?: string;
   children: ComponentChildren;
 };
 
-export function Panel({ title, badge, count, status = 'live', titleControls, controls, headerOverlay, className, dataPanelId, children }: PanelProps) {
+type PanelLoadingProps = {
+  label?: string;
+  detail?: string;
+  className?: string;
+};
+
+export function PanelLoading({ label = '加载中...', detail = '正在同步实时数据', className }: PanelLoadingProps) {
+  return (
+    <div className={`wm-panel-loading${className ? ` ${className}` : ''}`} role="status" aria-live="polite">
+      <div className="wm-panel-loading-radar" aria-hidden="true">
+        <span className="wm-panel-loading-sweep" />
+        <span className="wm-panel-loading-dot" />
+      </div>
+      <strong>{label}</strong>
+      {detail ? <em>{detail}</em> : null}
+      <div className="wm-panel-loading-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
+export function Panel({
+  title,
+  badge,
+  count,
+  status = 'live',
+  titleControls,
+  controls,
+  headerOverlay,
+  className,
+  dataPanelId,
+  loading = false,
+  loadingLabel,
+  loadingDetail,
+  children,
+}: PanelProps) {
   return (
     <section className={`wm-panel${className ? ` ${className}` : ''}`} data-panel-id={dataPanelId}>
       <header className="wm-panel-header">
@@ -28,7 +69,9 @@ export function Panel({ title, badge, count, status = 'live', titleControls, con
         </div>
       </header>
       {headerOverlay ? <div className="wm-panel-header-overlay">{headerOverlay}</div> : null}
-      <div className="wm-panel-body">{children}</div>
+      <div className="wm-panel-body">
+        {loading ? <PanelLoading label={loadingLabel} detail={loadingDetail} /> : children}
+      </div>
     </section>
   );
 }

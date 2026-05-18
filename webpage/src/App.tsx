@@ -2,6 +2,7 @@ import { type ComponentChildren } from 'preact';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
+import { PanelLoading } from '@/components/Panel';
 import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
@@ -100,6 +101,19 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
 const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
+const MARKET_WORKSPACE_PANEL_IDS = new Set([
+  'market-summary',
+  'featured-market',
+  'price-implications',
+  'price-chart',
+  'sample-chain-trades',
+  'lob-depth',
+  'oracle-timeline',
+  'related-news',
+  'related-video',
+  'report-feed',
+  'research-feed',
+]);
 const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 const PANEL_ROW_RESIZE_STEP = 170;
 const PANEL_COL_RESIZE_STEP = 260;
@@ -385,6 +399,7 @@ function PanelWorkspaceSlot({
   size,
   layoutPrefs,
   children,
+  loading = false,
   className = '',
   layoutManaged = true,
   resizeEnabled = true,
@@ -396,6 +411,7 @@ function PanelWorkspaceSlot({
   size: PanelSizeHint;
   layoutPrefs: PanelLayoutPrefs;
   children: ComponentChildren;
+  loading?: boolean;
   className?: string;
   layoutManaged?: boolean;
   resizeEnabled?: boolean;
@@ -669,8 +685,13 @@ function PanelWorkspaceSlot({
         '--wm-panel-row-span': String(layout.rowSpan),
         '--wm-panel-col-span': String(layout.colSpan),
       } as Record<string, string>}
-    >
+  >
       {children}
+      {loading ? (
+        <div className="wm-panel-slot-loading">
+          <PanelLoading detail="正在同步这个 panel 的实时数据" />
+        </div>
+      ) : null}
       {resizeEnabled ? (
         <>
           <button
@@ -710,6 +731,7 @@ export function App() {
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
   const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>({});
+  const [panelLoadingIds, setPanelLoadingIds] = useState<Set<string>>(() => new Set());
   const [marketQuery] = useState('');
   const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
@@ -747,6 +769,18 @@ export function App() {
   const bundleRequestSeqRef = useRef(0);
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
 
+  const setPanelsLoading = (panelIds: string[], nextLoading: boolean) => {
+    if (!panelIds.length) return;
+    setPanelLoadingIds((current) => {
+      const next = new Set(current);
+      panelIds.forEach((panelId) => {
+        if (nextLoading) next.add(panelId);
+        else next.delete(panelId);
+      });
+      return next;
+    });
+  };
+
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
     const nextMarketId = marketId != null ? Number(marketId) : null;
@@ -767,6 +801,8 @@ export function App() {
 
   async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null; marketGroupsPayload: MarketGroupsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
+    const fastRuntimePanelIds = FAST_RUNTIME_PANELS.map((panel) => panel.id);
+    setPanelsLoading(fastRuntimePanelIds, true);
     const settled = await Promise.allSettled([
       fetchSystemHealth(),
       fetchRecentTrades(24),
@@ -801,6 +837,7 @@ export function App() {
     } else if (bootstrapPayload?.commoditiesPreview) {
       setRuntimeData((current) => mergeRuntimeData(current, { 'commodities-watch': bootstrapPayload.commoditiesPreview }));
     }
+    setPanelsLoading(fastRuntimePanelIds, false);
 
     return {
       marketsPayload: settled[5].status === 'fulfilled' ? settled[5].value : null,
@@ -812,6 +849,7 @@ export function App() {
     const eligible = panels.filter((panel) => !slowRefreshInFlightRef.current.has(panel.id));
     if (!eligible.length) return;
     eligible.forEach((panel) => slowRefreshInFlightRef.current.add(panel.id));
+    setPanelsLoading(eligible.map((panel) => panel.id), true);
     try {
       const patch = await fetchPanelRuntimeData(eligible, (panelId, value) => {
         setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
@@ -819,6 +857,7 @@ export function App() {
       setRuntimeData((current) => mergeRuntimeData(current, patch));
     } finally {
       eligible.forEach((panel) => slowRefreshInFlightRef.current.delete(panel.id));
+      setPanelsLoading(eligible.map((panel) => panel.id), false);
     }
   }
 
@@ -1075,12 +1114,15 @@ export function App() {
     async function refreshRuntimePanel(panelId: string) {
       try {
         const panel = PANEL_REGISTRY[panelId];
+        setPanelsLoading([panelId], true);
         const payload = await panel?.fetchData?.();
         if (!cancelled && payload !== undefined) {
           setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: payload }));
         }
       } catch {
         // Keep the latest visible runtime snapshot rather than flashing empty on transient upstream misses.
+      } finally {
+        if (!cancelled) setPanelsLoading([panelId], false);
       }
     }
 
@@ -1412,6 +1454,13 @@ export function App() {
   const activeLayerCount = enabledLayerIds.length;
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
+  const runtimePayloadLoaded = (panelId: string) => runtimeData[panelId] !== undefined && runtimeData[panelId] !== null;
+  const panelShouldShowLoading = (panelId: string) => {
+    if (loading && !bootstrap) return true;
+    if (panelLoadingIds.has(panelId) && !runtimePayloadLoaded(panelId)) return true;
+    if (bundleLoading && selectedMarketId != null && MARKET_WORKSPACE_PANEL_IDS.has(panelId)) return true;
+    return false;
+  };
 
   const panelContext: PanelRenderContext = {
     bootstrap,
@@ -1672,6 +1721,11 @@ export function App() {
               return (
                 <div className={`wm-panel-slot ${sizeClass}`.trim()} key={`bottom-${panelId}`}>
                   {entry.render(panelContext)}
+                  {panelShouldShowLoading(panelId) ? (
+                    <div className="wm-panel-slot-loading">
+                      <PanelLoading detail="正在同步这个 panel 的实时数据" />
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -1687,6 +1741,7 @@ export function App() {
               className="wm-focused-market-list"
               layoutManaged={false}
               resizeEnabled={false}
+              loading={panelShouldShowLoading('active-markets')}
               onMovePanel={moveWorkspacePanel}
               onResizePanel={resizeWorkspacePanel}
               onResetPanelLayout={resetWorkspacePanelLayout}
@@ -1708,6 +1763,7 @@ export function App() {
                     className={className}
                     layoutManaged={false}
                     resizeEnabled={false}
+                    loading={panelShouldShowLoading(panelId)}
                     onMovePanel={moveWorkspacePanel}
                     onResizePanel={resizeWorkspacePanel}
                     onResetPanelLayout={resetWorkspacePanelLayout}
@@ -1726,6 +1782,7 @@ export function App() {
               className="wm-focused-oracle-feed"
               layoutManaged={false}
               resizeEnabled={false}
+              loading={panelShouldShowLoading('oracle-feed')}
               onMovePanel={moveWorkspacePanel}
               onResizePanel={resizeWorkspacePanel}
               onResetPanelLayout={resetWorkspacePanelLayout}
@@ -1745,6 +1802,7 @@ export function App() {
                 panelId={panelId}
                 size={entry.size}
                 layoutPrefs={panelLayoutPrefs}
+                loading={panelShouldShowLoading(panelId)}
                 onMovePanel={moveWorkspacePanel}
                 onResizePanel={resizeWorkspacePanel}
                 onResetPanelLayout={resetWorkspacePanelLayout}

@@ -1,275 +1,144 @@
-# polyData
+# polyData Monitor
 
-polyData is a Polymarket data indexing and analysis project. It combines local
-sync pipelines, a Flask API, and a Vite/Preact dashboard so market metadata,
-trade flow, oracle events, runtime signals, and content overlays can be queried
-from one place.
+polyData Monitor is a live intelligence workspace for Polymarket operators,
+analysts, and market watchers who need to understand what is moving, why it is
+moving, and where risk is building.
 
-This README is the public entrypoint for what the project does today, how to
-run it, and where to find the deeper docs.
+It brings market prices, on-chain flow, oracle activity, order-book depth,
+macro context, sports signals, weather markets, news, and AI-generated market
+briefs into one monitoring surface.
 
-## Recent Updates
+Instead of switching between Polymarket, block explorers, spreadsheets, news
+feeds, and internal notes, users get a single command center for live market
+awareness.
 
-- `2026-04-16` Added a public updates log in [`docs/updates.md`](docs/updates.md).
-- `2026-04-16` Added public `systemd` and `nginx` deployment templates under
-  [`deploy/`](deploy/README.md).
-- `2026-04-16` Documented the current recommendation to deploy CI-built
-  `webpage/dist` instead of building frontend code on the remote server.
+## What It Helps You Do
 
-## What polyData does
+- Track active Polymarket markets and fast-changing outcomes in real time.
+- Watch large trades, suspicious flow, and fresh OrderFilled activity.
+- Inspect market depth, best bid/ask conditions, and visible liquidity.
+- Follow oracle events so resolution risk is easier to spot before it matters.
+- Connect market moves with related news, reports, video, and research context.
+- Monitor macro, CPI, Fed, crypto, commodities, sports, NBA, weather, and
+  geopolitical panels from the same workspace.
+- Use AI market insights to turn fragmented signals into a short, readable
+  brief.
 
-- Indexes and serves core Polymarket entities: markets, trades, oracle events,
-  sync checkpoints, and auxiliary mappings.
-- Exposes a Flask API for dashboard bootstrap, market detail, runtime health,
-  address analytics, LOB snapshots, and curated runtime feeds.
-- Ships a Vite/Preact dashboard with panel-driven views for market context,
-  order flow, oracle activity, sports, macro data, signals, and related content.
-- Supports local production-style runtime with user-level `systemd` templates
-  for the API and sync jobs.
-- Separates public engineering docs in `docs/` from private machine notes in
-  `document/`.
+## Who It Is For
 
-## Dashboard Surface
+polyData Monitor is designed for people who need a faster read on prediction
+markets:
 
-The current frontend panel registry includes:
+- Polymarket traders watching price, liquidity, and event risk.
+- Research teams following market narratives across categories.
+- Risk and operations teams checking oracle status, sync health, and abnormal
+  flow.
+- Content and community teams looking for markets worth explaining now.
+- Builders who want a live example of a Polymarket intelligence product.
 
-- market context and featured market views
-- active market lists and focused market summaries
-- recent chain trades and whale/suspicious flow panels
-- oracle feed and market oracle timelines
-- runtime LOB and depth panels
-- related news, video, reports, and research panels
-- system health and live API status
-- macro, crypto, commodities, NBA, and heuristic signal panels
+## Product Experience
 
-The frontend is built in `webpage/` with Vite, TypeScript, and Preact.
+The dashboard opens as a live global market atlas. From there, users can focus
+on a market, scan outcome probabilities, inspect order-book depth, review recent
+trades, check oracle history, and read linked context without leaving the page.
 
-## API Surface
+The workspace is panel based, so the same product can support different modes:
 
-The API entrypoint is `scripts/api_server.py`. Public route groups include:
+- A market tape for active trading.
+- A resolution-risk desk for oracle-sensitive markets.
+- A macro board for CPI, Fed, growth, labor, energy, and recession signals.
+- A sports board for NBA, odds, and matchup intelligence.
+- A weather market board for city temperature markets and forecast ranges.
+- A content desk for related news, video, reports, and research.
 
-- `/dashboard`, `/bootstrap`, `/search`
-- `/markets`, `/markets/<id>`, `/markets/<slug>`
-- `/markets/<id>/trades`, `/markets/<id>/price`, `/markets/<id>/chart`,
-  `/markets/<id>/detail`, `/markets/<id>/oracle`
-- `/trades/recent`, `/oracle/recent`
-- `/analytics/addresses/...`
-- `/runtime/markets/...`, `/runtime/sports/...`, `/runtime/macro/...`,
-  `/runtime/signals/...`, `/runtime/lob/<market_id>`
-- `/health`, `/system/health`
+## Current Capabilities
 
-## Quick Start
+### Live Polymarket View
 
-### 1. Backend dependencies
+Active markets, grouped outcomes, market summaries, price movement, volume,
+trade counts, and focused market context.
 
-Copy the public example env and fill in the values you need:
+### Flow and Liquidity
 
-```bash
-cp .env.example .env
-```
+OrderFilled tape, whale tracking, suspicious-flow monitoring, runtime order
+book depth, best bid/ask snapshots, and focused trade panels.
 
-The project expects external infrastructure such as:
+### Oracle and Resolution Watch
 
-- MySQL for indexed market and trade data
-- Redis for API caching and runtime snapshots
-- a Polygon RPC endpoint for chain-facing scripts
+Recent oracle events, focused oracle timelines, proposal and settlement context,
+and links between oracle activity and the relevant markets.
 
-Python dependencies:
+### AI Market Insights
 
-```bash
-pip install -r scripts/requirements.txt
-```
+Agent-generated briefs that summarize the selected market, surface focus
+signals, and organize supporting evidence for faster review.
 
-### 2. Run the API
+### Macro and Event Panels
 
-```bash
-python scripts/api_server.py --host 127.0.0.1 --port 18500
-```
+CPI release timing, inflation nowcasts, Fed/rates context, labor and services
+pressure, tariff and supply-chain watch, energy and gasoline shocks, food and
+retail basket pressure, crypto funding, commodities, geopolitical sanctions,
+and Polymarket macro-market clusters.
 
-Health checks:
+### Sports, Weather, and Content
 
-```bash
-curl http://127.0.0.1:18500/health
-curl http://127.0.0.1:18500/system/health
-curl http://127.0.0.1:18500/bootstrap
-```
+NBA scoreboard and intel, sports odds comparison, ESPN matchup indicators,
+global temperature monitoring, weather quote curves, related news, video,
+reports, and research feeds.
 
-There is also a helper wrapper:
+### Telegram Publishing
 
-```bash
-bash scripts/start_dashboard.sh
-```
+The project includes a Telegram publishing layer for sending selected monitor
+updates into topic-based channels.
 
-That script starts the API only and prints the frontend command separately.
+## Why It Matters
 
-### 3. Run the frontend
+Prediction markets move when price, liquidity, information, and resolution risk
+change together. polyData Monitor is built around that reality.
 
-```bash
-cd webpage
-npm install
-npm run dev
-```
+It gives users a faster way to answer practical questions:
 
-Useful frontend commands:
+- Which markets are active right now?
+- Which outcomes are moving?
+- Is the move supported by trade flow or thin liquidity?
+- Are there oracle events or settlement risks nearby?
+- What external news or macro context may explain the move?
+- Which markets deserve attention before the crowd notices?
 
-```bash
-cd webpage
-npm run build
-npm run preview
-```
+## Access and Deployment
 
-Defaults:
+The product can be served as a web dashboard backed by the polyData runtime API.
+For a production-style deployment, the recommended setup is:
 
-- API: `http://127.0.0.1:18500`
-- Web: `http://127.0.0.1:3000`
-- Dev proxy path: `/wm-api`
+- serve the built dashboard as static web assets
+- proxy dashboard API requests through `/wm-api/`
+- keep data sync jobs and runtime services running separately
 
-## Convenience Commands
+Public deployment templates are available in [`deploy/`](deploy/README.md).
 
-The root `Makefile` provides a few thin wrappers:
+## Project Status
 
-```bash
-make dev
-make api
-make web-build
-make status API_PORT=18500
-```
+polyData Monitor is an actively developed product workspace. The current public
+dashboard version shown in the app is `v0.2.1`.
 
-`make status` defaults to port `5000`, so pass `API_PORT=18500` if you are
-using the current API default.
+The product already covers live market monitoring, oracle tracking, runtime
+order-book views, macro/sports/weather panels, AI insights, and Telegram
+publishing. Upcoming work is focused on sharper customer-facing workflows,
+cleaner sharing, stronger runtime reliability, and deeper signal quality.
 
-## Runtime and Deployment
+## For Teams Running the Project
 
-### Local long-running services
+This README is intentionally customer facing. Technical setup and maintenance
+details live in the supporting docs:
 
-Public `systemd` templates live in [`deploy/systemd/`](deploy/systemd/README.md)
-for:
-
-- `polydata-api.service`
-- `polydata-market-sync.service`
-- `polydata-trade-sync.service`
-- `polydata-oracle-sync.service`
-- `polydata-analytics-sync.service`
-- `polydata.target`
-
-These templates assume:
-
-- user-level `systemd`
-- one shared env file at `~/.config/polydata/polydata.env`
-- MySQL, Redis, and Tailscale managed outside this repo
-
-### Remote frontend hosting
-
-Public deployment guidance lives in [`deploy/`](deploy/README.md).
-
-Current recommendation:
-
-- build `webpage/dist` in CI or locally
-- publish the built static output to a server directory such as
-  `/var/www/polydata`
-- serve it with Nginx using
-  [`deploy/nginx/polydata-static.conf.example`](deploy/nginx/polydata-static.conf.example)
-- proxy `/wm-api/` to the local API over Tailscale
-
-This keeps the remote server focused on serving a known artifact instead of
-cloning the repo and running `npm build` there.
-
-## Repository Layout
-
-```text
-polyData/
-  scripts/      Python API, pipelines, DB helpers, runtime providers, utilities
-  webpage/      Vite/Preact dashboard
-  deploy/       public deployment templates for systemd and nginx
-  docs/         public architecture, development, and update docs
-  document/     private notes and machine-specific operations (gitignored)
-  database/     schema notes and sample/reference data
-  data/         generated runtime data such as local snapshots
-  tests/        public entrypoint for future automated coverage
-  todos/        public roadmap-style engineering tasks
-```
-
-## Core Data Model
-
-The current project is organized around six main tables:
-
-### 1. `markets`
-
-Primary market metadata such as title, slug, condition identifiers, oracle,
-token ids, end date, category, and tags.
-
-### 2. `trades`
-
-Structured on-chain fill records used for tape views, price analysis, whale
-tracking, suspicious flow detection, and address analytics.
-
-### 3. `oracle_events`
-
-Request, proposal, dispute, and settlement events that explain how a market
-reaches a result.
-
-### 4. `sync_state`
-
-Checkpoint table for the market, trade, oracle, and live sync jobs.
-
-### 5. `block_timestamps`
-
-Cached block-to-time mapping to avoid repeated metadata fetches.
-
-### 6. `uma_adapter_mapping`
-
-Mapping layer between ancillary/oracle strings and question ids so oracle
-events can be linked back to markets.
-
-In practice the flow is:
-
-```text
-Polymarket / chain / runtime sources
-  -> sync jobs
-  -> MySQL and local caches
-  -> Flask API
-  -> dashboard panels and downstream analysis
-```
-
-## Reference Data and Scripts
-
-Useful sample/reference files:
-
-- `database/markets.json`
-- `database/closed_markets.json`
-- `database/trades_sample.json`
-- `database/oracle.json`
-- `database/POLYMARKET_INDEXER_DB_REPORT.md`
-
-Useful script families:
-
-- `scripts/market/` for market fetch, discovery, decode, and backfill helpers
-- `scripts/trade/` for trade indexing and decoding
-- `scripts/oracle/` for UMA and oracle investigation/backfill helpers
-- `scripts/runtime/` for content, LOB, and snapshot runtime support
-- `scripts/db/` for backend configuration, migrations, and trade schema work
-
-## Docs Map
-
-- [`docs/architecture.md`](docs/architecture.md): current shape and target
+- [`docs/development.md`](docs/development.md) for local development commands
+- [`docs/architecture.md`](docs/architecture.md) for system shape and runtime
   boundaries
-- [`docs/development.md`](docs/development.md): stable development commands
-- [`docs/updates.md`](docs/updates.md): daily public progress log
-- [`deploy/README.md`](deploy/README.md): public deployment template overview
-- [`todos/README.md`](todos/README.md): public roadmap/task file format
+- [`docs/panel-modules.md`](docs/panel-modules.md) for dashboard panel modules
+- [`deploy/README.md`](deploy/README.md) for deployment templates
+- [`deploy/systemd/README.md`](deploy/systemd/README.md) for service templates
+- [`telegram/README.md`](telegram/README.md) for Telegram publishing setup
+- [`docs/updates.md`](docs/updates.md) for the public update log
 
-Private notes, host-specific commands, and sensitive operational details belong
-in `document/`, which is intentionally ignored by git.
-
-## Verification
-
-Current lightweight verification commands:
-
-```bash
-cd webpage && npm run build
-python scripts/api_server.py --help
-make status API_PORT=18500
-```
-
-The public test entrypoint and planned coverage notes live in
-[`tests/README.md`](tests/README.md).
+Private host-specific notes and sensitive operational details should stay out
+of this README.

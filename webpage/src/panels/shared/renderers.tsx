@@ -6,7 +6,7 @@ function emptyState(message: string) {
     <div className="wm-empty wm-empty-card">
       <span>Standby</span>
       <strong>{message}</strong>
-      <em>Panel will hydrate as soon as the runtime feed returns rows.</em>
+      <em>The panel will update automatically when this source has rows for the selected market.</em>
     </div>
   );
 }
@@ -214,29 +214,88 @@ function oracleTone(status?: string | null) {
   return 'muted';
 }
 
-function oracleList(events: OracleEvent[], limit = 8) {
+function oracleStageLabel(event: OracleEvent) {
+  const status = String(event.eventStatus || '').toLowerCase();
+  const outcome = String(event.effectiveSettlementOutcome || event.settlementOutcome || '').toUpperCase();
+  if (status.includes('settle')) return outcome && outcome !== 'UNKNOWN' ? `Finalized ${outcome}` : 'Finalized';
+  if (status.includes('dispute')) return 'Disputed';
+  if (status.includes('propose')) return 'Proposed';
+  if (status.includes('request')) return 'Requested';
+  return event.eventStatus || 'Oracle event';
+}
+
+function oracleOutcomeLabel(event: OracleEvent) {
+  const outcome = String(event.effectiveSettlementOutcome || event.settlementOutcome || '').toUpperCase();
+  if (outcome && outcome !== 'UNKNOWN') return outcome;
+  const price = event.settledPrice ?? event.proposedPrice;
+  const numeric = Number(price);
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 0.999 || numeric >= 999999999999999999) return 'YES';
+    if (numeric <= 0.001) return 'NO';
+    if (Math.abs(numeric - 0.5) < 0.001) return 'CANCELLED';
+    return formatPercent(numeric);
+  }
+  return 'Pending';
+}
+
+function oracleActor(event: OracleEvent) {
+  return event.proposer || event.disputer || event.requester || event.sourceOracle || event.sourceAdapter || event.txHash || '';
+}
+
+function oracleTx(event: OracleEvent) {
+  return event.settlementTransaction || event.proposalTransaction || event.txHash || '';
+}
+
+function oracleList(events: OracleEvent[], limit = 8, mode: 'feed' | 'timeline' = 'feed') {
   if (!events.length) return emptyState('No oracle activity loaded.');
+  const visible = events.slice(0, limit);
+  const settledCount = visible.filter((event) => String(event.eventStatus || '').toLowerCase().includes('settle')).length;
+  const proposedCount = visible.filter((event) => String(event.eventStatus || '').toLowerCase().includes('propose')).length;
+  const boundCount = visible.filter((event) => event.isBound !== false && event.marketId).length;
   return (
-    <div className="wm-oracle-list">
-      {events.slice(0, limit).map((event, index) => {
-        const price = event.settledPrice ?? event.proposedPrice;
+    <div className={`wm-oracle-shell ${mode}`}>
+      <div className="wm-oracle-summary-strip">
+        <span><strong>{settledCount}</strong> final</span>
+        <span><strong>{proposedCount}</strong> proposed</span>
+        <span><strong>{boundCount}</strong> bound</span>
+      </div>
+      <div className="wm-oracle-list">
+      {visible.map((event, index) => {
+        const status = String(event.eventStatus || '').toLowerCase();
+        const tone = oracleTone(event.eventStatus);
+        const stage = oracleStageLabel(event);
+        const outcome = oracleOutcomeLabel(event);
+        const actor = oracleActor(event);
+        const tx = oracleTx(event);
+        const lifecycleClass = status.includes('settle') ? 'settle' : status.includes('dispute') ? 'dispute' : status.includes('propose') ? 'propose' : 'request';
         return (
-          <article className="wm-oracle-event-card" key={`${event.id || index}-${event.blockNumber || index}`}>
+          <article className={`wm-oracle-event-card ${tone} ${lifecycleClass}`} key={`${event.id || index}-${event.blockNumber || index}`}>
             <div className="wm-oracle-event-top">
-              <strong>{event.marketTitle || event.eventStatus || 'Oracle event'}</strong>
-              <span className={`wm-status-pill ${oracleTone(event.eventStatus)}`}>{event.eventStatus || 'event'}</span>
+              <div className="wm-oracle-stage">
+                <span className={`wm-oracle-stage-dot ${tone}`} aria-hidden="true" />
+                <strong>{stage}</strong>
+              </div>
+              <span className={`wm-status-pill ${tone}`}>{event.eventStatus || 'event'}</span>
             </div>
-            <div className="wm-oracle-event-middle">
-              <span>{event.sourceAdapter || event.sourceOracle || event.requester || 'uma oracle'}</span>
-              <em>{price !== null && price !== undefined ? formatPercent(price) : 'pending'}</em>
+            <div className="wm-oracle-market-title">{event.marketTitle || event.marketSlug || 'Unbound oracle event'}</div>
+            <div className="wm-oracle-result-row">
+              <span className={`wm-oracle-outcome ${String(outcome).toLowerCase()}`}>{outcome}</span>
+              <span>{event.completionStatus || (event.isFinal ? 'SETTLED' : 'PENDING')}</span>
+              <span>{event.isBound === false || !event.marketId ? 'UNBOUND' : `MKT #${event.marketId}`}</span>
             </div>
             <div className="wm-oracle-event-meta">
+              <span>{formatRelative(event.eventTime || null)}</span>
               <span>{formatDate(event.eventTime || null)}</span>
-              <span>{shortHash(event.questionId || event.conditionId || event.txHash || '', 8, 5)}</span>
+            </div>
+            <div className="wm-oracle-proof-grid">
+              <span>Oracle <strong>{shortHash(actor, 8, 5) || '--'}</strong></span>
+              <span>Tx <strong>{shortHash(tx, 8, 5) || '--'}</strong></span>
+              <span>QID <strong>{shortHash(event.questionId || event.conditionId || '', 8, 5) || '--'}</strong></span>
             </div>
           </article>
         );
       })}
+      </div>
     </div>
   );
 }
