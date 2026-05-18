@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(chainPanelRenderers, {
   id: 'sample-chain-trades',
-  title: 'AI Flow Insights',
+  title: 'AI Special Markets',
   eyebrow: 'agent',
-  description: 'Market-wide AI readout of trade flow, whales, and liquidity.',
+  description: 'Market-wide AI radar for unusual, high-attention, and fast-moving markets.',
   defaultEnabled: true,
 });

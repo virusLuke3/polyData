@@ -11,7 +11,14 @@ from agent.common.tavily_client import TavilySearchClient
 from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 
-VALID_LENSES = {"overview", "flow", "oracle"}
+VALID_LENSES = {"overview", "special", "trend"}
+LENS_ALIASES = {
+    "brief": "overview",
+    "flow": "special",
+    "oracle": "trend",
+    "catalyst": "trend",
+    "radar": "trend",
+}
 
 
 def _utc_now_iso() -> str:
@@ -46,6 +53,57 @@ def _items(payload: dict[str, Any], key: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _market_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for item in _items(payload, "markets"):
+        if not isinstance(item, dict):
+            continue
+        candidates.append({
+            "title": item.get("title") or item.get("slug") or "Untitled market",
+            "category": item.get("category") or "market",
+            "volume24h": item.get("volume24h"),
+            "tradeCount24h": item.get("tradeCount24h"),
+            "latestPrice": item.get("latestPrice"),
+            "change24h": item.get("change24h"),
+            "endDate": item.get("endDate"),
+            "createdAt": item.get("createdAt"),
+            "kind": "market",
+        })
+    for group in _items(payload, "marketGroups"):
+        if not isinstance(group, dict):
+            continue
+        outcomes = group.get("topOutcomes") if isinstance(group.get("topOutcomes"), list) else group.get("outcomes")
+        outcomes = outcomes if isinstance(outcomes, list) else []
+        prices = [
+            _as_float(outcome.get("yesPrice"))
+            for outcome in outcomes
+            if isinstance(outcome, dict) and outcome.get("yesPrice") not in (None, "")
+        ]
+        latest_price = prices[0] if prices else None
+        candidates.append({
+            "title": group.get("title") or group.get("slug") or "Untitled event",
+            "category": group.get("category") or "market",
+            "volume24h": group.get("volume24h"),
+            "tradeCount24h": group.get("tradeCount24h"),
+            "latestPrice": latest_price,
+            "outcomeCount": group.get("outcomeCount") or len(outcomes),
+            "endDate": group.get("endDate"),
+            "createdAt": group.get("createdAt"),
+            "kind": "group",
+            "outcomes": [
+                {
+                    "label": outcome.get("label") or outcome.get("title"),
+                    "yesPrice": outcome.get("yesPrice"),
+                    "volume24h": outcome.get("volume24h"),
+                    "tradeCount24h": outcome.get("tradeCount24h"),
+                }
+                for outcome in outcomes[:4]
+                if isinstance(outcome, dict)
+            ],
+        })
+    return candidates
+
+
 def _top_categories(markets: list[Any]) -> list[str]:
     counts: dict[str, int] = {}
     for item in markets:
@@ -73,9 +131,135 @@ def _signal_items(payload: dict[str, Any], key: str) -> list[Any]:
     return []
 
 
+def _market_reason(candidate: dict[str, Any]) -> tuple[str, str, str]:
+    volume = _as_float(candidate.get("volume24h"))
+    trades = _as_float(candidate.get("tradeCount24h"))
+    price = _as_float(candidate.get("latestPrice"))
+    outcome_count = _as_float(candidate.get("outcomeCount"))
+    if volume > 0 and volume >= 10_000:
+        return ("Liquidity spike", "Volume is unusually visible versus the rest of the loaded market set.", _fmt_currency(volume))
+    if trades >= 20:
+        return ("Tape active", "Trade count suggests this market is drawing attention today.", f"{_fmt_compact(trades)} trades")
+    if price and 0.42 <= price <= 0.58:
+        return ("Knife-edge odds", "Pricing is close to 50/50, so small catalysts can move the market quickly.", f"{price * 100:.0f}%")
+    if outcome_count >= 8:
+        return ("Crowded outcome set", "Many outcomes make this event useful for reading broad narrative dispersion.", f"{_fmt_compact(outcome_count)} outcomes")
+    return ("Narrative watch", "This market is part of the current loaded universe and may anchor user attention.", str(candidate.get("category") or "market"))
+
+
+def _special_markets(payload: dict[str, Any], limit: int = 4) -> list[dict[str, str]]:
+    candidates = _market_candidates(payload)
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            _as_float(item.get("volume24h")) * 3
+            + _as_float(item.get("tradeCount24h")) * 250
+            + (1500 if 0.42 <= _as_float(item.get("latestPrice")) <= 0.58 and _as_float(item.get("latestPrice")) else 0)
+            + _as_float(item.get("outcomeCount")) * 80
+        ),
+        reverse=True,
+    )
+    output: list[dict[str, str]] = []
+    for candidate in ranked[:limit]:
+        trend, why, evidence = _market_reason(candidate)
+        severity = "warning" if trend in {"Liquidity spike", "Knife-edge odds"} else "neutral"
+        output.append({
+            "title": compact_text(candidate.get("title"), 90),
+            "why": compact_text(why, 150),
+            "trend": trend,
+            "severity": severity,
+            "evidence": evidence,
+        })
+    return output
+
+
+def _fallback_themes(payload: dict[str, Any], lens: str) -> list[dict[str, str]]:
+    metrics = _summary_metrics(payload)
+    top_categories = ", ".join(metrics["topCategories"]) or "category data loading"
+    if lens == "special":
+        return [
+            {
+                "label": "SPECIAL",
+                "title": "Unusual-market radar",
+                "summary": "Markets are ranked by visible volume, trade count, close odds, and outcome complexity.",
+                "severity": "neutral",
+                "evidence": f"{metrics['coveredMarkets']} covered",
+            },
+            {
+                "label": "ATTENTION",
+                "title": "Where attention clusters",
+                "summary": top_categories,
+                "severity": "neutral",
+                "evidence": "categories",
+            },
+        ]
+    if lens == "trend":
+        return [
+            {
+                "label": "TREND",
+                "title": "Polymarket narrative breadth",
+                "summary": f"Loaded markets cluster around {top_categories}.",
+                "severity": "neutral",
+                "evidence": f"{metrics['coveredMarkets']} covered",
+            },
+            {
+                "label": "CATALYSTS",
+                "title": "Catalyst feed",
+                "summary": f"{metrics['contentItems']} content items and {metrics['alphaSignals']} alpha signals are available for context.",
+                "severity": "positive" if metrics["contentItems"] else "warning",
+                "evidence": f"{metrics['contentItems']} items",
+            },
+        ]
+    return [
+        {
+            "label": "BREADTH",
+            "title": "Market universe",
+            "summary": f"{metrics['coveredMarkets']} markets/events are visible across the dashboard.",
+            "severity": "positive" if metrics["coveredMarkets"] else "neutral",
+            "evidence": f"{metrics['coveredMarkets']} covered",
+        },
+        {
+            "label": "CONVERGENCE",
+            "title": "Where Polymarket attention sits",
+            "summary": top_categories,
+            "severity": "neutral",
+            "evidence": "categories",
+        },
+    ]
+
+
+def _fallback_watchlist(payload: dict[str, Any], lens: str) -> list[dict[str, str]]:
+    special = _special_markets(payload, limit=2)
+    watchlist = [
+        {
+            "title": item["title"],
+            "reason": item["why"],
+            "horizon": "today",
+            "severity": item["severity"],
+        }
+        for item in special
+    ]
+    if lens == "trend":
+        watchlist.append({
+            "title": "Narrative rotation",
+            "reason": "Watch whether volume migrates from isolated events into a category-wide theme.",
+            "horizon": "24h",
+            "severity": "neutral",
+        })
+    else:
+        watchlist.append({
+            "title": "Fresh catalysts",
+            "reason": "New information can turn a quiet market into the day's focal point.",
+            "horizon": "today",
+            "severity": "neutral",
+        })
+    return watchlist[:3]
+
+
 def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     markets = _items(payload, "markets")
     groups = _items(payload, "marketGroups")
+    candidates = _market_candidates(payload)
     trades = _items(payload, "trades")
     oracle = _items(payload, "oracle")
     content = _items(payload, "content")
@@ -85,8 +269,9 @@ def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "activeMarkets": len(markets),
         "marketGroups": len(groups),
-        "topCategories": _top_categories(markets),
-        "visible24hVolume": _fmt_currency(_volume_total(markets) or _volume_total(groups)),
+        "coveredMarkets": len(candidates),
+        "topCategories": _top_categories(candidates),
+        "visible24hVolume": _fmt_currency(_volume_total(candidates)),
         "tradeRows": len(trades),
         "oracleEvents": len(oracle),
         "contentItems": len(content),
@@ -97,92 +282,20 @@ def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _search_query(payload: dict[str, Any], lens: str) -> str:
-    markets = [item for item in _items(payload, "markets") if isinstance(item, dict)]
-    titles = " ".join(str(item.get("title") or "") for item in markets[:4])
+    markets = _market_candidates(payload)
+    titles = " ".join(str(item.get("title") or "") for item in markets[:6])
     categories = " ".join(_top_categories(markets))
-    if lens == "flow":
-        prefix = "prediction market trading flow whale volume liquidity"
-    elif lens == "oracle":
-        prefix = "Polymarket oracle resolution settlement proposal market risk"
+    if lens == "special":
+        prefix = "Polymarket unusual markets today volume probability trend"
+    elif lens == "trend":
+        prefix = "Polymarket market trends macro narratives prediction markets today"
     else:
-        prefix = "prediction markets global catalysts active markets"
+        prefix = "Polymarket market brief today special markets catalysts trends"
     return compact_text(f"{prefix} {categories} {titles}", 320)
 
 
 def _fallback_focus(payload: dict[str, Any], lens: str, search_results: list[dict[str, str]]) -> list[dict[str, str]]:
-    metrics = _summary_metrics(payload)
-    if lens == "flow":
-        focus = [
-            {
-                "label": "FLOW",
-                "title": "Cross-market tape loaded" if metrics["tradeRows"] else "Trade tape is quiet",
-                "summary": f"{metrics['tradeRows']} recent trades are visible across the dashboard.",
-                "severity": "positive" if metrics["tradeRows"] else "neutral",
-                "evidence": f"{metrics['tradeRows']} trades",
-            },
-            {
-                "label": "WHALES",
-                "title": "Whale signals available" if metrics["whaleSignals"] else "No whale cluster loaded",
-                "summary": f"{metrics['whaleSignals']} whale signals and {metrics['suspiciousSignals']} suspicious-flow signals are loaded.",
-                "severity": "warning" if metrics["suspiciousSignals"] else "neutral",
-                "evidence": f"{metrics['whaleSignals']} / {metrics['suspiciousSignals']}",
-            },
-            {
-                "label": "LIQUIDITY",
-                "title": "Visible volume breadth",
-                "summary": f"Visible 24h volume across loaded markets is {metrics['visible24hVolume']}.",
-                "severity": "neutral",
-                "evidence": metrics["visible24hVolume"],
-            },
-        ]
-    elif lens == "oracle":
-        focus = [
-            {
-                "label": "ORACLE",
-                "title": "Resolution queue visible" if metrics["oracleEvents"] else "Oracle queue quiet",
-                "summary": f"{metrics['oracleEvents']} recent oracle events are loaded across markets.",
-                "severity": "warning" if metrics["oracleEvents"] else "neutral",
-                "evidence": f"{metrics['oracleEvents']} events",
-            },
-            {
-                "label": "RISK",
-                "title": "Settlement risk watch",
-                "summary": "Markets near resolution need proposal, dispute, and final settlement monitoring.",
-                "severity": "warning" if metrics["oracleEvents"] else "neutral",
-                "evidence": "resolution",
-            },
-            {
-                "label": "BREADTH",
-                "title": "Active market coverage",
-                "summary": f"{metrics['activeMarkets']} active markets are visible to the oracle watch.",
-                "severity": "neutral",
-                "evidence": f"{metrics['activeMarkets']} markets",
-            },
-        ]
-    else:
-        focus = [
-            {
-                "label": "BREADTH",
-                "title": "Market universe loaded",
-                "summary": f"{metrics['activeMarkets']} active markets and {metrics['marketGroups']} grouped markets are visible.",
-                "severity": "positive" if metrics["activeMarkets"] else "neutral",
-                "evidence": f"{metrics['activeMarkets']} markets",
-            },
-            {
-                "label": "CATALYSTS",
-                "title": "Content context available" if metrics["contentItems"] else "Catalyst feed thin",
-                "summary": f"{metrics['contentItems']} latest content items and {metrics['alphaSignals']} alpha signals are loaded.",
-                "severity": "positive" if metrics["contentItems"] else "warning",
-                "evidence": f"{metrics['contentItems']} items",
-            },
-            {
-                "label": "CONVERGENCE",
-                "title": "Top market categories",
-                "summary": ", ".join(metrics["topCategories"]) or "Category breadth is still loading.",
-                "severity": "neutral",
-                "evidence": "categories",
-            },
-        ]
+    focus = _fallback_themes(payload, lens)
     if search_results:
         top = search_results[0]
         focus.insert(1, {
@@ -198,16 +311,19 @@ def _fallback_focus(payload: dict[str, Any], lens: str, search_results: list[dic
 def _fallback_response(payload: dict[str, Any], lens: str, *, reason: str, search_results: list[dict[str, str]] | None = None) -> dict[str, Any]:
     search_results = search_results or []
     metrics = _summary_metrics(payload)
-    if lens == "flow":
-        brief = f"Market-wide flow shows {metrics['tradeRows']} recent trades, {metrics['whaleSignals']} whale signals, and {metrics['suspiciousSignals']} suspicious-flow signals."
-    elif lens == "oracle":
-        brief = f"Oracle watch sees {metrics['oracleEvents']} recent resolution events across {metrics['activeMarkets']} active markets."
+    special = _special_markets(payload)
+    categories = ", ".join(metrics["topCategories"]) or "categories still loading"
+    if lens == "special":
+        lead = special[0]["title"] if special else "No standout market"
+        brief = f"Today's unusual-market radar is led by {lead}. The broader loaded set clusters around {categories}."
+    elif lens == "trend":
+        brief = f"Polymarket attention is clustering around {categories}. Watch whether isolated event interest turns into a category-wide trend."
     else:
-        brief = f"Market-wide dashboard covers {metrics['activeMarkets']} active markets with {metrics['visible24hVolume']} visible 24h volume."
+        brief = f"Market-wide dashboard covers {metrics['coveredMarkets']} markets/events with {metrics['visible24hVolume']} visible 24h volume. Current attention clusters around {categories}."
     evidence = [
-        f"{metrics['activeMarkets']} active markets",
+        f"{metrics['coveredMarkets']} covered markets",
         f"{metrics['tradeRows']} recent trades",
-        f"{metrics['oracleEvents']} oracle events",
+        f"{len(special)} special markets",
         f"{metrics['visible24hVolume']} visible volume",
     ]
     if search_results:
@@ -219,6 +335,9 @@ def _fallback_response(payload: dict[str, Any], lens: str, *, reason: str, searc
         "model": "deterministic-fallback",
         "brief": compact_text(brief, 260),
         "focus": _fallback_focus(payload, lens, search_results),
+        "specialMarkets": special,
+        "themes": _fallback_themes(payload, lens),
+        "watchlist": _fallback_watchlist(payload, lens),
         "evidence": evidence[:4],
         "metrics": metrics,
         "searchResults": search_results,
@@ -241,6 +360,41 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
             "evidence": compact_text(item.get("evidence") or "", 80),
         })
     evidence = raw.get("evidence") if isinstance(raw.get("evidence"), list) else fallback["evidence"]
+    raw_special = raw.get("specialMarkets") if isinstance(raw.get("specialMarkets"), list) else []
+    special_markets: list[dict[str, str]] = []
+    for item in raw_special[:4]:
+        if not isinstance(item, dict):
+            continue
+        special_markets.append({
+            "title": compact_text(item.get("title") or "Special market", 90),
+            "why": compact_text(item.get("why") or item.get("summary") or "", 160),
+            "trend": compact_text(item.get("trend") or "Watch", 40),
+            "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
+            "evidence": compact_text(item.get("evidence") or "", 80),
+        })
+    raw_themes = raw.get("themes") if isinstance(raw.get("themes"), list) else []
+    themes: list[dict[str, str]] = []
+    for item in raw_themes[:4]:
+        if not isinstance(item, dict):
+            continue
+        themes.append({
+            "label": compact_text(item.get("label") or "THEME", 16).upper(),
+            "title": compact_text(item.get("title") or "Market theme", 80),
+            "summary": compact_text(item.get("summary") or "", 180),
+            "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
+            "evidence": compact_text(item.get("evidence") or "", 80),
+        })
+    raw_watchlist = raw.get("watchlist") if isinstance(raw.get("watchlist"), list) else []
+    watchlist: list[dict[str, str]] = []
+    for item in raw_watchlist[:4]:
+        if not isinstance(item, dict):
+            continue
+        watchlist.append({
+            "title": compact_text(item.get("title") or "Watch item", 90),
+            "reason": compact_text(item.get("reason") or item.get("summary") or "", 160),
+            "horizon": compact_text(item.get("horizon") or "today", 24),
+            "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
+        })
     return {
         "status": "live",
         "lens": lens,
@@ -248,6 +402,9 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
         "model": model,
         "brief": compact_text(raw.get("brief") or fallback["brief"], 260),
         "focus": focus or fallback["focus"],
+        "specialMarkets": special_markets or fallback["specialMarkets"],
+        "themes": themes or fallback["themes"],
+        "watchlist": watchlist or fallback["watchlist"],
         "evidence": [compact_text(item, 120) for item in evidence[:4]],
         "metrics": _summary_metrics(payload),
         "searchResults": search_results,
@@ -258,6 +415,7 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return _fallback_response({}, "overview", reason="invalid-payload")
     lens = str(payload.get("lens") or "overview").strip().lower()
+    lens = LENS_ALIASES.get(lens, lens)
     if lens not in VALID_LENSES:
         lens = "overview"
     search_results: list[dict[str, str]] = []
@@ -268,6 +426,7 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
     context = {
         "lens": lens,
         "metrics": _summary_metrics(payload),
+        "marketCandidates": _market_candidates(payload)[:48],
         "markets": _items(payload, "markets")[:30],
         "marketGroups": _items(payload, "marketGroups")[:24],
         "trades": _items(payload, "trades")[:16],
@@ -296,4 +455,3 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
         response = _fallback_response(payload, lens, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)
         return response
-

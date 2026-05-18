@@ -217,6 +217,7 @@ export type OracleEvent = {
 
 export type OraclePayload = {
   marketId: number;
+  localMarketId?: number | null;
   questionId?: string | null;
   oracle?: string | null;
   currentStatus?: string | null;
@@ -250,6 +251,7 @@ export type ChartPoint = {
 
 export type ChartPayload = {
   marketId: number;
+  localMarketId?: number | null;
   range: string;
   interval: string;
   kind?: 'probability' | 'underlying-price' | string;
@@ -359,7 +361,30 @@ export type MarketAiInsightResponse = {
   error?: string;
 };
 
-export type MarketWideAiInsightLens = 'overview' | 'flow' | 'oracle';
+export type MarketWideAiInsightLens = 'overview' | 'special' | 'trend';
+
+export type MarketWideSpecialMarket = {
+  title: string;
+  why: string;
+  trend?: string | null;
+  severity?: string | null;
+  evidence?: string | null;
+};
+
+export type MarketWideTheme = {
+  label: string;
+  title: string;
+  summary: string;
+  severity?: string | null;
+  evidence?: string | null;
+};
+
+export type MarketWideWatchItem = {
+  title: string;
+  reason: string;
+  horizon?: string | null;
+  severity?: string | null;
+};
 
 export type MarketWideAiInsightPayload = {
   lens: MarketWideAiInsightLens;
@@ -375,6 +400,9 @@ export type MarketWideAiInsightPayload = {
 
 export type MarketWideAiInsightResponse = MarketAiInsightResponse & {
   lens?: MarketWideAiInsightLens | string;
+  specialMarkets?: MarketWideSpecialMarket[];
+  themes?: MarketWideTheme[];
+  watchlist?: MarketWideWatchItem[];
   metrics?: Record<string, string | number | boolean | string[] | null>;
   viaGateway?: boolean;
   servedBy?: string;

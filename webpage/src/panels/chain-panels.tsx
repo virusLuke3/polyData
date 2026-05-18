@@ -110,7 +110,7 @@ export const chainPanelRenderers: PanelRenderMap = {
   },
   'sample-chain-trades': {
     render: (ctx) => (
-      <AiMarketWidePanel ctx={ctx} lens="flow" title="AI FLOW INSIGHTS" badge="FLOW" />
+      <AiMarketWidePanel ctx={ctx} lens="special" title="AI SPECIAL MARKETS" badge="RADAR" />
     ),
   },
   'bbo-monitor': {

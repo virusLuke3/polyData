@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchMarketWideAiInsights } from '@/services/api';
 import type {
+  MarketGroupItem,
+  MarketListItem,
   MarketWideAiInsightLens,
   MarketWideAiInsightPayload,
   MarketWideAiInsightResponse,
@@ -9,6 +11,7 @@ import type {
 } from '@/types';
 import { formatCompact, formatCurrencyCompact } from './formatters';
 import { globalMarkets } from './selectors';
+import '@/styles/ai-market-panels.css';
 
 type AiMarketWidePanelProps = {
   ctx: PanelRenderContext;
@@ -17,10 +20,20 @@ type AiMarketWidePanelProps = {
   badge: string;
 };
 
-const PANEL_COPY: Record<MarketWideAiInsightLens, { section: string; fallbackTitle: string }> = {
-  overview: { section: 'World Brief', fallbackTitle: 'Market universe loaded' },
-  flow: { section: 'Flow Focus', fallbackTitle: 'Cross-market tape loaded' },
-  oracle: { section: 'Oracle Watch', fallbackTitle: 'Resolution queue visible' },
+type MarketCandidate = {
+  title: string;
+  category: string;
+  volume24h: number;
+  tradeCount24h: number;
+  latestPrice: number;
+  outcomeCount: number;
+  source: 'market' | 'group';
+};
+
+const PANEL_COPY: Record<MarketWideAiInsightLens, { section: string; kicker: string; fallbackTitle: string }> = {
+  overview: { section: 'Market Brief', kicker: 'MARKET-WIDE', fallbackTitle: 'Market universe loaded' },
+  special: { section: 'Special Markets', kicker: 'TODAY RADAR', fallbackTitle: 'Unusual market watch' },
+  trend: { section: 'Trend Radar', kicker: 'MACRO READ', fallbackTitle: 'Polymarket trend watch' },
 };
 
 function numericValue(value: string | number | null | undefined) {
@@ -36,7 +49,8 @@ function topMarkets(ctx: PanelRenderContext) {
 }
 
 function topGroups(ctx: PanelRenderContext) {
-  return ctx.marketGroups
+  const groups = ctx.marketGroups.length ? ctx.marketGroups : (ctx.bootstrap?.activeMarketGroupsPreview || []);
+  return groups
     .slice()
     .sort((a, b) => numericValue(b.volume24h) - numericValue(a.volume24h))
     .slice(0, 36);
@@ -56,10 +70,41 @@ function buildMarketWidePayload(ctx: PanelRenderContext, lens: MarketWideAiInsig
   };
 }
 
+function candidatePriceFromGroup(group: MarketGroupItem) {
+  const outcomes = group.topOutcomes?.length ? group.topOutcomes : group.outcomes || [];
+  const edge = outcomes
+    .map((outcome) => numericValue(outcome.yesPrice))
+    .filter((price) => price > 0)
+    .sort((a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5))[0];
+  return edge || 0;
+}
+
+function marketCandidates(payload: MarketWideAiInsightPayload): MarketCandidate[] {
+  const markets = payload.markets.map((market: MarketListItem) => ({
+    title: market.title,
+    category: market.category || 'market',
+    volume24h: numericValue(market.volume24h),
+    tradeCount24h: numericValue(market.tradeCount24h),
+    latestPrice: numericValue(market.latestPrice),
+    outcomeCount: numericValue(market.outcomeCount),
+    source: 'market' as const,
+  }));
+  const groups = payload.marketGroups.map((group: MarketGroupItem) => ({
+    title: group.title,
+    category: group.category || 'market',
+    volume24h: numericValue(group.volume24h),
+    tradeCount24h: numericValue(group.tradeCount24h),
+    latestPrice: candidatePriceFromGroup(group),
+    outcomeCount: numericValue(group.outcomeCount || group.outcomes?.length || group.topOutcomes?.length),
+    source: 'group' as const,
+  }));
+  return [...markets, ...groups];
+}
+
 function categorySummary(payload: MarketWideAiInsightPayload) {
   const counts = new Map<string, number>();
-  payload.markets.forEach((market) => {
-    const category = String(market.category || 'market').toLowerCase();
+  marketCandidates(payload).forEach((candidate) => {
+    const category = String(candidate.category || 'market').toLowerCase();
     counts.set(category, (counts.get(category) || 0) + 1);
   });
   return Array.from(counts.entries())
@@ -69,48 +114,110 @@ function categorySummary(payload: MarketWideAiInsightPayload) {
     .join(' / ');
 }
 
+function specialMarketsFromPayload(payload: MarketWideAiInsightPayload) {
+  return marketCandidates(payload)
+    .slice()
+    .sort((a, b) => candidateScore(b) - candidateScore(a))
+    .slice(0, 4)
+    .map((candidate) => {
+      const closeOdds = candidate.latestPrice >= 0.42 && candidate.latestPrice <= 0.58;
+      const active = candidate.volume24h > 0 || candidate.tradeCount24h > 0;
+      const complex = candidate.outcomeCount >= 6;
+      const trend = closeOdds ? 'Knife-edge odds' : active ? 'Liquidity focus' : complex ? 'Outcome spread' : 'Narrative watch';
+      const evidence = closeOdds
+        ? `${Math.round(candidate.latestPrice * 100)}%`
+        : active
+          ? `${formatCurrencyCompact(candidate.volume24h)} 24h`
+          : `${formatCompact(candidate.outcomeCount)} outcomes`;
+      return {
+        title: candidate.title,
+        why: closeOdds
+          ? 'Odds are balanced enough that new information can quickly reprice the market.'
+          : active
+            ? 'Visible volume or trade activity makes this a useful read on current attention.'
+            : 'This market helps explain where broad narrative interest is forming.',
+        trend,
+        severity: closeOdds || active ? 'warning' : 'neutral',
+        evidence,
+      };
+    });
+}
+
+function candidateScore(candidate: MarketCandidate) {
+  const closeOdds = candidate.latestPrice >= 0.42 && candidate.latestPrice <= 0.58;
+  return (candidate.volume24h * 3)
+    + (candidate.tradeCount24h * 250)
+    + (closeOdds ? 3500 : 0)
+    + (candidate.outcomeCount * 120);
+}
+
 function localMarketWideFallback(payload: MarketWideAiInsightPayload): MarketWideAiInsightResponse {
-  const volume = payload.markets.reduce((sum, market) => sum + numericValue(market.volume24h), 0)
-    || payload.marketGroups.reduce((sum, group) => sum + numericValue(group.volume24h), 0);
-  if (payload.lens === 'flow') {
+  const candidates = marketCandidates(payload);
+  const volume = candidates.reduce((sum, item) => sum + item.volume24h, 0);
+  const totalTrades = payload.trades.length || candidates.reduce((sum, item) => sum + item.tradeCount24h, 0);
+  const specialMarkets = specialMarketsFromPayload(payload);
+  if (payload.lens === 'special') {
     return {
       status: 'fallback',
       lens: payload.lens,
       model: 'local-market-wide-fallback',
-      brief: `Cross-market flow shows ${formatCompact(payload.trades.length)} recent trade rows, ${formatCompact(payload.whaleSignals?.length || 0)} whale signals, and ${formatCompact(payload.suspiciousSignals?.length || 0)} suspicious-flow signals.`,
-      focus: [
-        { label: 'FLOW', title: 'Trade tape breadth', summary: `${formatCompact(payload.trades.length)} recent trades are visible across loaded markets.`, severity: 'positive', evidence: `${formatCompact(payload.trades.length)} trades` },
-        { label: 'WHALES', title: 'Whale cluster watch', summary: `${formatCompact(payload.whaleSignals?.length || 0)} whale signals are loaded for market-wide review.`, severity: payload.whaleSignals?.length ? 'warning' : 'neutral', evidence: `${formatCompact(payload.whaleSignals?.length || 0)} signals` },
-        { label: 'LIQUIDITY', title: 'Visible volume', summary: `Loaded markets show ${formatCurrencyCompact(volume)} in visible 24h volume.`, severity: 'neutral', evidence: formatCurrencyCompact(volume) },
+      brief: specialMarkets.length
+        ? `Today's unusual-market radar is led by ${specialMarkets[0]?.title || 'the top loaded market'}. Look for close odds, visible volume, and broad outcome sets.`
+        : `No single standout market is dominating the loaded dashboard yet.`,
+      specialMarkets,
+      themes: [
+        { label: 'SPECIAL', title: 'Unusual-market radar', summary: 'Markets are ranked by volume, close probabilities, and outcome complexity.', severity: 'neutral', evidence: `${formatCompact(candidates.length)} scanned` },
+        { label: 'ATTENTION', title: 'Attention clusters', summary: categorySummary(payload) || 'Category breadth is still loading.', severity: 'neutral', evidence: 'categories' },
       ],
-      evidence: [`${formatCompact(payload.trades.length)} trades`, `${formatCompact(payload.whaleSignals?.length || 0)} whales`, formatCurrencyCompact(volume)],
+      watchlist: specialMarkets.slice(0, 2).map((item) => ({ title: item.title, reason: item.why, horizon: 'today', severity: item.severity })),
+      focus: [
+        { label: 'SPECIAL', title: specialMarkets[0]?.title || 'No standout market yet', summary: specialMarkets[0]?.why || 'Waiting for market concentration to appear.', severity: specialMarkets[0]?.severity || 'neutral', evidence: specialMarkets[0]?.evidence || '--' },
+        { label: 'BREADTH', title: 'Market set coverage', summary: `${formatCompact(candidates.length)} markets and events are available for anomaly scanning.`, severity: 'neutral', evidence: `${formatCompact(candidates.length)} scanned` },
+      ],
+      evidence: [`${formatCompact(candidates.length)} scanned`, `${formatCompact(totalTrades)} trade signals`, formatCurrencyCompact(volume), categorySummary(payload) || 'categories loading'],
     };
   }
-  if (payload.lens === 'oracle') {
+  if (payload.lens === 'trend') {
     return {
       status: 'fallback',
       lens: payload.lens,
       model: 'local-market-wide-fallback',
-      brief: `Oracle watch is tracking ${formatCompact(payload.oracle.length)} recent resolution events across ${formatCompact(payload.markets.length)} loaded markets.`,
-      focus: [
-        { label: 'ORACLE', title: 'Resolution queue', summary: `${formatCompact(payload.oracle.length)} recent oracle events are visible.`, severity: payload.oracle.length ? 'warning' : 'neutral', evidence: `${formatCompact(payload.oracle.length)} events` },
-        { label: 'RISK', title: 'Settlement timing', summary: 'Near-expiry markets should be read with proposal and dispute timing in mind.', severity: 'warning', evidence: 'resolution' },
-        { label: 'BREADTH', title: 'Market coverage', summary: `${formatCompact(payload.markets.length)} active markets are covered by this watch.`, severity: 'neutral', evidence: `${formatCompact(payload.markets.length)} markets` },
+      brief: `Polymarket attention is clustering around ${categorySummary(payload) || 'the loaded event set'}. Watch whether isolated markets become category-wide narratives.`,
+      specialMarkets,
+      themes: [
+        { label: 'TREND', title: 'Narrative concentration', summary: categorySummary(payload) || 'Category breadth is still loading.', severity: 'neutral', evidence: `${formatCompact(candidates.length)} scanned` },
+        { label: 'CATALYSTS', title: 'News-to-market bridge', summary: `${formatCompact(payload.content.length)} content items and ${formatCompact(payload.alphaSignals?.length || 0)} alpha signals can explain why users rotate attention.`, severity: payload.content.length ? 'positive' : 'warning', evidence: `${formatCompact(payload.content.length)} items` },
+        { label: 'SPECIAL', title: 'Standout market pressure', summary: specialMarkets[0]?.title || 'No clear standout market yet.', severity: specialMarkets[0]?.severity || 'neutral', evidence: specialMarkets[0]?.evidence || '--' },
       ],
-      evidence: [`${formatCompact(payload.oracle.length)} oracle events`, `${formatCompact(payload.markets.length)} markets`, categorySummary(payload) || 'categories loading'],
+      watchlist: [
+        { title: 'Narrative rotation', reason: 'Watch whether one unusual market pulls volume into adjacent markets.', horizon: '24h', severity: 'neutral' },
+        { title: 'Close-probability events', reason: 'Markets near 50/50 tend to react quickly to fresh catalysts.', horizon: 'today', severity: 'warning' },
+      ],
+      focus: [
+        { label: 'TREND', title: 'Narrative concentration', summary: categorySummary(payload) || 'Category breadth is still loading.', severity: 'neutral', evidence: 'categories' },
+        { label: 'CATALYSTS', title: 'Catalyst bridge', summary: `${formatCompact(payload.content.length)} content items are loaded for context.`, severity: payload.content.length ? 'positive' : 'warning', evidence: `${formatCompact(payload.content.length)} items` },
+      ],
+      evidence: [categorySummary(payload) || 'categories loading', `${formatCompact(payload.content.length)} content`, `${formatCompact(totalTrades)} trade signals`, formatCurrencyCompact(volume)],
     };
   }
   return {
     status: 'fallback',
     lens: payload.lens,
     model: 'local-market-wide-fallback',
-    brief: `Market-wide dashboard covers ${formatCompact(payload.markets.length)} active markets and ${formatCompact(payload.marketGroups.length)} grouped markets. Top category breadth: ${categorySummary(payload) || 'loading'}.`,
+    brief: `Market-wide dashboard covers ${formatCompact(candidates.length)} markets and events. Top category breadth: ${categorySummary(payload) || 'loading'}.`,
+    specialMarkets,
+    themes: [
+      { label: 'BREADTH', title: 'Market universe', summary: `${formatCompact(candidates.length)} markets/events are loaded.`, severity: 'positive', evidence: `${formatCompact(candidates.length)} scanned` },
+      { label: 'CONVERGENCE', title: 'Attention map', summary: categorySummary(payload) || 'Category breadth is still loading.', severity: 'neutral', evidence: 'categories' },
+      { label: 'SPECIAL', title: 'Standout market pressure', summary: specialMarkets[0]?.title || 'No clear standout market yet.', severity: specialMarkets[0]?.severity || 'neutral', evidence: specialMarkets[0]?.evidence || '--' },
+    ],
+    watchlist: specialMarkets.slice(0, 2).map((item) => ({ title: item.title, reason: item.why, horizon: 'today', severity: item.severity })),
     focus: [
-      { label: 'BREADTH', title: 'Market universe', summary: `${formatCompact(payload.markets.length)} active markets and ${formatCompact(payload.marketGroups.length)} grouped markets are loaded.`, severity: 'positive', evidence: `${formatCompact(payload.markets.length)} markets` },
+      { label: 'BREADTH', title: 'Market universe', summary: `${formatCompact(payload.markets.length)} active markets and ${formatCompact(payload.marketGroups.length)} grouped markets are loaded.`, severity: 'positive', evidence: `${formatCompact(candidates.length)} covered` },
       { label: 'CATALYSTS', title: 'Context feed', summary: `${formatCompact(payload.content.length)} content items and ${formatCompact(payload.alphaSignals?.length || 0)} alpha signals are available.`, severity: payload.content.length ? 'positive' : 'warning', evidence: `${formatCompact(payload.content.length)} items` },
       { label: 'CONVERGENCE', title: 'Category concentration', summary: categorySummary(payload) || 'Category breadth is still loading.', severity: 'neutral', evidence: 'categories' },
     ],
-    evidence: [`${formatCompact(payload.markets.length)} markets`, `${formatCompact(payload.marketGroups.length)} groups`, formatCurrencyCompact(volume)],
+    evidence: [`${formatCompact(payload.markets.length)} markets`, `${formatCompact(payload.marketGroups.length)} groups`, `${formatCompact(totalTrades)} trade signals`, formatCurrencyCompact(volume)],
   };
 }
 
@@ -138,6 +245,7 @@ function requestSignature(payload: MarketWideAiInsightPayload) {
 export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanelProps) {
   const payload = useMemo(() => buildMarketWidePayload(ctx, lens), [
     ctx.alphaSignals,
+    ctx.bootstrap,
     ctx.globalOracle,
     ctx.globalTrades,
     ctx.latestContent,
@@ -172,30 +280,59 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   }, [fallback, payload, signature]);
 
   const focus = insight.focus?.length ? insight.focus : fallback.focus;
+  const specialMarkets = insight.specialMarkets?.length ? insight.specialMarkets : (fallback.specialMarkets || []);
+  const themes = insight.themes?.length ? insight.themes : (fallback.themes || focus);
+  const watchlist = insight.watchlist?.length ? insight.watchlist : (fallback.watchlist || []);
   const evidence = insight.evidence?.length ? insight.evidence : (fallback.evidence || []);
   const live = insight.status === 'live';
   const copy = PANEL_COPY[lens];
+  const themeLimit = lens === 'trend' ? 4 : 3;
+  const specialLimit = lens === 'special' ? 4 : 2;
+  const panelCount = Math.max(specialMarkets.length, themes.length, focus.length);
 
   return (
     <Panel
       title={title}
       badge={loading ? 'THINKING' : (live ? badge : 'LOCAL')}
       status={live ? 'live' : 'muted'}
-      count={focus.length}
-      className={`wm-market-panel wm-ai-market-panel wm-ai-market-wide-panel ${lens}`}
+      count={panelCount}
+      className={`wm-market-panel wm-ai-market-panel wm-ai-market-wide-panel wm-ai-${lens}`}
     >
       <div className="wm-ai-market">
         <section className="wm-ai-market-brief">
-          <span>{copy.section}</span>
+          <div className="wm-ai-market-brief-head">
+            <span>{copy.kicker}</span>
+            <b>{insight.viaGateway ? 'AI LIVE' : 'LOCAL'}</b>
+          </div>
+          <strong>{copy.section}</strong>
           <p>{insight.brief || fallback.brief}</p>
         </section>
 
-        <section className="wm-ai-market-focus" aria-label={`${title} focus signals`}>
+        {specialMarkets.length ? (
+          <section className="wm-ai-special-list" aria-label={`${title} special markets`}>
+            <div className="wm-ai-market-section-head">
+              <span>Special Markets</span>
+              <em>{specialMarkets.length} picked</em>
+            </div>
+            {specialMarkets.slice(0, specialLimit).map((item, index) => (
+              <article className={`wm-ai-special-card ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
+                <div>
+                  <span>{item.trend || 'Watch'}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.why}</p>
+                </div>
+                <b>{item.evidence || '--'}</b>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
+        <section className="wm-ai-market-focus" aria-label={`${title} trend signals`}>
           <div className="wm-ai-market-section-head">
-            <span>Focus</span>
+            <span>{lens === 'trend' ? 'Trend Thesis' : 'Focus'}</span>
             <em>{insight.viaGateway ? 'gateway' : (insight.model || 'local')}</em>
           </div>
-          {focus.map((item, index) => (
+          {themes.slice(0, themeLimit).map((item, index) => (
             <article className={`wm-ai-market-card ${severityClass(item.severity)}`} key={`${lens}-${item.label}-${index}`}>
               <div className="wm-ai-market-card-head">
                 <span>{item.label}</span>
@@ -207,6 +344,22 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
           ))}
         </section>
 
+        {watchlist.length ? (
+          <section className="wm-ai-watchlist" aria-label={`${title} watchlist`}>
+            <div className="wm-ai-market-section-head">
+              <span>Watch Next</span>
+              <em>{watchlist.length} items</em>
+            </div>
+            {watchlist.slice(0, 3).map((item, index) => (
+              <article className={`wm-ai-watch-card ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
+                <span>{item.horizon || 'today'}</span>
+                <strong>{item.title}</strong>
+                <p>{item.reason}</p>
+              </article>
+            ))}
+          </section>
+        ) : null}
+
         <section className="wm-ai-market-evidence" aria-label={`${title} evidence`}>
           {evidence.slice(0, 4).map((item) => <span key={item}>{item}</span>)}
         </section>
@@ -214,4 +367,3 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
     </Panel>
   );
 }
-

@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(oraclePanelRenderers, {
   id: 'oracle-timeline',
-  title: 'AI Oracle Insights',
+  title: 'AI Trend Radar',
   eyebrow: 'agent',
-  description: 'Market-wide AI readout of oracle activity and settlement risk.',
+  description: 'Market-wide AI synthesis of Polymarket trend clusters, catalysts, and watch items.',
   defaultEnabled: true,
 });

@@ -1,0 +1,294 @@
+.wm-ai-market-panel .wm-panel-body {
+  padding: 12px 16px 16px;
+}
+
+.wm-ai-market {
+  display: grid;
+  gap: 12px;
+}
+
+.wm-ai-market-brief {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 18px 18px 24px;
+  border: 1px solid rgba(151, 210, 255, 0.18);
+  border-left: 5px solid rgba(238, 246, 255, 0.96);
+  background:
+    linear-gradient(125deg, rgba(38, 75, 66, 0.42), rgba(38, 34, 68, 0.7) 62%, rgba(20, 18, 36, 0.75)),
+    rgba(18, 19, 20, 0.94);
+  box-shadow: inset 0 0 28px rgba(112, 184, 255, 0.1), 0 16px 32px rgba(0, 0, 0, 0.32);
+}
+
+.wm-ai-market-brief::after {
+  content: "";
+  position: absolute;
+  inset: auto -18% -32px 28%;
+  height: 86px;
+  background: radial-gradient(circle, rgba(83, 164, 255, 0.18), transparent 62%);
+  pointer-events: none;
+}
+
+.wm-ai-market-brief-head,
+.wm-ai-market-section-head,
+.wm-ai-market-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wm-ai-market-brief-head span,
+.wm-ai-market-section-head span,
+.wm-ai-market-card-head span,
+.wm-ai-watch-card span {
+  color: #90ddff;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.wm-ai-market-brief-head b {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid rgba(57, 255, 115, 0.28);
+  border-radius: 999px;
+  color: var(--wm-green);
+  background: rgba(57, 255, 115, 0.08);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.wm-ai-market-brief > strong {
+  display: block;
+  margin-top: 14px;
+  color: var(--wm-text);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.wm-ai-market-brief p {
+  position: relative;
+  z-index: 1;
+  margin: 14px 0 0;
+  color: rgba(245, 248, 252, 0.94);
+  font-size: 21px;
+  font-weight: 900;
+  line-height: 1.38;
+}
+
+.wm-ai-market-section-head {
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+
+.wm-ai-market-section-head em,
+.wm-ai-market-card-head b {
+  overflow: hidden;
+  color: var(--wm-text-dim);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-ai-special-list,
+.wm-ai-market-focus,
+.wm-ai-watchlist {
+  display: grid;
+  gap: 8px;
+}
+
+.wm-ai-special-card,
+.wm-ai-market-card,
+.wm-ai-watch-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(151, 210, 255, 0.14);
+  border-left: 4px solid rgba(151, 210, 255, 0.82);
+  background:
+    linear-gradient(100deg, rgba(25, 28, 28, 0.96), rgba(22, 22, 24, 0.9) 58%, rgba(16, 24, 34, 0.78)),
+    rgba(18, 18, 18, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.wm-ai-special-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px 12px 18px;
+}
+
+.wm-ai-special-card::before,
+.wm-ai-market-card::before,
+.wm-ai-watch-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(112, 184, 255, 0.07), transparent 44%);
+  pointer-events: none;
+}
+
+.wm-ai-special-card span {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 7px;
+  padding: 2px 7px;
+  border: 1px solid rgba(144, 221, 255, 0.22);
+  color: #90ddff;
+  background: rgba(17, 49, 64, 0.56);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-ai-special-card strong,
+.wm-ai-market-card > strong,
+.wm-ai-watch-card strong {
+  display: block;
+  color: var(--wm-text);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.22;
+}
+
+.wm-ai-special-card p,
+.wm-ai-market-card p,
+.wm-ai-watch-card p {
+  margin: 7px 0 0;
+  color: rgba(218, 224, 226, 0.76);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.wm-ai-special-card > b {
+  position: relative;
+  z-index: 1;
+  align-self: start;
+  max-width: 92px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 199, 82, 0.28);
+  color: #ffd67a;
+  background: rgba(255, 178, 36, 0.09);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  text-align: right;
+}
+
+.wm-ai-market-card,
+.wm-ai-watch-card {
+  padding: 12px 14px 13px 16px;
+}
+
+.wm-ai-market-card-head {
+  margin-bottom: 8px;
+}
+
+.wm-ai-market-card.positive,
+.wm-ai-special-card.positive,
+.wm-ai-watch-card.positive {
+  border-left-color: var(--wm-green);
+}
+
+.wm-ai-market-card.warning,
+.wm-ai-special-card.warning,
+.wm-ai-watch-card.warning {
+  border-left-color: var(--wm-yellow);
+  background:
+    linear-gradient(100deg, rgba(43, 35, 20, 0.95), rgba(24, 22, 20, 0.9) 60%, rgba(22, 25, 29, 0.78)),
+    rgba(18, 18, 18, 0.96);
+}
+
+.wm-ai-market-card.critical,
+.wm-ai-special-card.critical,
+.wm-ai-watch-card.critical {
+  border-left-color: var(--wm-red);
+  background:
+    linear-gradient(100deg, rgba(48, 25, 29, 0.96), rgba(26, 22, 24, 0.92) 58%, rgba(24, 20, 30, 0.8)),
+    rgba(18, 18, 18, 0.96);
+}
+
+.wm-ai-watchlist {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 10px;
+}
+
+.wm-ai-watch-card {
+  border-left-width: 3px;
+}
+
+.wm-ai-watch-card span {
+  display: block;
+  margin-bottom: 7px;
+  color: #ffd67a;
+}
+
+.wm-ai-market-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-bottom: 2px;
+}
+
+.wm-ai-market-evidence span {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid rgba(151, 210, 255, 0.16);
+  color: #90ddff;
+  background: rgba(15, 32, 44, 0.54);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-ai-special .wm-ai-market-brief {
+  border-left-color: rgba(255, 214, 122, 0.96);
+  background:
+    linear-gradient(125deg, rgba(57, 45, 20, 0.5), rgba(37, 35, 62, 0.68) 62%, rgba(20, 18, 32, 0.75)),
+    rgba(18, 19, 20, 0.94);
+}
+
+.wm-ai-trend .wm-ai-market-brief {
+  border-left-color: rgba(57, 255, 115, 0.86);
+  background:
+    linear-gradient(125deg, rgba(18, 58, 42, 0.46), rgba(31, 39, 64, 0.68) 62%, rgba(18, 19, 28, 0.75)),
+    rgba(18, 19, 20, 0.94);
+}
+
+@media (max-width: 760px) {
+  .wm-ai-market-panel .wm-panel-body {
+    padding: 10px 12px 14px;
+  }
+
+  .wm-ai-market-brief {
+    padding: 14px 14px 14px 18px;
+  }
+
+  .wm-ai-market-brief p {
+    font-size: 18px;
+  }
+
+  .wm-ai-special-card {
+    grid-template-columns: 1fr;
+  }
+
+  .wm-ai-special-card > b {
+    max-width: 100%;
+    text-align: left;
+  }
+}
