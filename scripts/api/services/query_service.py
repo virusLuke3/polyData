@@ -11,8 +11,8 @@ def fetch_dashboard_market_status(ctx: dict, now_iso: str) -> List[Dict[str, Any
         FROM (
             SELECT
                 CASE
-                    WHEN COALESCE(mss.has_settle, 0) = 1 THEN 'Settled'
-                    WHEN COALESCE(mss.has_propose, 0) = 1 THEN 'Proposed'
+                    WHEN COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) THEN 'Settled'
+                    WHEN COALESCE(mss.has_propose, FALSE) = TRUE THEN 'Proposed'
                     WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed'
                     ELSE 'Active'
                 END AS status
@@ -259,7 +259,7 @@ def get_recent_oracle_events(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]
         SELECT
             id, tx_hash, block_number, event_time, event_status, external_market_id,
             market_id, market_title, matched_by, question_id, condition_id,
-            proposed_price, settled_price, requester, proposer, disputer,
+            proposed_price, settled_price, payout, requester, proposer, disputer,
             proposal_transaction, settlement_transaction, source_adapter, source_oracle
         FROM oracle_events
         ORDER BY block_number DESC, id DESC

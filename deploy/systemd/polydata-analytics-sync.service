@@ -1,5 +1,5 @@
 [Unit]
-Description=polyData trade analytics sync service
+Description=polyData PostgreSQL market status snapshot sync service
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/usr/bin/python3 scripts/db/sync_trade_analytics.py --batch-size 200000 --sync-state-key trade_analytics_live --watch --interval 15
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/db/sync_trade_analytics.py --backend postgres --market-only --max-batches 0 --watch --interval 60'
 Restart=always
 RestartSec=10
 StandardOutput=journal

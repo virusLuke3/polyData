@@ -1,5 +1,5 @@
 [Unit]
-Description=polyData trade sync service
+Description=polyData trade sync placeholder disabled until ClickHouse migration
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/usr/bin/python3 scripts/trade/trades_indexer.py --continue-sync --watch --interval 10 --confirmations 20 --batch 125 --max-workers 6 --sync-state-key trade_sync_live
+ExecStart=/bin/bash -lc 'echo "polydata-trade-sync disabled: OrderFilled/trade runtime is waiting for ClickHouse migration"; exec sleep infinity'
 Restart=always
 RestartSec=10
 StandardOutput=journal

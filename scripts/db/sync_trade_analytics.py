@@ -34,11 +34,19 @@ from db import (  # type: ignore
     describe_db_target,
     get_connection,
     init_schema,
+    table_exists,
 )
 from db.trade_v2 import TRADE_V2_CORE_TABLE, get_trade_stats_source, sql_identifier, uint256_storage_to_text
+from oracle.settlement_parser import (
+    OUTCOME_UNKNOWN,
+    SettlementResult,
+    choose_best_settlement,
+    parse_fast_settlement_code,
+    parse_oracle_settlement_event,
+)
 
 TRADE_ANALYTICS_SYNC_KEY = "trade_analytics_sync"
-MARKET_STATUS_SNAPSHOT_SYNC_KEY = "market_status_snapshot_sync"
+MARKET_STATUS_SNAPSHOT_SYNC_KEY = "market_status_snapshot_sync_v2"
 MARKET_LIST_SERVING_DAY_SYNC_KEY = "market_list_serving_day_sync"
 DEFAULT_BATCH_SIZE = 50_000
 DEFAULT_WATCH_INTERVAL_SECONDS = 15
@@ -179,6 +187,19 @@ def _get_sync_state_row(conn, sync_state_key: str) -> Dict[str, Any]:
     return row.as_dict() if hasattr(row, "as_dict") else dict(row) if row else {}
 
 
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if hasattr(row, "as_dict"):
+        return row.as_dict()
+    return dict(row)
+
+
+def _chunked_values(values: Sequence[int], size: int = 900) -> Iterable[Sequence[int]]:
+    for offset in range(0, len(values), size):
+        yield values[offset : offset + size]
+
+
 def get_last_processed_trade_id(
     db_path: str = DEFAULT_DB_PATH,
     sync_state_key: str = TRADE_ANALYTICS_SYNC_KEY,
@@ -300,51 +321,213 @@ def _refresh_market_list_price_24h_ago(conn, market_ids: Sequence[int], threshol
     return len(rows)
 
 
-def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
-    normalized_ids = sorted({int(market_id) for market_id in market_ids if market_id})
-    if not normalized_ids:
-        return 0
-    placeholders = ", ".join("?" for _ in normalized_ids)
-    cursor = conn.cursor()
-    cursor.execute(
-        f"""
-        SELECT
-            market_id,
-            MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
-            MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
-        FROM oracle_events
-        WHERE market_id IN ({placeholders})
-        GROUP BY market_id
-        """,
-        tuple(normalized_ids),
+def _fetch_oracle_status_flags(conn, market_ids: Optional[Sequence[int]] = None) -> Dict[int, Tuple[int, int]]:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    status_map: Dict[int, Tuple[int, int]] = {}
+
+    def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
+        filter_sql = ""
+        params: Tuple[Any, ...] = ()
+        if chunk is not None:
+            placeholders = ", ".join("?" for _ in chunk)
+            filter_sql = f"AND market_id IN ({placeholders})"
+            params = tuple(chunk)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT
+                market_id,
+                MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
+                MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
+            FROM oracle_events
+            WHERE market_id IS NOT NULL
+              {filter_sql}
+            GROUP BY market_id
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            payload = _row_to_dict(row)
+            market_id = payload.get("market_id")
+            if market_id is None:
+                continue
+            status_map[int(market_id)] = (
+                int(payload.get("has_settle") or 0),
+                int(payload.get("has_propose") or 0),
+            )
+
+    if market_ids is None:
+        fetch_chunk(None)
+    else:
+        for chunk in _chunked_values(normalized_ids):
+            fetch_chunk(chunk)
+    return status_map
+
+
+def _fetch_latest_oracle_settlement_map(
+    conn,
+    market_ids: Optional[Sequence[int]] = None,
+) -> Dict[int, SettlementResult]:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    settlement_map: Dict[int, SettlementResult] = {}
+
+    def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
+        filter_sql = ""
+        params: Tuple[Any, ...] = ()
+        if chunk is not None:
+            placeholders = ", ".join("?" for _ in chunk)
+            filter_sql = f"AND market_id IN ({placeholders})"
+            params = tuple(chunk)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT
+                id,
+                market_id,
+                event_time,
+                event_status,
+                block_number,
+                log_index,
+                settlement_transaction,
+                settled_price,
+                payout
+            FROM oracle_events
+            WHERE event_status = 'settle'
+              AND market_id IS NOT NULL
+              {filter_sql}
+            ORDER BY market_id ASC, block_number DESC, log_index DESC, id DESC
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            payload = _row_to_dict(row)
+            market_id = payload.get("market_id")
+            if market_id is None:
+                continue
+            market_id_int = int(market_id)
+            if market_id_int in settlement_map:
+                continue
+            settlement_map[market_id_int] = parse_oracle_settlement_event(payload)
+
+    if market_ids is None:
+        fetch_chunk(None)
+    else:
+        for chunk in _chunked_values(normalized_ids):
+            fetch_chunk(chunk)
+    return settlement_map
+
+
+def _fetch_fast_resolution_map(
+    conn,
+    market_ids: Optional[Sequence[int]] = None,
+) -> Dict[int, SettlementResult]:
+    if not table_exists(conn, "market_resolution_fast"):
+        return {}
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    settlement_map: Dict[int, SettlementResult] = {}
+
+    def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
+        filter_sql = ""
+        params: Tuple[Any, ...] = ()
+        if chunk is not None:
+            placeholders = ", ".join("?" for _ in chunk)
+            filter_sql = f"WHERE r.market_id IN ({placeholders})"
+            params = tuple(chunk)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT r.market_id, r.settlement_code, r.closed_time, r.updated_at
+            FROM market_resolution_fast r
+            JOIN markets m ON m.id = r.market_id
+            {filter_sql}
+            ORDER BY r.market_id ASC
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            payload = _row_to_dict(row)
+            market_id = payload.get("market_id")
+            if market_id is None:
+                continue
+            event_time = payload.get("closed_time") or payload.get("updated_at")
+            settlement_map[int(market_id)] = parse_fast_settlement_code(
+                payload.get("settlement_code"),
+                closed_time=event_time,
+            )
+
+    if market_ids is None:
+        fetch_chunk(None)
+    else:
+        for chunk in _chunked_values(normalized_ids):
+            fetch_chunk(chunk)
+    return settlement_map
+
+
+def _market_status_snapshot_tuple(
+    market_id: int,
+    flags: Tuple[int, int],
+    settlement: SettlementResult,
+) -> Tuple[Any, ...]:
+    return (
+        market_id,
+        bool(flags[0]),
+        bool(flags[1]),
+        int(settlement.settlement_code or 0),
+        settlement.settlement_outcome or OUTCOME_UNKNOWN,
+        settlement.settlement_source,
+        settlement.settlement_raw,
+        settlement.settlement_event_id,
+        settlement.settlement_event_time,
+        settlement.settlement_transaction,
     )
-    grouped_rows = cursor.fetchall()
-    grouped_map = {
-        int((row.as_dict() if hasattr(row, "as_dict") else dict(row))["market_id"]): (
-            int((row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("has_settle") or 0),
-            int((row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("has_propose") or 0),
-        )
-        for row in grouped_rows
-        if (row.as_dict() if hasattr(row, "as_dict") else dict(row)).get("market_id") is not None
-    }
-    rows = [
-        (
-            market_id,
-            grouped_map.get(market_id, (0, 0))[0],
-            grouped_map.get(market_id, (0, 0))[1],
-        )
-        for market_id in normalized_ids
-    ]
+
+
+def _build_market_status_snapshot_rows(conn, market_ids: Optional[Sequence[int]] = None) -> List[Tuple[Any, ...]]:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    scoped_ids: Optional[Sequence[int]] = normalized_ids if market_ids is not None else None
+    flags_map = _fetch_oracle_status_flags(conn, scoped_ids)
+    oracle_map = _fetch_latest_oracle_settlement_map(conn, scoped_ids)
+    fast_map = _fetch_fast_resolution_map(conn, scoped_ids)
+    if market_ids is None:
+        output_ids = sorted(set(flags_map) | set(oracle_map) | set(fast_map))
+    else:
+        output_ids = normalized_ids
+    rows: List[Tuple[Any, ...]] = []
+    for market_id in output_ids:
+        settlement = choose_best_settlement(oracle_map.get(market_id), fast_map.get(market_id))
+        rows.append(_market_status_snapshot_tuple(market_id, flags_map.get(market_id, (0, 0)), settlement))
+    return rows
+
+
+def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
+    rows = _build_market_status_snapshot_rows(conn, market_ids)
+    if not rows:
+        return 0
     conn.executemany(
         """
         INSERT INTO market_status_snapshot (
             market_id,
             has_settle,
-            has_propose
-        ) VALUES (?, ?, ?)
+            has_propose,
+            settlement_code,
+            settlement_outcome,
+            settlement_source,
+            settlement_raw,
+            settlement_event_id,
+            settlement_event_time,
+            settlement_transaction
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(market_id) DO UPDATE SET
             has_settle = excluded.has_settle,
-            has_propose = excluded.has_propose
+            has_propose = excluded.has_propose,
+            settlement_code = excluded.settlement_code,
+            settlement_outcome = excluded.settlement_outcome,
+            settlement_source = excluded.settlement_source,
+            settlement_raw = excluded.settlement_raw,
+            settlement_event_id = excluded.settlement_event_id,
+            settlement_event_time = excluded.settlement_event_time,
+            settlement_transaction = excluded.settlement_transaction,
+            updated_at = CURRENT_TIMESTAMP
         """,
         rows,
     )
@@ -352,26 +535,7 @@ def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
 
 
 def _full_refresh_market_status_snapshot(conn) -> int:
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT
-            market_id,
-            MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
-            MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
-        FROM oracle_events
-        WHERE market_id IS NOT NULL
-        GROUP BY market_id
-        """
-    )
-    rows = []
-    max_event_id = 0
-    for row in cursor.fetchall():
-        payload = row.as_dict() if hasattr(row, "as_dict") else dict(row)
-        market_id = payload.get("market_id")
-        if market_id is None:
-            continue
-        rows.append((int(market_id), int(payload.get("has_settle") or 0), int(payload.get("has_propose") or 0)))
+    rows = _build_market_status_snapshot_rows(conn)
     conn.execute("DELETE FROM market_status_snapshot")
     if rows:
         conn.executemany(
@@ -379,14 +543,22 @@ def _full_refresh_market_status_snapshot(conn) -> int:
             INSERT INTO market_status_snapshot (
                 market_id,
                 has_settle,
-                has_propose
-            ) VALUES (?, ?, ?)
+                has_propose,
+                settlement_code,
+                settlement_outcome,
+                settlement_source,
+                settlement_raw,
+                settlement_event_id,
+                settlement_event_time,
+                settlement_transaction
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
+    max_event_id = 0
     max_row = conn.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM oracle_events").fetchone()
     if max_row:
-        max_payload = max_row.as_dict() if hasattr(max_row, "as_dict") else dict(max_row)
+        max_payload = _row_to_dict(max_row)
         max_event_id = int(max_payload.get("max_id") or 0)
     _set_sync_state(
         conn,
@@ -400,9 +572,7 @@ def _full_refresh_market_status_snapshot(conn) -> int:
 def _sync_market_status_snapshot(conn, *, oracle_batch_size: int = DEFAULT_ORACLE_EVENT_BATCH_SIZE) -> Dict[str, int]:
     sync_row = _get_sync_state_row(conn, MARKET_STATUS_SNAPSHOT_SYNC_KEY)
     last_event_id = int(sync_row.get("last_block") or 0)
-    table_row = conn.execute("SELECT COUNT(*) AS c FROM market_status_snapshot").fetchone()
-    table_count = int((table_row.as_dict() if hasattr(table_row, "as_dict") else dict(table_row)).get("c") or 0) if table_row else 0
-    if last_event_id <= 0 and table_count == 0:
+    if last_event_id <= 0:
         return {"mode": 1, "updated_markets": _full_refresh_market_status_snapshot(conn), "last_event_id": int(_get_sync_state_row(conn, MARKET_STATUS_SNAPSHOT_SYNC_KEY).get("last_block") or 0)}
 
     updated_market_ids: Set[int] = set()
@@ -1208,7 +1378,7 @@ def sync_trade_analytics(
     try:
         status_sync_result = _sync_market_status_snapshot(conn)
         serving_refreshed = 0
-        if serving_sync_row.get("value") != stats_since:
+        if max_batches != 0 and serving_sync_row.get("value") != stats_since:
             serving_refreshed = _full_refresh_market_list_serving(conn, stats_since)
         conn.commit()
 

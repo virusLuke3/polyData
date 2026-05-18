@@ -3,8 +3,8 @@
 """
 Polymarket 索引器数据库模块。
 
-当前默认后端为 MySQL，保留 SQLite 作为迁移来源和回退路径，并支持
-PostgreSQL core 库作为 market/oracle 重构后的直接写入目标。
+当前默认后端为 PostgreSQL。SQLite 仅作为旧迁移/本地调试回退路径；
+MySQL 连接代码只保留给显式的历史迁移工具，不再作为运行时默认目标。
 该模块尽量兼容原有 sqlite3 风格调用，避免大规模重写业务脚本。
 """
 
@@ -19,14 +19,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 try:
-    import pymysql
-except ImportError:
-    pymysql = None
-
-try:
     import psycopg
 except ImportError:
     psycopg = None
+
+try:
+    import pymysql
+except ImportError:
+    pymysql = None
 
 
 def _load_dotenv_files() -> None:
@@ -52,14 +52,19 @@ DEFAULT_SQLITE_PATH = os.environ.get(
     os.environ.get("POLYMARKET_DB", "/data/hy/myPolyDB/polymarket_indexer.db"),
 )
 DEFAULT_DB_PATH = DEFAULT_SQLITE_PATH
-DEFAULT_DB_BACKEND = os.environ.get("POLYMARKET_DB_BACKEND", "mysql").strip().lower()
+_REQUESTED_DB_BACKEND = os.environ.get("POLYMARKET_DB_BACKEND", "postgres").strip().lower()
+DEFAULT_DB_BACKEND = (
+    _REQUESTED_DB_BACKEND
+    if _REQUESTED_DB_BACKEND in {"postgres", "postgresql", "sqlite"}
+    else "postgres"
+)
 
-DEFAULT_MYSQL_HOST = os.environ.get("POLYMARKET_MYSQL_HOST", "127.0.0.1")
-DEFAULT_MYSQL_PORT = int(os.environ.get("POLYMARKET_MYSQL_PORT", "3306"))
-DEFAULT_MYSQL_USER = os.environ.get("POLYMARKET_MYSQL_USER", "")
-DEFAULT_MYSQL_PASSWORD = os.environ.get("POLYMARKET_MYSQL_PASSWORD", "")
-DEFAULT_MYSQL_DATABASE = os.environ.get("POLYMARKET_MYSQL_DATABASE", "")
-DEFAULT_MYSQL_CHARSET = os.environ.get("POLYMARKET_MYSQL_CHARSET", "utf8mb4")
+DEFAULT_MYSQL_HOST = ""
+DEFAULT_MYSQL_PORT = 0
+DEFAULT_MYSQL_USER = ""
+DEFAULT_MYSQL_PASSWORD = ""
+DEFAULT_MYSQL_DATABASE = ""
+DEFAULT_MYSQL_CHARSET = "utf8mb4"
 
 DEFAULT_POSTGRES_HOST = (
     os.environ.get("POLYDATA_POSTGRES_HOST")
@@ -214,9 +219,9 @@ def configure_runtime_db(
 def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--backend",
-        choices=["mysql", "sqlite", "postgres", "postgresql"],
+        choices=["sqlite", "mysql", "postgres", "postgresql"],
         default=DEFAULT_DB_BACKEND,
-        help="数据库后端；默认从 POLYMARKET_DB_BACKEND 读取，当前默认 mysql",
+        help="数据库后端；默认从 POLYMARKET_DB_BACKEND 读取",
     )
     parser.add_argument(
         "--sqlite-path",
@@ -232,7 +237,6 @@ def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--postgres-host", default=DEFAULT_POSTGRES_HOST, help="PostgreSQL host")
     parser.add_argument("--postgres-port", type=int, default=DEFAULT_POSTGRES_PORT, help="PostgreSQL port")
     parser.add_argument("--postgres-user", default=DEFAULT_POSTGRES_USER, help="PostgreSQL user")
-    parser.add_argument("--postgres-password", default=DEFAULT_POSTGRES_PASSWORD, help="PostgreSQL password")
     parser.add_argument("--postgres-database", default=DEFAULT_POSTGRES_DATABASE, help="PostgreSQL database")
     parser.add_argument(
         "--postgres-search-path",
@@ -254,7 +258,7 @@ def configure_db_from_args(args: argparse.Namespace) -> None:
         postgres_host=getattr(args, "postgres_host", None),
         postgres_port=getattr(args, "postgres_port", None),
         postgres_user=getattr(args, "postgres_user", None),
-        postgres_password=getattr(args, "postgres_password", None),
+        postgres_password=None,
         postgres_database=getattr(args, "postgres_database", None),
         postgres_search_path=getattr(args, "postgres_search_path", None),
     )
@@ -267,8 +271,10 @@ def describe_db_target() -> str:
     if backend in {"postgres", "postgresql"}:
         settings = get_postgres_settings()
         return f"postgres:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
-    settings = get_mysql_settings()
-    return f"mysql:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
+    if backend == "mysql":
+        settings = get_mysql_settings()
+        return f"mysql:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
+    return f"unsupported:{backend}"
 
 
 def is_mysql_backend() -> bool:
@@ -536,6 +542,7 @@ def _replace_insert_or_replace_for_postgres(sql: str) -> str:
 
 def adapt_sql_for_postgres(query: str, params: Optional[Any]) -> Tuple[str, Optional[Any]]:
     sql = query.strip()
+    sql = sql.replace("`", '"')
     sql = sql.replace(" COLLATE NOCASE", "")
     sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, flags=re.IGNORECASE)
     if re.search(r"INSERT\s+OR\s+REPLACE\s+INTO", sql, flags=re.IGNORECASE):
@@ -565,7 +572,7 @@ def get_sqlite_connection(db_path: str = DEFAULT_DB_PATH, readonly: bool = False
 
 def get_mysql_connection() -> MySQLConnectionWrapper:
     if pymysql is None:
-        raise RuntimeError("PyMySQL is not installed. Please install PyMySQL first.")
+        raise RuntimeError("pymysql is not installed. Please install pymysql first.")
     settings = get_mysql_settings()
     raw = pymysql.connect(
         host=settings["host"],
@@ -575,7 +582,6 @@ def get_mysql_connection() -> MySQLConnectionWrapper:
         database=settings["database"],
         charset=settings["charset"],
         autocommit=False,
-        local_infile=True,
         connect_timeout=int(os.environ.get("POLYMARKET_MYSQL_CONNECT_TIMEOUT", "10")),
         read_timeout=int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60")),
         write_timeout=int(os.environ.get("POLYMARKET_MYSQL_WRITE_TIMEOUT", "60")),
@@ -613,9 +619,9 @@ def get_connection(
         return get_sqlite_connection(db_path or get_sqlite_path(), readonly=readonly)
     if chosen in {"postgres", "postgresql"}:
         return get_postgres_connection()
-    if readonly:
+    if chosen == "mysql":
         return get_mysql_connection()
-    return get_mysql_connection()
+    raise ValueError(f"Unsupported database backend: {chosen}")
 
 
 @contextmanager
@@ -813,12 +819,13 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
     conn.execute("CREATE SCHEMA IF NOT EXISTS core")
     conn.execute("CREATE SCHEMA IF NOT EXISTS oracle")
     conn.execute("CREATE SCHEMA IF NOT EXISTS ops")
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS core.markets_id_seq")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS core.markets (
-            id BIGINT PRIMARY KEY,
+            id BIGINT PRIMARY KEY DEFAULT nextval('core.markets_id_seq'),
             gamma_market_id TEXT,
-            slug TEXT NOT NULL UNIQUE,
+            slug TEXT NOT NULL,
             condition_id TEXT NOT NULL UNIQUE,
             question_id TEXT,
             oracle TEXT,
@@ -840,60 +847,31 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
     )
     conn.execute(
         """
-        COMMENT ON COLUMN core.markets.id IS
-        'Local surrogate market id for internal joins. Do not use for Gamma API /markets/{id}.'
-        """
-    )
-    conn.execute(
-        """
-        COMMENT ON COLUMN core.markets.gamma_market_id IS
-        'Gamma API market id. Use this value for gamma-api.polymarket.com/markets/{id}.'
-        """
-    )
-    conn.execute(
-        """
-        COMMENT ON COLUMN core.markets.condition_id IS
-        'CTF/CLOB condition id. Use this for CLOB market identity and websocket market subscriptions.'
-        """
-    )
-    conn.execute(
-        """
-        COMMENT ON COLUMN core.markets.yes_token_id IS
-        'YES outcome ERC1155/CLOB token id. Use token ids for orderbook, price history, and trade matching.'
-        """
-    )
-    conn.execute(
-        """
-        COMMENT ON COLUMN core.markets.no_token_id IS
-        'NO outcome ERC1155/CLOB token id. Use token ids for orderbook, price history, and trade matching.'
-        """
-    )
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS core.markets_id_seq")
-    conn.execute("ALTER SEQUENCE core.markets_id_seq OWNED BY core.markets.id")
-    conn.execute("ALTER TABLE core.markets ALTER COLUMN id SET DEFAULT nextval('core.markets_id_seq')")
-    conn.execute(
-        """
-        SELECT setval(
-            'core.markets_id_seq',
-            GREATEST(
-                (SELECT COALESCE(MAX(id), 0) + 1 FROM core.markets),
-                (SELECT last_value FROM core.markets_id_seq),
-                1
-            ),
-            false
-        )
-        """
-    )
-    conn.execute(
-        """
         CREATE TABLE IF NOT EXISTS core.market_status_snapshot (
             market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
             has_settle BOOLEAN NOT NULL DEFAULT FALSE,
             has_propose BOOLEAN NOT NULL DEFAULT FALSE,
+            settlement_code SMALLINT NOT NULL DEFAULT 0 CHECK (settlement_code IN (0, 1, 2, 3)),
+            settlement_outcome TEXT NOT NULL DEFAULT 'UNKNOWN',
+            settlement_source TEXT,
+            settlement_raw TEXT,
+            settlement_event_id BIGINT,
+            settlement_event_time TIMESTAMPTZ,
+            settlement_transaction TEXT,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """
     )
+    for col, col_type in (
+        ("settlement_code", "SMALLINT NOT NULL DEFAULT 0"),
+        ("settlement_outcome", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
+        ("settlement_source", "TEXT"),
+        ("settlement_raw", "TEXT"),
+        ("settlement_event_id", "BIGINT"),
+        ("settlement_event_time", "TIMESTAMPTZ"),
+        ("settlement_transaction", "TEXT"),
+    ):
+        ensure_column_exists(conn, "core.market_status_snapshot", col, col_type)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS core.market_resolution_fast (
@@ -935,17 +913,74 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_trade_daily_stats (
+            trade_date DATE NOT NULL,
+            market_id BIGINT NOT NULL REFERENCES core.markets(id),
+            trade_count BIGINT NOT NULL DEFAULT 0,
+            volume_notional NUMERIC(38, 18) NOT NULL DEFAULT 0,
+            last_trade_at TIMESTAMPTZ,
+            last_block_number BIGINT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (trade_date, market_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_latest_prices (
+            market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
+            latest_trade_at TIMESTAMPTZ,
+            latest_trade_block BIGINT,
+            latest_trade_log_index BIGINT,
+            latest_price NUMERIC(20, 10),
+            latest_yes_trade_at TIMESTAMPTZ,
+            latest_yes_trade_block BIGINT,
+            latest_yes_trade_log_index BIGINT,
+            latest_yes_price NUMERIC(20, 10),
+            latest_no_trade_at TIMESTAMPTZ,
+            latest_no_trade_block BIGINT,
+            latest_no_trade_log_index BIGINT,
+            latest_no_price NUMERIC(20, 10),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_list_serving (
+            market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
+            latest_price NUMERIC(20, 10),
+            latest_trade_at TIMESTAMPTZ,
+            price_24h_ago NUMERIC(20, 10),
+            trade_count_24h BIGINT NOT NULL DEFAULT 0,
+            volume_24h NUMERIC(38, 18) NOT NULL DEFAULT 0,
+            last_trade_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    ensure_column_exists(conn, "core.market_list_serving", "price_24h_ago", "NUMERIC(20, 10)")
     for table, index_name, cols in (
         ("core.markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
+        ("core.markets", "idx_markets_slug", ["slug"]),
         ("core.markets", "idx_markets_question_id", ["question_id"]),
         ("core.markets", "idx_markets_yes_token_id", ["yes_token_id"]),
         ("core.markets", "idx_markets_no_token_id", ["no_token_id"]),
         ("core.markets", "idx_markets_end_date", ["end_date"]),
         ("core.markets", "idx_markets_created_at", ["created_at"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
         ("core.market_resolution_fast", "idx_mrf_settlement_code", ["settlement_code"]),
         ("core.market_resolution_fast", "idx_mrf_condition_id", ["condition_id"]),
         ("core.market_resolution_fast", "idx_mrf_slug", ["slug"]),
         ("core.market_resolution_fast", "idx_mrf_closed_time", ["closed_time"]),
+        ("core.market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
+        ("core.market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
+        ("core.market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
+        ("core.market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
+        ("core.market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_tags_gin ON core.markets USING GIN (tags)")
@@ -1121,10 +1156,31 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
             market_id INTEGER PRIMARY KEY,
             has_settle INTEGER NOT NULL DEFAULT 0,
             has_propose INTEGER NOT NULL DEFAULT 0,
+            settlement_code INTEGER NOT NULL DEFAULT 0,
+            settlement_outcome TEXT NOT NULL DEFAULT 'UNKNOWN',
+            settlement_source TEXT,
+            settlement_raw TEXT,
+            settlement_event_id INTEGER,
+            settlement_event_time TEXT,
+            settlement_transaction TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    for col, col_type in (
+        ("settlement_code", "INTEGER NOT NULL DEFAULT 0"),
+        ("settlement_outcome", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
+        ("settlement_source", "TEXT"),
+        ("settlement_raw", "TEXT"),
+        ("settlement_event_id", "INTEGER"),
+        ("settlement_event_time", "TEXT"),
+        ("settlement_transaction", "TEXT"),
+    ):
+        try:
+            cursor.execute(f"ALTER TABLE market_status_snapshot ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS market_list_serving (
@@ -1292,6 +1348,7 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
@@ -1431,6 +1488,13 @@ def _init_mysql_schema(conn) -> None:
             market_id BIGINT NOT NULL PRIMARY KEY,
             has_settle TINYINT NOT NULL DEFAULT 0,
             has_propose TINYINT NOT NULL DEFAULT 0,
+            settlement_code TINYINT NOT NULL DEFAULT 0,
+            settlement_outcome VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+            settlement_source VARCHAR(64),
+            settlement_raw LONGTEXT,
+            settlement_event_id BIGINT,
+            settlement_event_time DATETIME(6),
+            settlement_transaction VARCHAR(255),
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             CONSTRAINT fk_market_status_snapshot_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -1579,6 +1643,16 @@ def _init_mysql_schema(conn) -> None:
     ):
         ensure_column_exists(conn, "trades", col, col_type)
     ensure_column_exists(conn, "market_list_serving", "price_24h_ago", "DECIMAL(20, 10)")
+    for col, col_type in (
+        ("settlement_code", "TINYINT NOT NULL DEFAULT 0"),
+        ("settlement_outcome", "VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'"),
+        ("settlement_source", "VARCHAR(64)"),
+        ("settlement_raw", "LONGTEXT"),
+        ("settlement_event_id", "BIGINT"),
+        ("settlement_event_time", "DATETIME(6)"),
+        ("settlement_transaction", "VARCHAR(255)"),
+    ):
+        ensure_column_exists(conn, "market_status_snapshot", col, col_type)
     _ensure_mysql_uma_adapter_mapping_schema(conn)
     _ensure_mysql_neg_risk_request_mapping_schema(conn)
     for table, index_name, cols in (
@@ -1593,6 +1667,7 @@ def _init_mysql_schema(conn) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),

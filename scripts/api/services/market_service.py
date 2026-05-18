@@ -14,12 +14,12 @@ from market.market_identity import MarketIdentity, oracle_event_lookup_clause
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v8"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
-    INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
-    AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
-    AND INSTR(LOWER(COALESCE(m.tags, '')), 'onchain-registry') = 0
-    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-5m') = 0
-    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-15m') = 0
-    AND INSTR(LOWER(COALESCE(m.title, '')), ' up or down - ') = 0
+    LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
+    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
+    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%onchain-registry%%'
+    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-5m%%'
+    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-15m%%'
+    AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE '%% up or down - %%'
 """
 
 def _default_active_market_activity_sql(stats_alias: str) -> str:
@@ -263,9 +263,7 @@ def _market_family_key(row: Dict[str, Any]) -> str:
     return f"{category}:{prefix}"
 
 
-def _rank_default_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-
+def _rank_default_market_rows(rows: List[Dict[str, Any]], now_value: Any = None) -> List[Dict[str, Any]]:
     def parse_time(value: Any) -> Optional[datetime]:
         if not value:
             return None
@@ -279,6 +277,8 @@ def _rank_default_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    now = parse_time(now_value) or datetime.now(timezone.utc)
 
     def score(row: Dict[str, Any]) -> float:
         created = parse_time(row.get("created_at"))
@@ -295,11 +295,10 @@ def _rank_default_market_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return sorted(rows, key=score, reverse=True)
 
 
-def _diversify_market_rows(rows: List[Dict[str, Any]], page_size: int) -> List[Dict[str, Any]]:
-    ranked = _rank_default_market_rows(rows)
+def _diversify_market_rows(rows: List[Dict[str, Any]], page_size: int, now_value: Any = None) -> List[Dict[str, Any]]:
     selected: List[Dict[str, Any]] = []
     seen_families: set[str] = set()
-    for row in ranked:
+    for row in rows:
         family = _market_family_key(row)
         if family in seen_families:
             continue
@@ -308,6 +307,7 @@ def _diversify_market_rows(rows: List[Dict[str, Any]], page_size: int) -> List[D
         if len(selected) >= page_size:
             return selected
     seen_ids = {int(row["id"]) for row in selected if row.get("id") is not None}
+    ranked = _rank_default_market_rows(rows, now_value)
     for row in ranked:
         market_id = row.get("id")
         if market_id is not None and int(market_id) in seen_ids:
@@ -472,10 +472,18 @@ def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:
         SELECT
             m.*,
             {status_case} AS status,
+            COALESCE(mss_detail.settlement_code, 0) AS settlement_code,
+            COALESCE(mss_detail.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+            mss_detail.settlement_source,
+            mss_detail.settlement_raw,
+            mss_detail.settlement_event_id,
+            mss_detail.settlement_event_time,
+            mss_detail.settlement_transaction,
             mlp.latest_yes_price,
             mlp.latest_no_price,
             mlp.latest_price
         FROM markets m
+        LEFT JOIN market_status_snapshot mss_detail ON mss_detail.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
         WHERE m.slug = ? COLLATE NOCASE
         LIMIT 1
@@ -493,10 +501,18 @@ def get_market_by_id(ctx: dict, market_id: int) -> Optional[dict]:
         SELECT
             m.*,
             {status_case} AS status,
+            COALESCE(mss_detail.settlement_code, 0) AS settlement_code,
+            COALESCE(mss_detail.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+            mss_detail.settlement_source,
+            mss_detail.settlement_raw,
+            mss_detail.settlement_event_id,
+            mss_detail.settlement_event_time,
+            mss_detail.settlement_transaction,
             mlp.latest_yes_price,
             mlp.latest_no_price,
             mlp.latest_price
         FROM markets m
+        LEFT JOIN market_status_snapshot mss_detail ON mss_detail.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
         WHERE m.id = ?
         LIMIT 1
@@ -560,7 +576,7 @@ def get_oracle_events_by_market_id(ctx: dict, market_id: int) -> List[Dict[str, 
         SELECT
             oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
             oe.market_id, oe.market_title, oe.matched_by, oe.question_id, oe.condition_id,
-            oe.proposed_price, oe.settled_price, oe.requester, oe.proposer, oe.disputer,
+            oe.proposed_price, oe.settled_price, oe.payout, oe.requester, oe.proposer, oe.disputer,
             oe.proposal_transaction, oe.settlement_transaction, oe.source_adapter, oe.source_oracle
         FROM oracle_events oe
         WHERE {where_sql}
@@ -841,10 +857,45 @@ def _market_change(ctx: dict, current: Any, past: Any) -> Any:
     return ctx["format_trade_decimal"](delta)
 
 
+def _int_value(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in {"", "0", "false", "none", "null"}
+
+
+def _settlement_code(row: Dict[str, Any]) -> int:
+    return _int_value(row.get("settlement_code"), 0)
+
+
+def _settlement_payload(row: Dict[str, Any], *, include_raw: bool = False) -> Dict[str, Any]:
+    payload = {
+        "settlementCode": _settlement_code(row),
+        "settlementOutcome": row.get("settlement_outcome") or "UNKNOWN",
+        "settlementSource": row.get("settlement_source"),
+        "settlementEventId": row.get("settlement_event_id"),
+        "settlementEventTime": row.get("settlement_event_time"),
+        "settlementTransaction": row.get("settlement_transaction"),
+    }
+    if include_raw:
+        payload["settlementRaw"] = row.get("settlement_raw")
+    return payload
+
+
 def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
-    if bool(row.get("has_settle")):
+    if _settlement_code(row) in {1, 2, 3} or _truthy_flag(row.get("has_settle")):
         return "Settled"
-    if bool(row.get("has_propose")):
+    if _truthy_flag(row.get("has_propose")):
         return "Proposed"
     end_date = row.get("end_date")
     if end_date not in (None, "") and str(end_date) < now_iso:
@@ -872,6 +923,7 @@ def _market_list_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "tradeCount24h": int(row.get("trade_count_24h") or 0),
         "change24h": row.get("change_24h") or _market_change(ctx, row.get("latest_price"), row.get("price_24h_ago")),
         "lastTradeAt": row.get("last_trade_at") or row.get("latest_trade_at"),
+        **_settlement_payload(row),
     }
 
 
@@ -883,8 +935,14 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
                 m.condition_id,
                 m.end_date,
                 m.created_at,
-                COALESCE(mss.has_settle, 0) AS has_settle,
-                COALESCE(mss.has_propose, 0) AS has_propose,
+                CASE WHEN COALESCE(mss.has_settle, FALSE) THEN 1 ELSE 0 END AS has_settle,
+                CASE WHEN COALESCE(mss.has_propose, FALSE) THEN 1 ELSE 0 END AS has_propose,
+                COALESCE(mss.settlement_code, 0) AS settlement_code,
+                COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+                mss.settlement_source,
+                mss.settlement_event_id,
+                mss.settlement_event_time,
+                mss.settlement_transaction,
                 {stats_alias}.trade_count_24h,
                 {stats_alias}.volume_24h,
                 {stats_alias}.latest_price,
@@ -894,14 +952,59 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
             FROM markets m
             LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
             LEFT JOIN market_list_serving {stats_alias} ON {stats_alias}.market_id = m.id
-            WHERE COALESCE(mss.has_settle, 0) = 0
-              AND COALESCE(mss.has_propose, 0) = 0
+            WHERE COALESCE(mss.has_settle, FALSE) = FALSE
+              AND COALESCE(mss.has_propose, FALSE) = FALSE
+              AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
               AND {_default_active_market_activity_sql(stats_alias)}
               AND {_default_active_market_price_sql(stats_alias)}
               AND {_default_active_market_recent_trade_sql(stats_alias)}
         """
+
+
+def _market_list_serving_has_rows(ctx: dict) -> bool:
+    if not ctx["table_exists"]("market_list_serving"):
+        return False
+    row = ctx["query_one"]("SELECT 1 AS ok FROM market_list_serving LIMIT 1")
+    return bool(row and row.get("ok"))
+
+
+def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) -> List[Dict[str, Any]]:
+    return ctx["query_all"](
+        f"""
+            SELECT
+                m.id,
+                m.slug,
+                m.condition_id,
+                m.end_date,
+                m.created_at,
+                CASE WHEN COALESCE(mss.has_settle, FALSE) THEN 1 ELSE 0 END AS has_settle,
+                CASE WHEN COALESCE(mss.has_propose, FALSE) THEN 1 ELSE 0 END AS has_propose,
+                COALESCE(mss.settlement_code, 0) AS settlement_code,
+                COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+                mss.settlement_source,
+                mss.settlement_event_id,
+                mss.settlement_event_time,
+                mss.settlement_transaction,
+                0 AS trade_count_24h,
+                0 AS volume_24h,
+                NULL AS latest_price,
+                NULL AS last_trade_at,
+                NULL AS latest_trade_at,
+                NULL AS price_24h_ago
+            FROM markets m
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            WHERE COALESCE(mss.has_settle, FALSE) = FALSE
+              AND COALESCE(mss.has_propose, FALSE) = FALSE
+              AND COALESCE(mss.settlement_code, 0) = 0
+              AND (m.end_date IS NULL OR m.end_date >= ?)
+              AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
+            ORDER BY m.created_at DESC NULLS LAST, m.id DESC
+            LIMIT ?
+        """,
+        (now_iso, limit),
+    )
 
 
 def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int, Dict[str, Any]]:
@@ -924,10 +1027,18 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
             m.clob_token_ids,
             m.end_date,
             m.created_at,
+            COALESCE(mss.settlement_code, 0) AS settlement_code,
+            COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+            mss.settlement_source,
+            mss.settlement_event_id,
+            mss.settlement_event_time,
+            mss.settlement_transaction,
+            mss.settlement_raw,
             COALESCE(mlp.latest_yes_price, mls.latest_price) AS latest_price,
             COALESCE(mls.latest_trade_at, mlp.latest_trade_at) AS latest_trade_at,
             mls.price_24h_ago
         FROM markets m
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         LEFT JOIN market_list_serving mls ON mls.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
         WHERE m.id IN ({placeholders})
@@ -960,7 +1071,7 @@ def get_markets_payload(
     params: List[Any] = []
     recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
     if status == "active":
-        filters.append("(COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
+        filters.append("(COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
         if not query:
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
@@ -969,7 +1080,7 @@ def get_markets_payload(
             filters.append(_default_active_market_recent_trade_sql("mls"))
             params.append(recent_trade_cutoff)
     elif status == "closed":
-        filters.append("(COALESCE(mss.has_settle, 0) = 1 OR (COALESCE(mss.has_settle, 0) = 0 AND COALESCE(mss.has_propose, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
+        filters.append("(COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) OR (COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
         params.append(now_iso)
     if query:
         pattern = f"%{query}%"
@@ -994,8 +1105,14 @@ def get_markets_payload(
                 m.condition_id,
                 m.end_date,
                 m.created_at,
-                COALESCE(mss.has_settle, 0) AS has_settle,
-                COALESCE(mss.has_propose, 0) AS has_propose,
+                CASE WHEN COALESCE(mss.has_settle, FALSE) THEN 1 ELSE 0 END AS has_settle,
+                CASE WHEN COALESCE(mss.has_propose, FALSE) THEN 1 ELSE 0 END AS has_propose,
+                COALESCE(mss.settlement_code, 0) AS settlement_code,
+                COALESCE(mss.settlement_outcome, 'UNKNOWN') AS settlement_outcome,
+                mss.settlement_source,
+                mss.settlement_event_id,
+                mss.settlement_event_time,
+                mss.settlement_transaction,
                 mls.trade_count_24h,
                 mls.volume_24h,
                 mls.latest_price,
@@ -1044,6 +1161,12 @@ def get_markets_payload(
                     "price_24h_ago": candidate.get("price_24h_ago"),
                     "has_settle": candidate.get("has_settle"),
                     "has_propose": candidate.get("has_propose"),
+                    "settlement_code": candidate.get("settlement_code"),
+                    "settlement_outcome": candidate.get("settlement_outcome"),
+                    "settlement_source": candidate.get("settlement_source"),
+                    "settlement_event_id": candidate.get("settlement_event_id"),
+                    "settlement_event_time": candidate.get("settlement_event_time"),
+                    "settlement_transaction": candidate.get("settlement_transaction"),
                 }
             )
             normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
@@ -1058,7 +1181,7 @@ def get_markets_payload(
             visible_rows = _prefer_tradeable_market_rows(visible_rows, page_size + 1)
             if not query:
                 visible_rows = _coalesce_native_market_rows(visible_rows)
-                visible_rows = _diversify_market_rows(visible_rows, page_size + 1)
+                visible_rows = _diversify_market_rows(visible_rows, page_size + 1, now_iso)
         has_more = len(visible_rows) > page_size
         visible_rows = visible_rows[:page_size]
         return {
@@ -1084,23 +1207,26 @@ def build_active_markets_payload(
 ) -> Dict[str, Any]:
     now_iso = ctx["utc_now_iso"]()
     raw_limit = max(page_size * 3, 180)
-    volume_candidate_rows = ctx["query_all"](
-        f"""
-        {_active_market_candidate_select_sql("stats_24h")}
-        ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
-        LIMIT ?
-        """,
-        (now_iso, _iso_hours_before(now_iso, 24 * 7), raw_limit),
-    )
-    recent_candidate_rows = ctx["query_all"](
-        f"""
-        {_active_market_candidate_select_sql("stats_24h")}
-        ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
-        LIMIT ?
-        """,
-        (now_iso, _iso_hours_before(now_iso, 24 * 7), min(raw_limit, max(page_size * 2, 80))),
-    )
-    candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
+    if _market_list_serving_has_rows(ctx):
+        volume_candidate_rows = ctx["query_all"](
+            f"""
+            {_active_market_candidate_select_sql("stats_24h")}
+            ORDER BY COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC, stats_24h.last_trade_at DESC, m.created_at DESC
+            LIMIT ?
+            """,
+            (now_iso, _iso_hours_before(now_iso, 24 * 7), raw_limit),
+        )
+        recent_candidate_rows = ctx["query_all"](
+            f"""
+            {_active_market_candidate_select_sql("stats_24h")}
+            ORDER BY m.created_at DESC, COALESCE(stats_24h.volume_24h, 0) DESC, COALESCE(stats_24h.trade_count_24h, 0) DESC
+            LIMIT ?
+            """,
+            (now_iso, _iso_hours_before(now_iso, 24 * 7), min(raw_limit, max(page_size * 2, 80))),
+        )
+        candidate_rows = _blend_recent_candidate_rows(volume_candidate_rows, recent_candidate_rows, page_size)
+    else:
+        candidate_rows = _fallback_active_market_candidate_rows(ctx, now_iso, raw_limit)
     candidate_stats_map = {
         int(row["id"]): {
             "trade_count_24h": row.get("trade_count_24h"),
@@ -1109,6 +1235,12 @@ def build_active_markets_payload(
             "price_24h_ago": row.get("price_24h_ago"),
             "has_settle": row.get("has_settle"),
             "has_propose": row.get("has_propose"),
+            "settlement_code": row.get("settlement_code"),
+            "settlement_outcome": row.get("settlement_outcome"),
+            "settlement_source": row.get("settlement_source"),
+            "settlement_event_id": row.get("settlement_event_id"),
+            "settlement_event_time": row.get("settlement_event_time"),
+            "settlement_transaction": row.get("settlement_transaction"),
         }
         for row in candidate_rows
         if row.get("id") is not None
@@ -1141,7 +1273,7 @@ def build_active_markets_payload(
     if include_change_24h:
         rows = enrich_market_rows_with_24h_change(ctx, rows)
     rows = _coalesce_native_market_rows(rows)
-    rows = _diversify_market_rows(rows, page_size)
+    rows = _diversify_market_rows(rows, page_size, now_iso)
     rows = rows[:page_size]
     return {
         "items": [_market_list_item(ctx, row) for row in rows],
@@ -1157,7 +1289,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 12,
+            "v": 13,
         },
         sort_keys=True,
         ensure_ascii=True,

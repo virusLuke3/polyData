@@ -11,12 +11,12 @@ from api.runtime_panels import get_default_panel_ids
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
 BOOTSTRAP_CACHE_KEY = "workspace-default-v9"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
-    INSTR(LOWER(COALESCE(m.tags, '')), 'hide-from-new') = 0
-    AND INSTR(LOWER(COALESCE(m.tags, '')), 'recurring') = 0
-    AND INSTR(LOWER(COALESCE(m.tags, '')), 'onchain-registry') = 0
-    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-5m') = 0
-    AND INSTR(LOWER(COALESCE(m.slug, '')), 'updown-15m') = 0
-    AND INSTR(LOWER(COALESCE(m.title, '')), ' up or down - ') = 0
+    LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
+    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
+    AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%onchain-registry%%'
+    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-5m%%'
+    AND LOWER(COALESCE(CAST(m.slug AS TEXT), '')) NOT LIKE '%%updown-15m%%'
+    AND LOWER(COALESCE(CAST(m.title AS TEXT), '')) NOT LIKE '%% up or down - %%'
 """
 DEFAULT_ACTIVE_MARKET_ACTIVITY_SQL = """
     (
@@ -284,6 +284,7 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
             stats_24h.last_trade_at
         FROM markets m
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         LEFT JOIN (
             SELECT
                 market_id,
@@ -295,6 +296,9 @@ def _build_bootstrap_active_markets_payload(ctx: dict, page_size: int = 20) -> D
             GROUP BY market_id
         ) stats_24h ON stats_24h.market_id = m.id
         WHERE (m.end_date IS NULL OR m.end_date >= ?)
+          AND COALESCE(mss.has_settle, FALSE) = FALSE
+          AND COALESCE(mss.has_propose, FALSE) = FALSE
+          AND COALESCE(mss.settlement_code, 0) = 0
           AND """ + DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL + """
           AND """ + DEFAULT_ACTIVE_MARKET_ACTIVITY_SQL + """
           AND """ + DEFAULT_ACTIVE_MARKET_PRICE_SQL + """

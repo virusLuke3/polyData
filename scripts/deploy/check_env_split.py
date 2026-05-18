@@ -11,15 +11,12 @@ from typing import Dict, Iterable, List, Tuple
 SECRET_MARKERS = ("PASSWORD", "SECRET", "TOKEN", "KEY", "NODE_URL", "RPC")
 
 REMOTE_REQUIRED = {
-    "POLYMARKET_DB_BACKEND": "mysql",
-    "POLYMARKET_MYSQL_HOST": "127.0.0.1",
-    "POLYMARKET_MYSQL_PORT": "43306",
-    "POLYMARKET_MYSQL_USER": "poly_readonly",
-    "POLYMARKET_MYSQL_DATABASE": "poly_data",
-    "POLYMARKET_MYSQL_CHARSET": "utf8mb4",
-    "POLYMARKET_MYSQL_CONNECT_TIMEOUT": "10",
-    "POLYMARKET_MYSQL_READ_TIMEOUT": "60",
-    "POLYMARKET_MYSQL_WRITE_TIMEOUT": "60",
+    "POLYMARKET_DB_BACKEND": "postgres",
+    "POLYDATA_POSTGRES_HOST": "127.0.0.1",
+    "POLYDATA_POSTGRES_PORT": "45432",
+    "POLYDATA_POSTGRES_USER": "poly_user",
+    "POLYDATA_POSTGRES_DATABASE": "poly_data_core",
+    "POLYDATA_POSTGRES_SEARCH_PATH": "core,oracle,ops,public",
     "POLYDATA_API_READONLY": "1",
     "POLYDATA_API_HOST": "127.0.0.1",
     "POLYDATA_API_PORT": "18500",
@@ -35,9 +32,9 @@ REMOTE_REQUIRED = {
 }
 
 LOCAL_REQUIRED = {
-    "POLYMARKET_DB_BACKEND": "mysql",
-    "POLYMARKET_MYSQL_HOST": "127.0.0.1",
-    "POLYMARKET_MYSQL_DATABASE": "poly_data",
+    "POLYMARKET_DB_BACKEND": "postgres",
+    "POLYDATA_POSTGRES_HOST": "127.0.0.1",
+    "POLYDATA_POSTGRES_DATABASE": "poly_data_core",
 }
 
 REMOTE_UNNEEDED_PREFIXES = ("VITE_",)
@@ -79,21 +76,27 @@ def check_required(values: Dict[str, str], required: Dict[str, str]) -> List[Tup
 def check_remote(values: Dict[str, str]) -> tuple[List[str], List[str]]:
     errors = [f"{key}: {detail}" for key, detail in check_required(values, REMOTE_REQUIRED)]
     warnings: List[str] = []
+    if not values.get("POLYDATA_POSTGRES_PASSWORD") and not values.get("POLYMARKET_PostgreSQL_PASSWORD"):
+        errors.append("POLYDATA_POSTGRES_PASSWORD: expected <set>, got <missing>")
     for key in sorted(values):
         if key in REMOTE_UNNEEDED_KEYS or any(key.startswith(prefix) for prefix in REMOTE_UNNEEDED_PREFIXES):
             warnings.append(f"{key}: remote readonly API does not need this local/sync/frontend variable")
-    if values.get("POLYMARKET_MYSQL_USER") and values.get("POLYMARKET_MYSQL_USER") != "poly_readonly":
-        errors.append("POLYMARKET_MYSQL_USER: remote API must use poly_readonly")
+    for key in sorted(values):
+        if key.startswith("POLYMARKET_MYSQL_"):
+            warnings.append(f"{key}: legacy MySQL variable is ignored by the PostgreSQL runtime")
     return errors, warnings
 
 
 def check_local(values: Dict[str, str]) -> tuple[List[str], List[str]]:
     errors = [f"{key}: {detail}" for key, detail in check_required(values, LOCAL_REQUIRED)]
     warnings: List[str] = []
+    if not values.get("POLYDATA_POSTGRES_PASSWORD") and not values.get("POLYMARKET_PostgreSQL_PASSWORD"):
+        errors.append("POLYDATA_POSTGRES_PASSWORD: expected <set>, got <missing>")
     if values.get("POLYDATA_API_READONLY") == "1":
         warnings.append("POLYDATA_API_READONLY=1: local env is usually for sync/write/development, not readonly API")
-    if values.get("POLYMARKET_MYSQL_USER") == "poly_readonly":
-        warnings.append("POLYMARKET_MYSQL_USER=poly_readonly: local sync jobs need a write-capable DB user")
+    for key in sorted(values):
+        if key.startswith("POLYMARKET_MYSQL_"):
+            warnings.append(f"{key}: legacy MySQL variable is ignored by the PostgreSQL runtime")
     for key in ("POLYDATA_GUNICORN_WORKERS", "POLYDATA_GUNICORN_THREADS", "POLYDATA_GUNICORN_MAX_REQUESTS"):
         if key in values:
             warnings.append(f"{key}: local .env usually does not need remote Gunicorn service tuning")
