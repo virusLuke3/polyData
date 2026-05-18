@@ -105,26 +105,43 @@ def _fallback_focus(payload: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def _fallback_response(payload: dict[str, Any], *, reason: str = "fallback") -> dict[str, Any]:
+def _fallback_response(payload: dict[str, Any], *, reason: str = "fallback", search_results: list[dict[str, str]] | None = None) -> dict[str, Any]:
     price = payload.get("price") if isinstance(payload.get("price"), dict) else {}
     volume = price.get("volume24h") or payload.get("volume24h")
     trades = price.get("tradeCount24h")
     title = _market_title(payload)
+    search_results = search_results or []
+    focus = _fallback_focus(payload)
+    if search_results:
+        top_result = search_results[0]
+        focus.insert(
+            1,
+            {
+                "label": "NEWS",
+                "title": compact_text(top_result.get("title") or "External context available", 80),
+                "summary": compact_text(top_result.get("content") or "Tavily returned current external context for this market.", 180),
+                "severity": "neutral",
+                "evidence": "Tavily",
+            },
+        )
+    evidence = [
+        f"YES { _fmt_percent(price.get('latestYesPrice') or price.get('latestPrice')) }",
+        f"24h volume { _fmt_compact_currency(volume) }",
+        f"24h trades {trades if trades not in (None, '') else '--'}",
+    ]
+    if search_results:
+        evidence.append(compact_text(search_results[0].get("title") or "external context", 120))
     return {
-        "status": reason,
+        "status": "search-fallback" if reason == "agent-error" and search_results else reason,
         "generatedAt": _utc_now_iso(),
         "model": "deterministic-fallback",
         "brief": compact_text(
             f"{title} is trading near {_fmt_percent(price.get('latestYesPrice') or price.get('latestPrice'))}. "
             f"24h volume is {_fmt_compact_currency(volume)} with {trades if trades not in (None, '') else '--'} trades."
         ),
-        "focus": _fallback_focus(payload),
-        "evidence": [
-            f"YES { _fmt_percent(price.get('latestYesPrice') or price.get('latestPrice')) }",
-            f"24h volume { _fmt_compact_currency(volume) }",
-            f"24h trades {trades if trades not in (None, '') else '--'}",
-        ],
-        "searchResults": [],
+        "focus": focus[:5],
+        "evidence": evidence[:4],
+        "searchResults": search_results,
         "error": reason,
     }
 
@@ -192,6 +209,6 @@ def build_market_insight(payload: dict[str, Any]) -> dict[str, Any]:
         raw = extract_json_object(raw_text)
         return _normalize_model_response(raw, payload, search_results, client.model)
     except Exception as exc:
-        response = _fallback_response(payload, reason="agent-error")
+        response = _fallback_response(payload, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)
         return response
