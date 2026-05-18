@@ -455,3 +455,13 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
         response = _fallback_response(payload, lens, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)
         return response
+
+
+def build_market_wide_fallback(payload: dict[str, Any], *, reason: str = "cache-warming") -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return _fallback_response({}, "overview", reason="invalid-payload")
+    lens = str(payload.get("lens") or "overview").strip().lower()
+    lens = LENS_ALIASES.get(lens, lens)
+    if lens not in VALID_LENSES:
+        lens = "overview"
+    return _fallback_response(payload, lens, reason=reason)

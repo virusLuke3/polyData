@@ -350,6 +350,8 @@ export type MarketAiInsightResponse = {
   status: 'live' | 'fallback' | 'missing-api-key' | 'agent-error' | 'invalid-payload' | string;
   generatedAt?: string;
   model?: string;
+  cacheStatus?: 'hit' | 'warming' | 'warming-in-progress' | string;
+  cacheKey?: string;
   brief: string;
   focus: MarketAiInsightFocus[];
   evidence?: string[];

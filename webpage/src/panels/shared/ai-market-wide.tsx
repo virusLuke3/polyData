@@ -262,20 +262,32 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: number | undefined;
+    const load = (attempt = 0) => {
+      setLoading(true);
+      fetchMarketWideAiInsights(payload)
+        .then((response) => {
+          if (cancelled) return;
+          setInsight(response);
+          const warming = response.cacheStatus === 'warming'
+            || response.cacheStatus === 'warming-in-progress'
+            || response.status === 'cache-warming';
+          if (warming && attempt < 4) {
+            retryTimer = window.setTimeout(() => load(attempt + 1), 8000 + attempt * 2500);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setInsight(fallback);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
     setInsight(fallback);
-    setLoading(true);
-    fetchMarketWideAiInsights(payload)
-      .then((response) => {
-        if (!cancelled) setInsight(response);
-      })
-      .catch(() => {
-        if (!cancelled) setInsight(fallback);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    load();
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [fallback, payload, signature]);
 
@@ -285,6 +297,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   const watchlist = insight.watchlist?.length ? insight.watchlist : (fallback.watchlist || []);
   const evidence = insight.evidence?.length ? insight.evidence : (fallback.evidence || []);
   const live = insight.status === 'live';
+  const warming = insight.cacheStatus === 'warming' || insight.cacheStatus === 'warming-in-progress' || insight.status === 'cache-warming';
   const copy = PANEL_COPY[lens];
   const themeLimit = lens === 'trend' ? 4 : 3;
   const specialLimit = lens === 'special' ? 4 : 2;
@@ -293,7 +306,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   return (
     <Panel
       title={title}
-      badge={loading ? 'THINKING' : (live ? badge : 'LOCAL')}
+      badge={warming ? 'WARMING' : (loading && insight.cacheStatus !== 'hit' ? 'THINKING' : (live ? badge : 'LOCAL'))}
       status={live ? 'live' : 'muted'}
       count={panelCount}
       className={`wm-market-panel wm-ai-market-panel wm-ai-market-wide-panel wm-ai-${lens}`}

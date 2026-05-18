@@ -212,3 +212,9 @@ def build_market_insight(payload: dict[str, Any]) -> dict[str, Any]:
         response = _fallback_response(payload, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)
         return response
+
+
+def build_market_insight_fallback(payload: dict[str, Any], *, reason: str = "cache-warming") -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return _fallback_response({}, reason="invalid-payload")
+    return _fallback_response(payload, reason=reason)
