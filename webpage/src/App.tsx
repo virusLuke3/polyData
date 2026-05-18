@@ -151,6 +151,42 @@ function isLiveStatus(status?: string | null) {
   return normalized === 'active' || normalized === 'proposed';
 }
 
+type DefaultMarketCandidate = Pick<MarketSummary, 'id' | 'slug' | 'title' | 'category' | 'tags' | 'status'>;
+
+function isSuppressedDefaultMarket(market?: Partial<DefaultMarketCandidate> | null) {
+  const text = [
+    market?.title,
+    market?.slug,
+    market?.category,
+    ...(market?.tags || []),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return (
+    text.includes(' up or down - ')
+    || text.includes('updown-5m')
+    || text.includes('updown-15m')
+    || text.includes('recurring')
+    || text.includes('hide-from-new')
+  );
+}
+
+function pickDefaultMarketId(markets: MarketListItem[], featured?: MarketSummary | null) {
+  const firstLive = markets.find((market) => isLiveStatus(market.status) && !isSuppressedDefaultMarket(market));
+  if (firstLive) return firstLive.id;
+  const firstEligible = markets.find((market) => !isSuppressedDefaultMarket(market));
+  if (firstEligible) return firstEligible.id;
+  if (featured && !isSuppressedDefaultMarket(featured)) return featured.id;
+  return markets[0]?.id ?? featured?.id ?? null;
+}
+
+function pickDefaultMarketGroup(groups: MarketGroupItem[]) {
+  return (
+    groups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
+    || groups.find((group) => Number(group.outcomeCount || 0) > 1)
+    || groups[0]
+    || null
+  );
+}
+
 function currentUtcClock(now: Date) {
   return now.toLocaleString('en-GB', {
     weekday: 'short',
@@ -705,6 +741,8 @@ export function App() {
   const [weatherMapError, setWeatherMapError] = useState<string | null>(null);
   const [selectedWeatherCityId, setSelectedWeatherCityId] = useState<string | null>(null);
   const bootstrapRef = useRef<BootstrapPayload | null>(null);
+  const selectedMarketIdRef = useRef<number | null>(null);
+  const selectedMarketGroupIdRef = useRef<string | null>(null);
   const marketGroupSortRef = useRef<MarketGroupSort>(marketGroupSort);
   const slowRefreshCancelRef = useRef<(() => void) | null>(null);
   const slowRefreshInFlightRef = useRef<Set<string>>(new Set());
@@ -713,14 +751,21 @@ export function App() {
 
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
+    const nextMarketId = marketId != null ? Number(marketId) : null;
+    selectedMarketGroupIdRef.current = eventId;
+    selectedMarketIdRef.current = nextMarketId;
     setSelectedMarketGroupId(eventId);
     setSelectedMarketGroupOutcomeKey(outcomeKey || group.defaultOutcomeKey || null);
-    if (marketId != null) {
-      setSelectedMarketId(Number(marketId));
-    } else {
-      setSelectedMarketId(null);
-    }
+    setSelectedMarketId(nextMarketId);
   };
+
+  useEffect(() => {
+    selectedMarketIdRef.current = selectedMarketId;
+  }, [selectedMarketId]);
+
+  useEffect(() => {
+    selectedMarketGroupIdRef.current = selectedMarketGroupId;
+  }, [selectedMarketGroupId]);
 
   async function refreshFastRuntimePanels(options: RuntimePanelRefreshOptions = {}): Promise<{ marketsPayload: MarketsPayload | null; marketGroupsPayload: MarketGroupsPayload | null }> {
     const bootstrapPayload = options.bootstrapPayload || bootstrapRef.current;
@@ -915,9 +960,10 @@ export function App() {
 
         const defaultPanelIds = sanitizePanelIds(bootstrapPayload.defaultWorkspace?.panels || []);
         const immediatePanelIds = activePanelIds.length ? sanitizePanelIds([...activePanelIds, ...defaultPanelIds]) : defaultPanelIds;
-        const liveFeatured = bootstrapPayload.featuredMarket && isLiveStatus(bootstrapPayload.featuredMarket.status)
-          ? bootstrapPayload.featuredMarket.id
-          : null;
+        const initialDefaultMarketId = pickDefaultMarketId(
+          bootstrapPayload.activeMarketsPreview || [],
+          bootstrapPayload.featuredMarket,
+        );
 
         setBootstrap(bootstrapPayload);
         setMarkets(bootstrapPayload.activeMarketsPreview || []);
@@ -926,7 +972,11 @@ export function App() {
         setGlobalOracle(bootstrapPayload.globalOraclePreview || []);
         setLatestContent(bootstrapPayload.latestContentPreview || []);
         setRuntimeData((current) => mergeRuntimeData(current, bootstrapPayload.commoditiesPreview ? { 'commodities-watch': bootstrapPayload.commoditiesPreview } : {}));
-        setSelectedMarketId(liveFeatured || bootstrapPayload.featuredMarket?.id || null);
+        selectedMarketGroupIdRef.current = null;
+        selectedMarketIdRef.current = initialDefaultMarketId;
+        setSelectedMarketGroupId(null);
+        setSelectedMarketGroupOutcomeKey(null);
+        setSelectedMarketId(initialDefaultMarketId);
         setActivePanelIds((current) => (
           current.length
             ? sanitizePanelIds([...current, ...defaultPanelIds])
@@ -937,16 +987,17 @@ export function App() {
         void refreshRuntimePanels({ bootstrapPayload, activePanelIds: immediatePanelIds })
           .then(({ marketsPayload, marketGroupsPayload }) => {
             if (cancelled) return;
-            if (!liveFeatured && !bootstrapPayload.featuredMarket?.id) {
-              const firstGroup = marketGroupsPayload?.items?.[0] || null;
-              if (firstGroup) {
-                focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
-                return;
-              }
-              const marketItems = marketsPayload?.items || bootstrapPayload.activeMarketsPreview || [];
-              const firstLiveMarket = marketItems.find((market) => isLiveStatus(market.status));
-              setSelectedMarketId(firstLiveMarket?.id || marketItems?.[0]?.id || null);
+            const selectionStillInitial = !selectedMarketGroupIdRef.current && selectedMarketIdRef.current === initialDefaultMarketId;
+            if (!selectionStillInitial) return;
+            const firstGroup = pickDefaultMarketGroup(marketGroupsPayload?.items || []);
+            if (firstGroup) {
+              focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
+              return;
             }
+            const marketItems = marketsPayload?.items || bootstrapPayload.activeMarketsPreview || [];
+            const nextMarketId = pickDefaultMarketId(marketItems, bootstrapPayload.featuredMarket);
+            selectedMarketIdRef.current = nextMarketId;
+            setSelectedMarketId(nextMarketId);
           })
           .catch((loadError) => {
             if (!cancelled) {
@@ -1294,12 +1345,16 @@ export function App() {
   }, [availableMarkets, commandQuery]);
 
   const selectedMarket = useMemo<MarketSummary | null>(() => {
+    if (selectedMarketGroupId && selectedMarketId == null) return null;
     if (bundle?.market && bundle.market.id === selectedMarketId) return bundle.market;
     const selectedListMarket = availableMarkets.find((market) => market.id === selectedMarketId);
     if (selectedListMarket) return selectedListMarket;
     if (bootstrap?.featuredMarket?.id === selectedMarketId) return bootstrap.featuredMarket;
-    return bootstrap?.featuredMarket || null;
-  }, [availableMarkets, bootstrap?.featuredMarket, bundle?.market, selectedMarketId]);
+    if (!selectedMarketGroupId && bootstrap?.featuredMarket && !isSuppressedDefaultMarket(bootstrap.featuredMarket)) {
+      return bootstrap.featuredMarket;
+    }
+    return null;
+  }, [availableMarkets, bootstrap?.featuredMarket, bundle?.market, selectedMarketGroupId, selectedMarketId]);
 
   const currentGlobalTrades = globalTrades.length ? globalTrades : (bootstrap?.globalTradesPreview || []);
   const currentGlobalOracle = globalOracle.length ? globalOracle : (bootstrap?.globalOraclePreview || []);
@@ -1385,7 +1440,17 @@ export function App() {
     setRegion('global');
     setMapZoom(1);
     setViewMode('3d');
-    setSelectedMarketId(bootstrap?.featuredMarket?.id || availableMarkets[0]?.id || null);
+    const firstGroup = pickDefaultMarketGroup(marketGroups);
+    if (firstGroup) {
+      focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
+    } else {
+      const nextMarketId = pickDefaultMarketId(availableMarkets, bootstrap?.featuredMarket);
+      selectedMarketGroupIdRef.current = null;
+      selectedMarketIdRef.current = nextMarketId;
+      setSelectedMarketGroupId(null);
+      setSelectedMarketGroupOutcomeKey(null);
+      setSelectedMarketId(nextMarketId);
+    }
     setNotice('Workspace reset');
   };
 
@@ -1683,6 +1748,10 @@ export function App() {
                     type="button"
                     className="wm-command-result"
                     onClick={() => {
+                      selectedMarketGroupIdRef.current = null;
+                      selectedMarketIdRef.current = market.id;
+                      setSelectedMarketGroupId(null);
+                      setSelectedMarketGroupOutcomeKey(null);
                       setSelectedMarketId(market.id);
                       setShowCommandPalette(false);
                     }}

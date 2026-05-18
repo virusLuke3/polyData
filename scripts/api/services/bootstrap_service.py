@@ -9,7 +9,7 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v9"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v10"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -412,6 +412,7 @@ def _select_featured_market_id(preview_rows: List[Dict[str, Any]]) -> Optional[i
 
 def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
     now_iso = ctx["utc_now_iso"]()
+    recent_trade_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat().replace("+00:00", "Z")
     row = ctx["query_one"](
         """
         WITH settled_markets AS (
@@ -438,10 +439,16 @@ def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
         FROM markets m
         LEFT JOIN settled_markets settled ON settled.market_id = m.id
         LEFT JOIN proposed_markets proposed ON proposed.market_id = m.id
-        LEFT JOIN stats_24h stats ON stats.market_id = m.id
+        LEFT JOIN stats_24h ON stats_24h.market_id = m.id
         LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         WHERE settled.market_id IS NULL
+          AND COALESCE(mss.has_settle, FALSE) = FALSE
           AND (m.end_date IS NULL OR m.end_date >= ?)
+          AND """ + DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL + """
+          AND """ + DEFAULT_ACTIVE_MARKET_ACTIVITY_SQL + """
+          AND """ + DEFAULT_ACTIVE_MARKET_PRICE_SQL + """
+          AND """ + DEFAULT_ACTIVE_MARKET_RECENT_TRADE_SQL + """
         ORDER BY
             CASE WHEN proposed.market_id IS NULL THEN 1 ELSE 0 END DESC,
             CASE
@@ -449,12 +456,12 @@ def _get_fallback_featured_market_id(ctx: dict) -> Optional[int]:
                  AND COALESCE(NULLIF(TRIM(m.no_token_id), ''), '') <> '' THEN 1
                 ELSE 0
             END DESC,
-            COALESCE(stats.volume_24h, 0) DESC,
-            COALESCE(stats.trade_count_24h, 0) DESC,
-            COALESCE(stats.last_trade_at, mlp.latest_trade_at, m.created_at) DESC
+            COALESCE(stats_24h.volume_24h, 0) DESC,
+            COALESCE(stats_24h.trade_count_24h, 0) DESC,
+            COALESCE(stats_24h.last_trade_at, mlp.latest_trade_at, m.created_at) DESC
         LIMIT 1
         """,
-        (ctx["utc_date_days_ago"](1), now_iso),
+        (ctx["utc_date_days_ago"](1), now_iso, recent_trade_cutoff),
     )
     market_id = row.get("id") if row else None
     try:
@@ -560,7 +567,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v9",
+        "active-markets-preview-v10",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )
@@ -693,7 +700,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v9",
+            "active-markets-preview-v10",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),

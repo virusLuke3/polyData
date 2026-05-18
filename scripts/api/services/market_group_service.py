@@ -551,25 +551,27 @@ def _group_has_ready_signal(group: Dict[str, Any]) -> bool:
 
 def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int, int, float, float, float]:
     created_ts = _group_created_ts(group)
-    last_activity_ts = _group_last_activity_ts(group)
+    raw_last_activity_ts = _parse_timestamp(group.get("lastActivityAt"))
+    last_activity_ts = raw_last_activity_ts or created_ts
     volume = _float_value(group.get("volume24h")) or 0.0
     ready_signal = _group_has_ready_signal(group)
     multi_penalty = 0 if int(group.get("outcomeCount") or 0) > 2 else 1
     recent_threshold = now_ts - (14 * 86400)
     active_threshold = now_ts - (3 * 86400)
-    if created_ts >= recent_threshold and ready_signal:
+    traded_signal = volume > 0 or raw_last_activity_ts > 0
+    if raw_last_activity_ts >= recent_threshold and traded_signal:
         bucket = 0
-        recency = created_ts
-    elif last_activity_ts >= active_threshold and ready_signal:
+        recency = raw_last_activity_ts
+    elif volume > 0 and ready_signal:
         bucket = 1
         recency = last_activity_ts
-    elif created_ts >= recent_threshold:
+    elif created_ts >= active_threshold and ready_signal:
         bucket = 2
         recency = created_ts
     else:
         bucket = 3
         recency = max(created_ts, last_activity_ts)
-    return (bucket, multi_penalty, -recency, -volume, -created_ts)
+    return (bucket, multi_penalty, -volume, -recency, -created_ts)
 
 
 def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status: str = "degraded") -> Dict[str, Any]:
@@ -602,7 +604,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 2}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 3}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         fetch_target = max(100, min(1000, (page * page_size * 3)))
