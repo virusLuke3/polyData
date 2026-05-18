@@ -1,5 +1,4 @@
 import type { PanelModule } from '../types';
-import { panel as worldBrief } from './world-brief';
 import { panel as activeMarkets } from './active-markets';
 import { panel as globalOrderfilled } from './global-orderfilled';
 import { panel as oracleFeed } from './oracle-feed';
@@ -60,7 +59,6 @@ export const PANEL_MODULES: PanelModule[] = [
   oracleFeed,
   marketSummary,
   featuredMarket,
-  worldBrief,
   priceImplications,
   priceChart,
   sampleChainTrades,
