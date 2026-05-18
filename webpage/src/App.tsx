@@ -226,27 +226,28 @@ function WeatherInlineMap({
 }) {
   const items = payload?.items || [];
   const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
+  const mappedCount = payload?.summary?.mappedCount ?? items.length;
+  const cityCount = payload?.summary?.cityCount ?? items.length;
+  const cacheMode = payload?.cacheMode || (loading ? 'loading' : 'seed');
   return (
     <div className="wm-inline-weather-map">
-      <div className="wm-inline-weather-map-header">
-        <div>
-          <span>Global Weather Map</span>
-          <strong>{payload?.summary?.mappedCount ?? items.length}/{payload?.summary?.cityCount ?? items.length} cities</strong>
-        </div>
-        <div className="wm-inline-weather-map-actions">
-          <span>{payload?.cacheMode || (loading ? 'loading' : 'seed')}</span>
-          <button type="button" onClick={onRefresh}>Refresh</button>
-        </div>
+      <button type="button" className="wm-inline-weather-map-cache" onClick={onRefresh}>
+        {cacheMode}
+      </button>
+      <div className="wm-inline-weather-map-count" aria-hidden="true">
+        {mappedCount}/{cityCount}
       </div>
       {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
       <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
         <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={onSelectCity} height={620} />
       </Suspense>
-      <div className="wm-inline-weather-map-footer">
-        <span>{selected?.city || 'Weather city'}</span>
-        <strong>{weatherTempLabel(selected?.currentTemp, selected?.unit)}</strong>
-        <em>{selected?.condition || 'Condition pending'} / high {weatherTempLabel(selected?.forecastHigh ?? selected?.todayHigh, selected?.unit)} / {selected?.quoteCoverage || '0/0'} quotes</em>
-      </div>
+      {selected ? (
+        <div className="wm-inline-weather-map-selected" aria-live="polite">
+          <span>{selected.city}</span>
+          <strong>{weatherTempLabel(selected.currentTemp, selected.unit)}</strong>
+          <em>{selected.condition || 'Condition pending'} / high {weatherTempLabel(selected.forecastHigh ?? selected.todayHigh, selected.unit)}</em>
+        </div>
+      ) : null}
     </div>
   );
 }
