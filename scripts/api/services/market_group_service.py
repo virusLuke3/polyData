@@ -748,7 +748,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 1}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 2}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = get_market_group_detail_payload(ctx, identifier)

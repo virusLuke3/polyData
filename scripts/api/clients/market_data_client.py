@@ -33,7 +33,10 @@ def range_to_seconds(range_name: str) -> int:
         "1d": 86400,
         "3d": 259200,
         "7d": 604800,
+        "1w": 604800,
         "30d": 2592000,
+        "1m": 2592000,
+        "all": 180 * 86400,
     }
     return mapping.get(normalized, 86400)
 

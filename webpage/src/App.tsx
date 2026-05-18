@@ -1093,6 +1093,7 @@ export function App() {
     let cancelled = false;
     const eventId = selectedMarketGroupId;
     const chartRange = selectedMarketGroupChartRange;
+    setSelectedMarketGroupChart(null);
 
     fetchMarketGroupChart(eventId, chartRange, 6500)
       .then((chartPayload) => {
