@@ -738,10 +738,25 @@ def _source_status(value: bool) -> str:
 
 
 def build_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    mapped = [item for item in items if item.get("currentTemp") is not None]
+    mapped = [
+        item for item in items
+        if item.get("currentTemp") is not None or item.get("metarTemp") is not None
+    ]
     markets = [item for item in items if item.get("eventSlug")]
     stale = [item for item in items if "error" in set((item.get("sourceStates") or {}).values())]
-    hottest = max(mapped, key=lambda row: float(row.get("forecastHigh") if row.get("forecastHigh") is not None else row.get("currentTemp") or -999), default=None)
+    hottest = max(
+        mapped,
+        key=lambda row: float(
+            row.get("forecastHigh")
+            if row.get("forecastHigh") is not None
+            else row.get("currentTemp")
+            if row.get("currentTemp") is not None
+            else row.get("metarTemp")
+            if row.get("metarTemp") is not None
+            else -999
+        ),
+        default=None,
+    )
     return {
         "cityCount": len(items),
         "mappedCount": len(mapped),

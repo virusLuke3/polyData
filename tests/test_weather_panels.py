@@ -401,7 +401,12 @@ def test_weather_news_filters_sports_storm_false_positives():
 
 
 def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
-    previous_map = {"items": [{"cityId": "new-york"}], "sources": {"openMeteo": "ok"}, "status": "ok"}
+    previous_map = {
+        "items": [{"cityId": "new-york", "currentTemp": 72, "hourly": [{"temp": 72}]}],
+        "summary": {"mappedCount": 1},
+        "sources": {"openMeteo": "ok"},
+        "status": "ok",
+    }
     map_watcher = global_weather_map_watcher.GlobalWeatherMapWatcher.__new__(global_weather_map_watcher.GlobalWeatherMapWatcher)
     map_watcher.previous = lambda: previous_map
     map_watcher.context = lambda: {}
@@ -409,6 +414,15 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     map_watcher.store_payload = lambda payload: stored.setdefault("map_payload", payload)
     map_watcher.store_meta = lambda **kwargs: stored.setdefault("map_meta", kwargs)
     monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: {"items": [], "sources": {"openMeteo": "empty"}, "status": "empty"})
+
+    result = map_watcher.run_once()
+
+    assert result["status"] == "preserved"
+    assert stored["map_payload"] is previous_map
+    assert stored["map_meta"]["preserve"] is True
+
+    stored.clear()
+    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: {"items": [{"cityId": "new-york", "quoteCoverage": "11/11"}], "sources": {"openMeteo": "error"}, "summary": {"mappedCount": 0}, "status": "warming"})
 
     result = map_watcher.run_once()
 

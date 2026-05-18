@@ -35,12 +35,20 @@ function priceLabel(value?: string | number | null) {
   return `${Math.round(parsed * 100)}%`;
 }
 
+function currentTempValue(city: RuntimeGlobalWeatherCity) {
+  return city.currentTemp ?? city.metarTemp ?? city.todayHigh ?? null;
+}
+
+function highTempValue(city: RuntimeGlobalWeatherCity) {
+  return city.forecastHigh ?? city.todayHigh ?? city.currentTemp ?? city.metarTemp ?? null;
+}
+
 function citySortValue(city: RuntimeGlobalWeatherCity) {
-  return num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp) ?? -999;
+  return num(highTempValue(city)) ?? -999;
 }
 
 function cityTone(city: RuntimeGlobalWeatherCity) {
-  const high = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp);
+  const high = num(highTempValue(city));
   if (high === null) return 'neutral';
   if (String(city.unit || '').toUpperCase() === 'F') {
     if (high >= 90) return 'hot';
@@ -127,11 +135,11 @@ function TemperatureCard({
           <strong>{city.city || '--'}</strong>
           <span>{city.condition || 'Weather update'}</span>
         </div>
-        <b>{tempLabel(city.currentTemp ?? city.todayHigh, unit)}</b>
+        <b>{tempLabel(currentTempValue(city), unit)}</b>
       </div>
       <MiniSpark city={city} />
       <div className="wm-temp-city-stats">
-        <span><i>High</i>{tempLabel(city.forecastHigh ?? city.todayHigh, unit)}</span>
+        <span><i>High</i>{tempLabel(highTempValue(city), unit)}</span>
         <span><i>Low</i>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</span>
         <span><i>Updated</i>{formatRelative(city.updatedAt || city.hourly?.[0]?.time || null)}</span>
       </div>

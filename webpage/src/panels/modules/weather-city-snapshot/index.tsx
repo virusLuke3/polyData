@@ -4,6 +4,8 @@ import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import {
   bestQuoteBin,
+  currentWeatherTemp,
+  highWeatherTemp,
   panelStatus,
   quoteCoverage,
   selectedWeatherCity,
@@ -41,11 +43,11 @@ function WeatherCitySnapshotPanel({
               <strong>{city.city || '--'}</strong>
               <em>{city.condition || 'Condition pending'}</em>
             </div>
-            <b>{tempLabel(city.currentTemp ?? city.todayHigh, unit)}</b>
+            <b>{tempLabel(currentWeatherTemp(city), unit)}</b>
           </section>
           <div className="wm-weather-city-stats">
             <span><i>Low</i><strong>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</strong></span>
-            <span><i>High</i><strong>{tempLabel(city.forecastHigh ?? city.todayHigh, unit)}</strong></span>
+            <span><i>High</i><strong>{tempLabel(highWeatherTemp(city), unit)}</strong></span>
             <span><i>Quotes</i><strong>{quoteCoverage(city)}</strong></span>
             <span><i>Updated</i><strong>{updatedLabel(city, payload?.generatedAt)}</strong></span>
           </div>

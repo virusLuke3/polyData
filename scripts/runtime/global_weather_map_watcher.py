@@ -46,6 +46,34 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
     return f"{prefix or ''}{namespace}:{cache_key}"
 
 
+def _payload_has_weather_values(payload: Dict[str, Any]) -> bool:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    try:
+        if int(summary.get("mappedCount") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("currentTemp") is not None or item.get("metarTemp") is not None or item.get("todayHigh") is not None or item.get("forecastHigh") is not None:
+            return True
+        if item.get("hourly") or item.get("daily"):
+            return True
+    return False
+
+
+def _should_preserve_previous(previous: Dict[str, Any], payload: Dict[str, Any]) -> bool:
+    if not previous or not _payload_has_weather_values(previous):
+        return False
+    sources = payload.get("sources") if isinstance(payload.get("sources"), dict) else {}
+    if sources.get("openMeteo") == "error" and not _payload_has_weather_values(payload):
+        return True
+    if str(payload.get("status") or "").lower() == "warming" and not _payload_has_weather_values(payload):
+        return True
+    return False
+
+
 class GlobalWeatherMapWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
         if not redis_url:
@@ -145,6 +173,10 @@ class GlobalWeatherMapWatcher:
         if previous and not payload.get("items"):
             self.store_payload(previous)
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather map payload was empty", preserve=True)
+            return {"status": "preserved", "payload": previous}
+        if _should_preserve_previous(previous, payload):
+            self.store_payload(previous)
+            self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather map payload lost live weather values", preserve=True)
             return {"status": "preserved", "payload": previous}
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)

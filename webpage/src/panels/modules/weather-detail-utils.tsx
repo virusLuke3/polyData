@@ -13,6 +13,14 @@ export function tempLabel(value?: string | number | null, unit?: string | null) 
   return `${Math.round(parsed)}°${unit || ''}`;
 }
 
+export function currentWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
+  return city?.currentTemp ?? city?.metarTemp ?? city?.todayHigh ?? null;
+}
+
+export function highWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
+  return city?.forecastHigh ?? city?.todayHigh ?? city?.currentTemp ?? city?.metarTemp ?? null;
+}
+
 export function priceLabel(value?: string | number | null) {
   const parsed = num(value);
   if (parsed === null) return '--';
@@ -38,7 +46,7 @@ export function bestQuoteBin(city?: RuntimeGlobalWeatherCity | null): RuntimeWea
 export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
   if (!city) return [];
   const unit = city.unit || '';
-  const anchor = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp);
+  const anchor = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp ?? city.metarTemp);
   if (anchor === null) return [];
   const center = Math.round(anchor);
   const start = center - 5;
@@ -93,6 +101,7 @@ export function sourceStatus(city?: RuntimeGlobalWeatherCity | null) {
   if (bad) return `${bad[0]} ${bad[1]}`;
   if (sourceStates.polymarket === 'ok') return 'market linked';
   if (sourceStates.openMeteo === 'ok') return 'weather live';
+  if (sourceStates.metar === 'ok') return 'metar live';
   return 'seed';
 }
 
