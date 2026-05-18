@@ -423,10 +423,10 @@ def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[D
     start_iso, end_iso = _date_window_bounds(ctx, dates)
     conn = None
     try:
-        conn = connector(ctx.get("DB_PATH"), readonly=True)
-    except TypeError:
-        conn = connector(ctx.get("DB_PATH"))
-    try:
+        try:
+            conn = connector(ctx.get("DB_PATH"), readonly=True)
+        except TypeError:
+            conn = connector(ctx.get("DB_PATH"))
         cursor = conn.execute(
             """
             SELECT
