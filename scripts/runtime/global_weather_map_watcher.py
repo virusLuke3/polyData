@@ -23,7 +23,7 @@ from db.db import DEFAULT_DB_PATH, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
-DEFAULT_INTERVAL_SECONDS = 300
+DEFAULT_INTERVAL_SECONDS = 60
 SEED_META_NAMESPACE = "seed-meta:weather"
 SEED_META_CACHE_KEY = "global-weather-map"
 SEED_META_SERVICE_NAME = "polydata-global-weather-map-seed.service"

@@ -154,5 +154,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 300000,
   fetchData: () => fetchRuntimeWeatherNews(24),
 });

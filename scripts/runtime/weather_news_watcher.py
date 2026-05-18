@@ -22,7 +22,7 @@ from api.services import weather_news_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
-DEFAULT_INTERVAL_SECONDS = 900
+DEFAULT_INTERVAL_SECONDS = 300
 SEED_META_NAMESPACE = "seed-meta:weather"
 SEED_META_CACHE_KEY = "weather-news"
 SEED_META_SERVICE_NAME = "polydata-weather-news-seed.service"
@@ -175,4 +175,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
