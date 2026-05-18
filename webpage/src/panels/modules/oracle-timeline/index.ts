@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(oraclePanelRenderers, {
   id: 'oracle-timeline',
-  title: 'Oracle Timeline',
-  eyebrow: 'oracle',
-  description: 'Focused market oracle timeline.',
+  title: 'AI Oracle Insights',
+  eyebrow: 'agent',
+  description: 'Market-wide AI readout of oracle activity and settlement risk.',
   defaultEnabled: true,
 });

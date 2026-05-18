@@ -183,12 +183,29 @@ export type OracleEvent = {
   eventStatus?: string | null;
   externalMarketId?: string | null;
   marketId?: number | null;
+  localMarketId?: number | null;
+  gammaMarketId?: string | number | null;
   marketTitle?: string | null;
+  marketSlug?: string | null;
+  marketCategory?: string | null;
+  isBound?: boolean | null;
   matchedBy?: string | null;
   questionId?: string | null;
   conditionId?: string | null;
   proposedPrice?: string | number | null;
   settledPrice?: string | number | null;
+  payout?: string | number | null;
+  settlementCode?: number | string | null;
+  settlementOutcome?: string | null;
+  settlementSource?: string | null;
+  settlementRaw?: string | null;
+  effectiveSettlementCode?: number | string | null;
+  effectiveSettlementOutcome?: string | null;
+  effectiveSettlementSource?: string | null;
+  completionStatus?: string | null;
+  isTradingClosed?: boolean | null;
+  isResolved?: boolean | null;
+  isFinal?: boolean | null;
   requester?: string | null;
   proposer?: string | null;
   disputer?: string | null;
@@ -203,6 +220,12 @@ export type OraclePayload = {
   questionId?: string | null;
   oracle?: string | null;
   currentStatus?: string | null;
+  completionStatus?: string | null;
+  isTradingClosed?: boolean | null;
+  isResolved?: boolean | null;
+  isFinal?: boolean | null;
+  settlementOutcome?: string | null;
+  settlementSource?: string | null;
   timeline: OracleEvent[];
 };
 
@@ -334,6 +357,28 @@ export type MarketAiInsightResponse = {
     content?: string;
   }>;
   error?: string;
+};
+
+export type MarketWideAiInsightLens = 'overview' | 'flow' | 'oracle';
+
+export type MarketWideAiInsightPayload = {
+  lens: MarketWideAiInsightLens;
+  markets: MarketListItem[];
+  marketGroups: MarketGroupItem[];
+  trades: TradeRow[];
+  oracle: OracleEvent[];
+  content: ContentItem[];
+  alphaSignals?: RuntimeTradeSignal[];
+  whaleSignals?: RuntimeTradeSignal[];
+  suspiciousSignals?: RuntimeTradeSignal[];
+};
+
+export type MarketWideAiInsightResponse = MarketAiInsightResponse & {
+  lens?: MarketWideAiInsightLens | string;
+  metrics?: Record<string, string | number | boolean | string[] | null>;
+  viaGateway?: boolean;
+  servedBy?: string;
+  gatewayFallback?: boolean;
 };
 
 export type SparkPoint = {

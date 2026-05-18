@@ -1,8 +1,9 @@
 import { Panel } from '@/components/Panel';
 import type { PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
+import { AiMarketWidePanel } from './shared/ai-market-wide';
 import { formatCompact, formatPercent } from './shared/formatters';
-import { emptyState, levelTotal, orderfilledList, tradeList, tradeSignalList, whaleTrackerList } from './shared/renderers';
+import { emptyState, levelTotal, orderfilledList, tradeSignalList, whaleTrackerList } from './shared/renderers';
 import { focusedTrades, globalMarkets } from './shared/selectors';
 
 function maxLevelSize(levels: Array<{ size?: string | number | null }>) {
@@ -109,9 +110,7 @@ export const chainPanelRenderers: PanelRenderMap = {
   },
   'sample-chain-trades': {
     render: (ctx) => (
-      <Panel title="MARKET TAPE" badge="FOCUSED" status="live" count={focusedTrades(ctx).length}>
-        {tradeList(focusedTrades(ctx), 12)}
-      </Panel>
+      <AiMarketWidePanel ctx={ctx} lens="flow" title="AI FLOW INSIGHTS" badge="FLOW" />
     ),
   },
   'bbo-monitor': {

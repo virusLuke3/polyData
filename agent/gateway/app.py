@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 
 from agent.common.env import get_env
 from agent.market_insight import build_market_insight
+from agent.market_wide import build_market_wide_insight
 
 
 def _authorized() -> bool:
@@ -38,6 +39,17 @@ def create_app() -> Flask:
         result["servedBy"] = "agent-gateway"
         return jsonify(result)
 
+    @app.post("/agent/market-wide-insights")
+    def market_wide_insights():
+        if not _authorized():
+            return jsonify({"error": "unauthorized"}), 401
+        payload: Any = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify({"error": "JSON object required"}), 400
+        result = build_market_wide_insight(payload)
+        result["servedBy"] = "agent-gateway"
+        return jsonify(result)
+
     return app
 
 
@@ -53,4 +65,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

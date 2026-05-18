@@ -5,6 +5,8 @@ import type {
   LobPayload,
   MarketAiInsightPayload,
   MarketAiInsightResponse,
+  MarketWideAiInsightPayload,
+  MarketWideAiInsightResponse,
   MarketSummary,
   MarketGroupChartPayload,
   MarketGroupDetail,
@@ -331,6 +333,10 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
 
 export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs = 20000) {
   return apiPostWithTimeout<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
+}
+
+export function fetchMarketWideAiInsights(payload: MarketWideAiInsightPayload, timeoutMs = 24000) {
+  return apiPostWithTimeout<MarketWideAiInsightResponse>('/agent/market-wide-insights', payload, timeoutMs);
 }
 
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
