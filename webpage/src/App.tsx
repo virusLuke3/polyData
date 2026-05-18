@@ -333,6 +333,9 @@ function PanelWorkspaceSlot({
   size,
   layoutPrefs,
   children,
+  className = '',
+  layoutManaged = true,
+  resizeEnabled = true,
   onMovePanel,
   onResizePanel,
   onResetPanelLayout,
@@ -341,6 +344,9 @@ function PanelWorkspaceSlot({
   size: PanelSizeHint;
   layoutPrefs: PanelLayoutPrefs;
   children: ComponentChildren;
+  className?: string;
+  layoutManaged?: boolean;
+  resizeEnabled?: boolean;
   onMovePanel: (draggedPanelId: string, targetPanelId: string, insertAfter: boolean) => void;
   onResizePanel: (panelId: string, patch: { rowSpan?: number; colSpan?: number }) => void;
   onResetPanelLayout: (panelId: string) => void;
@@ -417,7 +423,7 @@ function PanelWorkspaceSlot({
 
   const findDropTarget = (clientX: number, clientY: number) => {
     const hit = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-    const targetSlot = hit?.closest<HTMLElement>('.wm-panels-grid .wm-panel-slot[data-workspace-panel-id]') || null;
+    const targetSlot = hit?.closest<HTMLElement>('.wm-panel-slot[data-workspace-panel-id]') || null;
     if (!targetSlot) return null;
     const targetPanelId = targetSlot.dataset.workspacePanelId;
     if (!targetPanelId || targetPanelId === panelId) return null;
@@ -425,7 +431,10 @@ function PanelWorkspaceSlot({
     return {
       targetSlot,
       targetPanelId,
-      insertAfter: clientY > rect.top + rect.height / 2,
+      insertAfter: clientY > rect.top + rect.height / 2 || (
+        Math.abs(clientY - (rect.top + rect.height / 2)) < Math.min(48, rect.height / 4)
+        && clientX > rect.left + rect.width / 2
+      ),
       rect,
     };
   };
@@ -552,6 +561,7 @@ function PanelWorkspaceSlot({
   };
 
   const startResize = (axis: 'row' | 'col', event: MouseEvent) => {
+    if (!resizeEnabled) return;
     event.preventDefault();
     event.stopPropagation();
     resizeRef.current.active = true;
@@ -599,7 +609,7 @@ function PanelWorkspaceSlot({
 
   return (
     <div
-      className="wm-panel-slot is-layout-managed"
+      className={`wm-panel-slot ${layoutManaged ? 'is-layout-managed' : ''} ${className}`.trim()}
       data-workspace-panel-id={panelId}
       ref={slotRef}
       onMouseDown={startDrag}
@@ -609,20 +619,24 @@ function PanelWorkspaceSlot({
       } as Record<string, string>}
     >
       {children}
-      <button
-        aria-label="Resize panel height"
-        className="wm-panel-resize-handle"
-        type="button"
-        onDblClick={() => onResetPanelLayout(panelId)}
-        onMouseDown={(event) => startResize('row', event)}
-      />
-      <button
-        aria-label="Resize panel width"
-        className="wm-panel-col-resize-handle"
-        type="button"
-        onDblClick={() => onResetPanelLayout(panelId)}
-        onMouseDown={(event) => startResize('col', event)}
-      />
+      {resizeEnabled ? (
+        <>
+          <button
+            aria-label="Resize panel height"
+            className="wm-panel-resize-handle"
+            type="button"
+            onDblClick={() => onResetPanelLayout(panelId)}
+            onMouseDown={(event) => startResize('row', event)}
+          />
+          <button
+            aria-label="Resize panel width"
+            className="wm-panel-col-resize-handle"
+            type="button"
+            onDblClick={() => onResetPanelLayout(panelId)}
+            onMouseDown={(event) => startResize('col', event)}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1133,7 +1147,7 @@ export function App() {
 
   const moveWorkspacePanel = (draggedPanelId: string, targetPanelId: string, insertAfter: boolean) => {
     setActivePanelIds((current) => {
-      const movablePanelIds = current.filter((panelId) => !MAP_BOTTOM_PANEL_IDS.includes(panelId) && !FOCUSED_STRIP_PANEL_IDS.has(panelId));
+      const movablePanelIds = current.filter((panelId) => !MAP_BOTTOM_PANEL_IDS.includes(panelId));
       if (!movablePanelIds.includes(draggedPanelId) || !movablePanelIds.includes(targetPanelId)) return current;
       const nextMovablePanelIds = reorderPanelIds(movablePanelIds, draggedPanelId, targetPanelId, insertAfter);
       if (nextMovablePanelIds === movablePanelIds) return current;
@@ -1460,17 +1474,58 @@ export function App() {
 
         <section className="wm-focused-market-row">
           {activeMarketsEntry ? (
-            <div className="wm-panel-slot wm-focused-market-list">
+            <PanelWorkspaceSlot
+              panelId="active-markets"
+              size={activeMarketsEntry.size}
+              layoutPrefs={panelLayoutPrefs}
+              className="wm-focused-market-list"
+              layoutManaged={false}
+              resizeEnabled={false}
+              onMovePanel={moveWorkspacePanel}
+              onResizePanel={resizeWorkspacePanel}
+              onResetPanelLayout={resetWorkspacePanelLayout}
+            >
               {activeMarketsEntry.render(panelContext)}
-            </div>
+            </PanelWorkspaceSlot>
           ) : null}
           <div className="wm-focused-market-right">
-            <FocusedMarketStrip {...panelContext} />
+            <FocusedMarketStrip
+              {...panelContext}
+              renderPanelSlot={(panelId, className, panel) => {
+                const entry = PANEL_REGISTRY[panelId];
+                return (
+                  <PanelWorkspaceSlot
+                    key={panelId}
+                    panelId={panelId}
+                    size={entry?.size}
+                    layoutPrefs={panelLayoutPrefs}
+                    className={className}
+                    layoutManaged={false}
+                    resizeEnabled={false}
+                    onMovePanel={moveWorkspacePanel}
+                    onResizePanel={resizeWorkspacePanel}
+                    onResetPanelLayout={resetWorkspacePanelLayout}
+                  >
+                    {panel}
+                  </PanelWorkspaceSlot>
+                );
+              }}
+            />
           </div>
           {oracleFeedEntry ? (
-            <div className="wm-panel-slot wm-focused-oracle-feed">
+            <PanelWorkspaceSlot
+              panelId="oracle-feed"
+              size={oracleFeedEntry.size}
+              layoutPrefs={panelLayoutPrefs}
+              className="wm-focused-oracle-feed"
+              layoutManaged={false}
+              resizeEnabled={false}
+              onMovePanel={moveWorkspacePanel}
+              onResizePanel={resizeWorkspacePanel}
+              onResetPanelLayout={resetWorkspacePanelLayout}
+            >
               {oracleFeedEntry.render(panelContext)}
-            </div>
+            </PanelWorkspaceSlot>
           ) : null}
         </section>
 

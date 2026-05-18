@@ -1,3 +1,4 @@
+import { type ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { emptyState, orderfilledList } from '@/panels/shared/renderers';
@@ -16,6 +17,10 @@ import type {
 } from '@/types';
 
 type BookSide = 'yes' | 'no';
+type FocusedPanelSlotRenderer = (panelId: string, className: string, panel: ComponentChildren) => ComponentChildren;
+type FocusedMarketStripProps = PanelRenderContext & {
+  renderPanelSlot?: FocusedPanelSlotRenderer;
+};
 
 const CHART_RANGE_TABS: Array<{ label: string; value: MarketGroupChartRange }> = [
   { label: '1h', value: '1h' },
@@ -468,17 +473,21 @@ function renderDetailChart(chart: ChartPayload | null) {
   );
 }
 
-export function FocusedMarketStrip(ctx: PanelRenderContext) {
+export function FocusedMarketStrip(props: FocusedMarketStripProps) {
+  const { renderPanelSlot, ...ctx } = props;
   const focusedMarket = ctx.selectedMarket;
   const detail = ctx.selectedMarketGroupDetail;
   const eventChart = ctx.selectedMarketGroupChart;
   const selectedOutcome = (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey) || null;
-  const executionAvailable = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
-  const chart = detail ? null : (ctx.bundle?.chart || null);
+  const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
+  const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
+  const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
+  const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(ctx.selectedMarketId && !detail);
+  const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const chartPoints = chart?.points || [];
-  const price = executionAvailable ? (ctx.bundle?.price ?? null) : null;
-  const lob = executionAvailable ? ctx.bundle?.lob : null;
-  const trades = executionAvailable ? (ctx.bundle?.trades || []) : [];
+  const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
+  const lob = executionAvailable && bundleMatchesSelected ? ctx.bundle?.lob : null;
+  const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
@@ -498,173 +507,182 @@ export function FocusedMarketStrip(ctx: PanelRenderContext) {
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
   const noTradesYet = executionAvailable && trades.length === 0 && Number(displayedTrades || 0) === 0;
+  const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
+    renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
+  );
 
   return (
     <section className="wm-focus-strip">
-      <Panel
-        title="MARKET DETAIL"
-        badge="selected ×"
-        status="live"
-        className="wm-focus-panel wm-focus-detail-panel"
-      >
-        <div className="wm-focus-detail">
-          <div className="wm-focus-detail-top">
-            <div className="wm-focus-detail-copy">
-              <strong className="wm-focus-title">{detail?.title || focusedMarket?.title || 'No market selected.'}</strong>
-              <div className="wm-focus-subtitle">
-                {marketTimeSubtitle(detail?.endDate || focusedMarket?.endDate || null, detail?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null)}
+      {wrapPanel('price-chart', 'wm-focus-panel-slot wm-focus-detail-slot', (
+        <Panel
+          title="MARKET DETAIL"
+          badge="selected ×"
+          status="live"
+          className="wm-focus-panel wm-focus-detail-panel"
+        >
+          <div className="wm-focus-detail">
+            <div className="wm-focus-detail-top">
+              <div className="wm-focus-detail-copy">
+                <strong className="wm-focus-title">{detail?.title || focusedMarket?.title || 'No market selected.'}</strong>
+                <div className="wm-focus-subtitle">
+                  {marketTimeSubtitle(detail?.endDate || focusedMarket?.endDate || null, detail?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null)}
+                </div>
+              </div>
+              <div className="wm-focus-price-hero">
+                <strong>{formatPercent(displayedYesPrice)}</strong>
+                <span className={signedClass(displayedChange)}>{formatSignedPercent(displayedChange)}</span>
               </div>
             </div>
-            <div className="wm-focus-price-hero">
-              <strong>{formatPercent(displayedYesPrice)}</strong>
-              <span className={signedClass(displayedChange)}>{formatSignedPercent(displayedChange)}</span>
-            </div>
-          </div>
 
-          <div className="wm-focus-chart-card">
-            <div className="wm-focus-chart-tabs">
-              {CHART_RANGE_TABS.map((tab) => (
-                <button
-                  type="button"
-                  key={tab.value}
-                  className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
-                  onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-              <i>UTC</i>
-            </div>
-            {detail ? eventChartLegend(detail, eventChart, ctx.selectedMarketGroupOutcomeKey, (outcome) => {
-              ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
-              if (outcome.marketId != null) {
-                ctx.setSelectedMarketId(Number(outcome.marketId));
-              } else {
-                ctx.setSelectedMarketId(null);
-              }
-            }) : null}
-            <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
-              <div className="wm-focus-chart-wrap">
-                {detail
-                  ? (
-                      hasEventHistory
-                        ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey)
-                        : showFocusedOutcomeFallback
-                          ? renderDetailChart(chart)
-                          : emptyState('Fresh market: waiting for event price history to print.')
-                    )
-                  : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
+            <div className="wm-focus-chart-card">
+              <div className="wm-focus-chart-tabs">
+                {CHART_RANGE_TABS.map((tab) => (
+                  <button
+                    type="button"
+                    key={tab.value}
+                    className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
+                    onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+                <i>UTC</i>
               </div>
-              {shouldShowOutcomeRail ? (
-                <aside className="wm-focus-outcome-rail" aria-label="outcomes">
+              {detail ? eventChartLegend(detail, eventChart, ctx.selectedMarketGroupOutcomeKey, (outcome) => {
+                ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
+                if (outcome.marketId != null) {
+                  ctx.setSelectedMarketId(Number(outcome.marketId));
+                } else {
+                  ctx.setSelectedMarketId(null);
+                }
+              }) : null}
+              <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
+                <div className="wm-focus-chart-wrap">
                   {detail
-                    ? eventOutcomes.map((outcome: EventOutcomeCard) => (
-                        <button
-                          type="button"
-                          className={`wm-focus-outcome-card event ${outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey ? 'active' : ''} ${outcome.marketId == null ? 'pending' : ''}`}
-                          key={outcome.outcomeKey || outcome.label || outcome.gammaMarketId || outcome.marketId}
-                          onClick={() => {
-                            ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
-                            if (outcome.marketId != null) {
-                              ctx.setSelectedMarketId(Number(outcome.marketId));
-                            } else {
-                              ctx.setSelectedMarketId(null);
-                            }
-                          }}
-                        >
-                          <div className="wm-focus-outcome-top">
-                            <span>{outcome.label}</span>
-                            <strong>{Number.isFinite(outcome.price) ? formatPercent(outcome.price) : '--'}</strong>
-                          </div>
-                          <div className={`wm-focus-outcome-change ${signedClass(outcome.change)}`}>
-                            {Number.isFinite(outcome.change) ? formatSignedPercent(outcome.change) : '--'}
-                          </div>
-                          <div className="wm-focus-outcome-cta">
-                            {outcome.marketId != null ? `Focus ${outcome.label}` : 'Pending local sync'}
-                          </div>
-                        </button>
-                      ))
-                    : legacyOutcomes.map((outcome) => (
-                        <button type="button" className={`wm-focus-outcome-card ${outcome.tone}`} key={outcome.label}>
-                          <div className="wm-focus-outcome-top">
-                            <span>{outcome.label}</span>
-                            <strong>{outcome.price == null ? '--' : formatPercent(outcome.price)}</strong>
-                          </div>
-                          <div className={`wm-focus-outcome-change ${signedClass(outcome.change)}`}>
-                            {outcome.change == null ? '--' : formatSignedPercent(outcome.change)}
-                          </div>
-                          <div className="wm-focus-outcome-cta">{outcome.cta}</div>
-                        </button>
-                      ))}
-                </aside>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="wm-focus-inline-stats">
-            <span><em>Vol</em> {formatCurrencyCompact(displayedVolume)}</span>
-            <span><em>24h</em> {formatCompact(displayedTrades)} trades</span>
-            <span><em>Yes</em> {formatPercent(displayedYesPrice)}</span>
-            <span><em>No</em> {formatPercent(displayedNoPrice)}</span>
-          </div>
-        </div>
-      </Panel>
-
-      <Panel
-        title="ORDER BOOK"
-        badge="live"
-        status="live"
-        className="wm-focus-panel wm-focus-book-panel"
-        controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
-      >
-        {!executionAvailable && detail ? (
-          emptyState('Select an outcome with local sync to load the order book.')
-        ) : !lob || !activeBook ? (
-          emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
-        ) : (
-          <div className="wm-focus-book">
-            <div className="wm-focus-book-tabs">
-              <button type="button" className={bookSide === 'yes' ? 'active' : ''} onClick={() => setBookSide('yes')}>YES</button>
-              <button type="button" className={bookSide === 'no' ? 'active' : ''} onClick={() => setBookSide('no')}>NO</button>
-            </div>
-            <div className="wm-focus-book-header">
-              <span>BOOK</span>
-              <span>PRICE</span>
-              <span>SHARES</span>
-              <span>TOTAL</span>
-            </div>
-            <div className="wm-focus-book-ladder">
-              {orderBookRows(activeBook.asks || [], 'ask')}
-              <div className="wm-focus-book-mid">
-                <span>Last: {formatBookPrice(activePrice)}</span>
-                <strong>Spread: {formatBookPrice(spreadValue)}</strong>
+                    ? (
+                        hasEventHistory
+                          ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey)
+                          : showFocusedOutcomeFallback
+                            ? renderDetailChart(chart)
+                            : emptyState('Fresh market: waiting for event price history to print.')
+                      )
+                    : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
+                </div>
+                {shouldShowOutcomeRail ? (
+                  <aside className="wm-focus-outcome-rail" aria-label="outcomes">
+                    {detail
+                      ? eventOutcomes.map((outcome: EventOutcomeCard) => (
+                          <button
+                            type="button"
+                            className={`wm-focus-outcome-card event ${outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey ? 'active' : ''} ${outcome.marketId == null ? 'pending' : ''}`}
+                            key={outcome.outcomeKey || outcome.label || outcome.gammaMarketId || outcome.marketId}
+                            onClick={() => {
+                              ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
+                              if (outcome.marketId != null) {
+                                ctx.setSelectedMarketId(Number(outcome.marketId));
+                              } else {
+                                ctx.setSelectedMarketId(null);
+                              }
+                            }}
+                          >
+                            <div className="wm-focus-outcome-top">
+                              <span>{outcome.label}</span>
+                              <strong>{Number.isFinite(outcome.price) ? formatPercent(outcome.price) : '--'}</strong>
+                            </div>
+                            <div className={`wm-focus-outcome-change ${signedClass(outcome.change)}`}>
+                              {Number.isFinite(outcome.change) ? formatSignedPercent(outcome.change) : '--'}
+                            </div>
+                            <div className="wm-focus-outcome-cta">
+                              {outcome.marketId != null ? `Focus ${outcome.label}` : 'Pending local sync'}
+                            </div>
+                          </button>
+                        ))
+                      : legacyOutcomes.map((outcome) => (
+                          <button type="button" className={`wm-focus-outcome-card ${outcome.tone}`} key={outcome.label}>
+                            <div className="wm-focus-outcome-top">
+                              <span>{outcome.label}</span>
+                              <strong>{outcome.price == null ? '--' : formatPercent(outcome.price)}</strong>
+                            </div>
+                            <div className={`wm-focus-outcome-change ${signedClass(outcome.change)}`}>
+                              {outcome.change == null ? '--' : formatSignedPercent(outcome.change)}
+                            </div>
+                            <div className="wm-focus-outcome-cta">{outcome.cta}</div>
+                          </button>
+                        ))}
+                  </aside>
+                ) : null}
               </div>
-              {orderBookRows(activeBook.bids || [], 'bid')}
+            </div>
+
+            <div className="wm-focus-inline-stats">
+              <span><em>Vol</em> {formatCurrencyCompact(displayedVolume)}</span>
+              <span><em>24h</em> {formatCompact(displayedTrades)} trades</span>
+              <span><em>Yes</em> {formatPercent(displayedYesPrice)}</span>
+              <span><em>No</em> {formatPercent(displayedNoPrice)}</span>
             </div>
           </div>
-        )}
-      </Panel>
+        </Panel>
+      ))}
 
-      <Panel
-        title="ORDERFILLED FLOW"
-        badge="FOCUSED"
-        status="live"
-        count={trades.length}
-        className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
-        controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{selectedOutcome?.label || focusedMarket?.title}</span> : undefined}
-      >
-        <div className="wm-focus-trades">
-          <div className="wm-focus-trades-meta">
-            <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
-            <strong>{trades[0] && tradeNotional(trades[0]) ? `$${formatCompact(tradeNotional(trades[0]))}` : '--'}</strong>
+      {wrapPanel('lob-depth', 'wm-focus-panel-slot wm-focus-book-slot', (
+        <Panel
+          title="ORDER BOOK"
+          badge="live"
+          status="live"
+          className="wm-focus-panel wm-focus-book-panel"
+          controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
+        >
+          {!executionAvailable && detail ? (
+            emptyState('Select an outcome with local sync to load the order book.')
+          ) : !lob || !activeBook ? (
+            emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
+          ) : (
+            <div className="wm-focus-book">
+              <div className="wm-focus-book-tabs">
+                <button type="button" className={bookSide === 'yes' ? 'active' : ''} onClick={() => setBookSide('yes')}>YES</button>
+                <button type="button" className={bookSide === 'no' ? 'active' : ''} onClick={() => setBookSide('no')}>NO</button>
+              </div>
+              <div className="wm-focus-book-header">
+                <span>BOOK</span>
+                <span>PRICE</span>
+                <span>SHARES</span>
+                <span>TOTAL</span>
+              </div>
+              <div className="wm-focus-book-ladder">
+                {orderBookRows(activeBook.asks || [], 'ask')}
+                <div className="wm-focus-book-mid">
+                  <span>Last: {formatBookPrice(activePrice)}</span>
+                  <strong>Spread: {formatBookPrice(spreadValue)}</strong>
+                </div>
+                {orderBookRows(activeBook.bids || [], 'bid')}
+              </div>
+            </div>
+          )}
+        </Panel>
+      ))}
+
+      {wrapPanel('global-orderfilled', 'wm-focus-panel-slot wm-focus-trades-slot', (
+        <Panel
+          title="ORDERFILLED FLOW"
+          badge="FOCUSED"
+          status="live"
+          count={trades.length}
+          className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
+          controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{selectedOutcome?.label || focusedMarket?.title}</span> : undefined}
+        >
+          <div className="wm-focus-trades">
+            <div className="wm-focus-trades-meta">
+              <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
+              <strong>{trades[0] && tradeNotional(trades[0]) ? `$${formatCompact(tradeNotional(trades[0]))}` : '--'}</strong>
+            </div>
+            {!executionAvailable && detail
+              ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
+              : trades.length
+              ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
+              : emptyState(noTradesYet ? 'No trade rows yet for this outcome.' : 'Waiting for trade rows.')}
           </div>
-          {!executionAvailable && detail
-            ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
-            : trades.length
-            ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
-            : emptyState(noTradesYet ? 'No trade rows yet for this outcome.' : 'Waiting for trade rows.')}
-        </div>
-      </Panel>
+        </Panel>
+      ))}
     </section>
   );
 }

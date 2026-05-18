@@ -31,7 +31,8 @@
 }
 
 .wm-panel-slot:hover .wm-panel,
-.wm-panel-slot.panel-drop-target .wm-panel {
+.wm-panel-slot.panel-drop-target .wm-panel,
+.wm-panel-slot.dragging-source .wm-panel {
   border-color: #4e5d6f;
   box-shadow:
     0 20px 42px rgba(0, 0, 0, 0.54),
@@ -194,10 +195,11 @@
   position: relative;
   min-width: 0;
   box-shadow:
-    0 0 0 1px rgba(96, 139, 183, 0.5),
+    0 0 0 1px rgba(120, 173, 226, 0.68),
     0 0 0 2px rgba(6, 13, 22, 0.95),
-    0 12px 28px rgba(0, 0, 0, 0.4),
-    10px 0 24px rgba(26, 58, 95, 0.18);
+    0 12px 30px rgba(0, 0, 0, 0.46),
+    10px 0 28px rgba(35, 82, 138, 0.28),
+    inset 0 0 0 1px rgba(179, 216, 255, 0.08);
 }
 
 .wm-panel-slot::before {
@@ -205,12 +207,12 @@
   position: absolute;
   inset: 0;
   z-index: 6;
-  border: 1px solid rgba(132, 178, 226, 0.38);
+  border: 1px solid rgba(152, 197, 244, 0.5);
   box-shadow:
-    inset 1px 0 0 rgba(180, 216, 255, 0.12),
-    inset -1px 0 0 rgba(45, 86, 133, 0.44),
-    inset 0 1px 0 rgba(196, 224, 255, 0.09),
-    inset 0 -1px 0 rgba(52, 93, 140, 0.38);
+    inset 1px 0 0 rgba(190, 224, 255, 0.18),
+    inset -1px 0 0 rgba(59, 107, 162, 0.54),
+    inset 0 1px 0 rgba(207, 232, 255, 0.14),
+    inset 0 -1px 0 rgba(65, 111, 165, 0.5);
   pointer-events: none;
 }
 
@@ -2438,12 +2440,17 @@ body.panel-resize-active iframe {
 }
 
 .wm-panel:not(.wm-market-panel) {
-  border-color: #2a2a2a;
+  border-color: #405a76;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 22%),
     #151515;
   box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.48),
+    10px 0 26px rgba(35, 78, 130, 0.22),
+    0 0 0 1px rgba(130, 180, 235, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 1px 0 0 rgba(168, 207, 250, 0.11),
+    inset -1px 0 0 rgba(57, 96, 143, 0.28),
     inset 0 -80px 120px rgba(0, 0, 0, 0.18);
 }
 
