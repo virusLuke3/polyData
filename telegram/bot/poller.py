@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from typing import Iterable
+
+from .client import TelegramBotClient
+from .commands import handle_command
+from .config import BotSettings, load_settings
+from .models import BotReply
+from .polydata_api import PolyDataBotApi
+from .router import parse_update
+from .state import BotState
+from telegram.topics.api_client import resolve_polydata_api_base
+
+
+def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, api: PolyDataBotApi) -> Iterable[tuple[int, int | str, BotReply]]:
+    for update in updates:
+        request = parse_update(update)
+        if request is None:
+            continue
+        if not settings.chat_allowed(request.chat_id, request.user_id):
+            yield request.update_id, request.chat_id, BotReply("⚠️ 当前 chat 未授权使用此 bot。")
+            continue
+        yield request.update_id, request.chat_id, handle_command(request, api)
+
+
+def run_once(
+    *,
+    settings: BotSettings,
+    state: BotState,
+    telegram: TelegramBotClient,
+    api: PolyDataBotApi,
+    dry_run: bool = False,
+    limit: int = 50,
+) -> int:
+    updates = telegram.get_updates(offset=state.offset, timeout_seconds=settings.long_poll_timeout_seconds, limit=limit)
+    handled = 0
+    for update_id, chat_id, reply in _iter_replies(updates, settings=settings, api=api):
+        if dry_run:
+            print(json.dumps({"chatId": chat_id, "text": reply.text}, ensure_ascii=False))
+        else:
+            telegram.send_message(
+                chat_id=str(chat_id),
+                text=reply.text,
+                disable_web_page_preview=not reply.link_preview,
+            )
+        if not dry_run:
+            state.mark_update(update_id)
+        handled += 1
+    if handled and not dry_run:
+        state.save()
+    return handled
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the interactive polyData Telegram bot")
+    parser.add_argument("--once", action="store_true", help="Process one getUpdates batch and exit")
+    parser.add_argument("--dry-run", action="store_true", help="Print replies instead of sending Telegram messages")
+    parser.add_argument("--limit", type=int, default=50, help="Maximum updates per getUpdates call")
+    return parser
+
+
+def main() -> int:
+    args = build_arg_parser().parse_args()
+    settings = load_settings()
+    dry_run = bool(args.dry_run or settings.dry_run)
+    if not dry_run and not settings.bot_token:
+        print("POLYDATA_TELEGRAM_BOT_TOKEN is required. Use --dry-run for local command tests.", file=sys.stderr)
+        return 2
+    state = BotState(settings.state_path)
+    telegram = TelegramBotClient(
+        bot_token=settings.bot_token,
+        api_base=settings.telegram_api_base,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    resolution = resolve_polydata_api_base(settings.polydata_api_candidates, timeout_seconds=min(5, settings.request_timeout_seconds))
+    if not resolution.healthy:
+        checked = ", ".join(resolution.checked) or "(none)"
+        print(f"[telegram-bot] WARN no healthy polyData API found; using {resolution.base_url or settings.polydata_api_base} after checking {checked}", file=sys.stderr)
+    api = PolyDataBotApi(
+        base_url=resolution.base_url or settings.polydata_api_base,
+        base_urls=settings.polydata_api_candidates,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    while True:
+        try:
+            handled = run_once(settings=settings, state=state, telegram=telegram, api=api, dry_run=dry_run, limit=args.limit)
+            print(json.dumps({"handled": handled, "offset": state.offset, "dryRun": dry_run}, ensure_ascii=True), file=sys.stderr)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:
+            print(f"[telegram-bot] ERROR {exc}", file=sys.stderr)
+            if args.once:
+                return 1
+        if args.once:
+            return 0
+        time.sleep(settings.poll_interval_seconds)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

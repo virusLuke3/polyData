@@ -1,0 +1,271 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from telegram.bot.commands import handle_command
+from telegram.bot.config import BotSettings
+from telegram.bot.formatters import format_market_search, format_pnl_coverage, format_wallet
+from telegram.bot.models import CommandRequest
+from telegram.bot.poller import run_once
+from telegram.bot.polydata_api import PolyDataBotApi
+from telegram.bot.router import parse_update
+from telegram.bot.state import BotState
+
+
+class FakeApi:
+    def search_markets(self, query: str, *, limit: int = 5):
+        return {
+            "items": [
+                {
+                    "title": "Spurs vs. Thunder: O/U 225.5",
+                    "latestPrice": "0.375",
+                    "slug": "nba-sas-okc-2026-05-18-total-225pt5",
+                    "tags": ["sports", "basketball", "nba"],
+                    "tradeCount24h": 12,
+                }
+            ]
+        }
+
+    def alpha_signals(self, *, limit: int = 5):
+        return {
+            "items": [
+                {
+                    "title": "Bitcoin Up or Down",
+                    "summary": "Clustered smart-wallet buying detected.",
+                    "kind": "whale",
+                    "severity": "watch",
+                }
+            ]
+        }
+
+    def wallet_summary(self, address: str, *, days: int = 30):
+        return {
+            "address": address,
+            "summary": {
+                "tradeCount": 1244,
+                "buyCount": 610,
+                "sellCount": 634,
+                "volumeNotional": "12430",
+                "activeMarkets": 18,
+                "lastTradeAt": "2026-05-18T00:00:00Z",
+            },
+            "daily": [{"tradeCount": 10}],
+            "topMarkets": [{"title": "NBA Finals Winner"}, {"title": "Bitcoin Up or Down"}],
+        }
+
+    def wallet_trades(self, address: str, *, limit: int = 5):
+        return {"items": [{"marketTitle": "NBA Finals Winner", "side": "BUY", "outcome": "YES", "price": "0.42"}]}
+
+    def pnl(self, address: str):
+        return {"status": "not_ready", "coverage": {"tradeCashflows": False, "nonTradeCashflows": False, "positionSnapshot": False}}
+
+
+class FakeTelegram:
+    def __init__(self, updates):
+        self.updates = updates
+        self.sent = []
+
+    def get_updates(self, **kwargs):
+        self.last_get_updates = kwargs
+        return self.updates
+
+    def send_message(self, **kwargs):
+        self.sent.append(kwargs)
+        return [{"ok": True}]
+
+
+class FakeApiResponse:
+    def __init__(self, payload, *, status_code=200):
+        self.payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self.payload
+
+
+class FakeApiSession:
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, params, timeout):
+        self.calls.append((url, params, timeout))
+        if "bad.local" in url:
+            raise __import__("requests").ReadTimeout("slow")
+        return FakeApiResponse({"status": "ok", "items": [{"title": "Fallback market"}]})
+
+
+def make_settings(state_path: str) -> BotSettings:
+    return BotSettings(
+        bot_token="token",
+        telegram_api_base="https://api.telegram.org",
+        polydata_api_base="http://127.0.0.1:18500",
+        polydata_api_candidates=("http://127.0.0.1:18500",),
+        state_path=state_path,
+        request_timeout_seconds=12,
+        poll_interval_seconds=2,
+        long_poll_timeout_seconds=1,
+        dry_run=False,
+        allowed_chat_ids=set(),
+        admin_user_ids=set(),
+    )
+
+
+def test_parse_update_supports_bot_mentions_and_args():
+    request = parse_update(
+        {
+            "update_id": 7,
+            "message": {
+                "message_id": 11,
+                "text": "/market@PolyMonitorBot bitcoin",
+                "chat": {"id": -100},
+                "from": {"id": 42},
+            },
+        }
+    )
+
+    assert request is not None
+    assert request.command == "market"
+    assert request.args == "bitcoin"
+    assert request.chat_id == -100
+    assert request.user_id == 42
+
+
+def test_market_formatter_adds_price_tags_and_polymarket_link():
+    text = format_market_search("nba", FakeApi().search_markets("nba"))
+
+    assert "🔎 Market Search: nba" in text
+    assert "YES: 37.5%" in text
+    assert "#sports #basketball #nba" in text
+    assert "https://polymarket.com/event/nba-sas-okc-2026-05-18-total-225pt5" in text
+
+
+def test_wallet_formatter_returns_profile_and_labels():
+    api = FakeApi()
+    address = "0x1234567890abcdef1234567890abcdef12345678"
+    text = format_wallet(address, api.wallet_summary(address), api.wallet_trades(address))
+
+    assert "👛 Wallet" in text
+    assert "总交易次数：1,244" in text
+    assert "交易量：12,430 USDC" in text
+    assert "NBA Finals Winner" in text
+    assert "高频交易者" in text
+    assert "多市场活跃" in text
+
+
+def test_pnl_formatter_is_coverage_only_when_not_ready():
+    text = format_pnl_coverage("0x1234567890abcdef1234567890abcdef12345678", FakeApi().pnl("x"))
+
+    assert "当前状态：PnL 正在接入 cashflow 层" in text
+    assert "暂不输出完整 PnL" in text
+    assert "trade cashflows: False" in text
+
+
+def test_handle_command_routes_first_version_commands():
+    api = FakeApi()
+    base = {
+        "update_id": 1,
+        "chat_id": 1,
+        "user_id": 2,
+        "message_id": 3,
+        "text": "",
+        "raw": {},
+    }
+
+    assert "PolyMonitorBot" in handle_command(CommandRequest(command="start", args="", **base), api).text
+    assert "Market:" in handle_command(CommandRequest(command="help", args="", **base), api).text
+    assert "Spurs vs. Thunder" in handle_command(CommandRequest(command="market", args="nba", **base), api).text
+    assert "Alpha Signals" in handle_command(CommandRequest(command="signal", args="polymarket", **base), api).text
+    assert "Wallet" in handle_command(
+        CommandRequest(command="wallet", args="0x1234567890abcdef1234567890abcdef12345678", **base),
+        api,
+    ).text
+    assert "PnL" in handle_command(
+        CommandRequest(command="pnl", args="0x1234567890abcdef1234567890abcdef12345678", **base),
+        api,
+    ).text
+
+
+def test_run_once_dry_run_processes_updates_without_persisting_offset(tmp_path: Path, capsys):
+    update = {
+        "update_id": 10,
+        "message": {
+            "message_id": 2,
+            "text": "/market nba",
+            "chat": {"id": 123},
+            "from": {"id": 456},
+        },
+    }
+    state = BotState(str(tmp_path / "bot_state.json"))
+    telegram = FakeTelegram([update])
+    settings = make_settings(str(tmp_path / "bot_state.json"))
+
+    handled = run_once(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=True)
+
+    output = capsys.readouterr().out
+    assert handled == 1
+    assert state.offset is None
+    assert telegram.sent == []
+    assert "Spurs vs. Thunder" in output
+
+
+def test_run_once_sends_and_persists_offset(tmp_path: Path):
+    update = {
+        "update_id": 10,
+        "message": {
+            "message_id": 2,
+            "text": "/market nba",
+            "chat": {"id": 123},
+            "from": {"id": 456},
+        },
+    }
+    state = BotState(str(tmp_path / "bot_state.json"))
+    telegram = FakeTelegram([update])
+    settings = make_settings(str(tmp_path / "bot_state.json"))
+
+    handled = run_once(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=False)
+
+    assert handled == 1
+    assert state.offset == 11
+    assert "Spurs vs. Thunder" in telegram.sent[0]["text"]
+
+
+def test_run_once_rejects_unauthorized_chat(tmp_path: Path):
+    update = {
+        "update_id": 10,
+        "message": {
+            "message_id": 2,
+            "text": "/start",
+            "chat": {"id": 123},
+            "from": {"id": 456},
+        },
+    }
+    state = BotState(str(tmp_path / "bot_state.json"))
+    telegram = FakeTelegram([update])
+    settings = BotSettings(
+        **{**make_settings(str(tmp_path / "bot_state.json")).__dict__, "allowed_chat_ids": {"999"}}
+    )
+
+    handled = run_once(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=False)
+
+    assert handled == 1
+    assert "未授权" in telegram.sent[0]["text"]
+
+
+def test_polydata_api_falls_back_to_next_base_url():
+    api = PolyDataBotApi(base_url="http://bad.local/wm-api", base_urls=("http://good.local/wm-api",), timeout_seconds=1)
+    api.session = FakeApiSession()
+
+    payload = api.search_markets("nba", limit=1)
+
+    assert payload["items"][0]["title"] == "Fallback market"
+    assert api.session.calls[0][0] == "http://bad.local/wm-api/markets"
+    assert api.session.calls[1][0] == "http://good.local/wm-api/markets"
