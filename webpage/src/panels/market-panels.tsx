@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem } from '@/types';
+import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, formatSignedPercent, shortHash, signedClass } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
@@ -169,6 +169,26 @@ function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
       {remaining ? <span className="wm-poly-market-more">+{remaining}</span> : null}
     </>
   );
+}
+
+function complementPrice(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.max(0, Math.min(1, 1 - numeric));
+}
+
+function marketSummaryOracleHint(ctx: PanelRenderContext, endDate?: string | null) {
+  const timeline = ctx.bundle?.oracle?.timeline || [];
+  const latest = timeline[0] || null;
+  if (latest?.settledPrice !== null && latest?.settledPrice !== undefined && latest?.settledPrice !== '') {
+    return `Settled at ${formatPercent(latest.settledPrice)}`;
+  }
+  if (latest?.proposedPrice !== null && latest?.proposedPrice !== undefined && latest?.proposedPrice !== '') {
+    return `Oracle proposed ${formatPercent(latest.proposedPrice)}`;
+  }
+  if (ctx.bundle?.oracle?.currentStatus) return ctx.bundle.oracle.currentStatus;
+  if (endDate) return `Resolves after ${formatDate(endDate)}`;
+  return 'Oracle resolution pending';
 }
 
 function activeMarketGroupsList(
@@ -421,25 +441,66 @@ export const marketPanelRenderers: PanelRenderMap = {
     ),
   },
   'market-summary': {
-    render: (ctx) => (
-      <Panel title="MARKET SUMMARY" badge="MARKET" status="live">
-        <div className="wm-detail-stack">
-          {[
-            { label: 'CONDITION', value: shortHash(ctx.selectedMarket?.conditionId || '', 10, 8) },
-            { label: 'QUESTION', value: shortHash(ctx.selectedMarket?.questionId || '', 10, 8) },
-            { label: 'YES TOKEN', value: shortHash(ctx.selectedMarket?.yesTokenId || '', 10, 8) },
-            { label: 'NO TOKEN', value: shortHash(ctx.selectedMarket?.noTokenId || '', 10, 8) },
-            { label: 'STATUS', value: ctx.selectedMarket?.status || '--' },
-            { label: 'ORACLE', value: shortHash(ctx.selectedMarket?.oracle || '', 10, 8) },
-          ].map((row) => (
-            <article className="wm-detail-row" key={row.label}>
-              <span>{row.label}</span>
-              <strong>{row.value}</strong>
-            </article>
-          ))}
-        </div>
-      </Panel>
-    ),
+    render: (ctx) => {
+      const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
+      const listMarket = globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId);
+      const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
+      const yesPrice = price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
+      const noPrice = price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
+      const volume24h = price?.volume24h ?? listMarket?.volume24h;
+      const tradeCount24h = price?.tradeCount24h ?? listMarket?.tradeCount24h;
+      const status = selected?.status || listMarket?.status || 'market';
+      const endDate = selected?.endDate || listMarket?.endDate || null;
+      const oracleHint = marketSummaryOracleHint(ctx, endDate);
+      return (
+        <Panel title="MARKET SUMMARY" badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
+          <div className="wm-market-summary">
+            <section className="wm-market-summary-hero">
+              <div className="wm-market-summary-kicker">
+                <span>{selected?.category || listMarket?.category || 'market'}</span>
+                <em>{endDate ? formatRelative(endDate) : 'rolling'}</em>
+              </div>
+              <strong>{selected?.title || 'No market selected.'}</strong>
+            </section>
+
+            <div className="wm-market-summary-prices" aria-label="current market prices">
+              <article className="yes">
+                <span>YES</span>
+                <strong>{formatPercent(yesPrice)}</strong>
+              </article>
+              <article className="no">
+                <span>NO</span>
+                <strong>{formatPercent(noPrice)}</strong>
+              </article>
+            </div>
+
+            <div className="wm-market-summary-grid">
+              <article>
+                <span>24H VOL</span>
+                <strong>{formatCurrencyCompact(volume24h)}</strong>
+              </article>
+              <article>
+                <span>24H TRADES</span>
+                <strong>{formatCompact(tradeCount24h)}</strong>
+              </article>
+              <article>
+                <span>ENDS</span>
+                <strong>{formatDate(endDate)}</strong>
+              </article>
+              <article>
+                <span>STATUS</span>
+                <strong>{status}</strong>
+              </article>
+            </div>
+
+            <div className="wm-market-summary-oracle">
+              <span>ORACLE RESOLUTION</span>
+              <strong>{oracleHint}</strong>
+            </div>
+          </div>
+        </Panel>
+      );
+    },
   },
   'price-implications': {
     render: (ctx) => (
