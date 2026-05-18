@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import contextlib
+import fcntl
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, Iterable
+
+from .client import TelegramClient
+from .config import TelegramSettings, load_settings
+from .formatters import format_panel_snapshot
+from .models import MessageCandidate
+from .publisher import publish_candidates
+from .state import PublishState
+
+
+_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="polydata-telegram")
+
+
+def publish_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> None:
+    """Publish a runtime panel payload in the background after an API fetch."""
+    try:
+        settings = load_settings()
+    except Exception as exc:
+        _log(f"settings-load-failed panel={panel_id} error={exc}")
+        return
+    if not _enabled(settings):
+        return
+    if not isinstance(payload, dict):
+        return
+    candidates = format_panel_snapshot(panel_id, payload)
+    if not candidates:
+        return
+    _EXECUTOR.submit(_publish_candidates, tuple(candidates), settings, panel_id)
+
+
+def _enabled(settings: TelegramSettings) -> bool:
+    return bool(settings.publish_on_api_fetch and (settings.bot_token or settings.dry_run))
+
+
+def _publish_candidates(candidates: Iterable[MessageCandidate], settings: TelegramSettings, panel_id: str) -> None:
+    try:
+        with _state_lock(settings.state_path):
+            state = PublishState(settings.state_path)
+            telegram = TelegramClient(
+                bot_token=settings.bot_token,
+                api_base=settings.telegram_api_base,
+                timeout_seconds=settings.request_timeout_seconds,
+            )
+            result = publish_candidates(
+                list(candidates),
+                settings=settings,
+                state=state,
+                telegram=telegram,
+                dry_run=settings.dry_run,
+            )
+        if result.sent or result.skipped_seen:
+            _log(
+                "panel=%s candidates=%s sent=%s skipped_seen=%s skipped_unconfigured=%s"
+                % (panel_id, result.candidates, result.sent, result.skipped_seen, result.skipped_unconfigured)
+            )
+    except Exception as exc:
+        _log(f"publish-failed panel={panel_id} error={exc}")
+
+
+@contextlib.contextmanager
+def _state_lock(state_path: str):
+    lock_path = Path(state_path).expanduser().with_suffix(Path(state_path).suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _log(message: str) -> None:
+    print(f"[telegram-runtime-bridge] {message}", file=sys.stderr)
+

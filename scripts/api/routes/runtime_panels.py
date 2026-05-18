@@ -7,7 +7,7 @@ from api.runtime_panels import RUNTIME_PANEL_MODULES
 
 def _publish_runtime_panel(panel_id: str, payload: dict) -> None:
     try:
-        from telegram.runtime_bridge import publish_panel_snapshot
+        from telegram.topics.runtime_bridge import publish_panel_snapshot
     except Exception:
         return
     try:

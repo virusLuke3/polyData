@@ -7,10 +7,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from telegram.api_client import resolve_polydata_api_base
-from telegram.client import TelegramClient
-from telegram.config import TelegramSettings, TopicConfig
-from telegram.formatters import (
+from telegram.topics.api_client import resolve_polydata_api_base
+from telegram.topics.client import TelegramClient
+from telegram.topics.config import TelegramSettings, TopicConfig
+from telegram.topics.formatters import (
     format_alpha_signal,
     format_latest_content,
     format_nba_scoreboard,
@@ -18,9 +18,9 @@ from telegram.formatters import (
     format_weather_map,
     format_weather_news,
 )
-from telegram.models import MessageCandidate
-from telegram.publisher import publish_candidates
-from telegram.state import PublishState
+from telegram.topics.models import MessageCandidate
+from telegram.topics.publisher import publish_candidates
+from telegram.topics.state import PublishState
 
 
 class FakeTelegram:
@@ -202,7 +202,7 @@ def test_telegram_client_retries_429_and_redacts_token(monkeypatch):
             FakeSendResponse(200, {"ok": True, "result": {"message_id": 1}}),
         ]
     )
-    monkeypatch.setattr("telegram.client.time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr("telegram.topics.client.time.sleep", lambda seconds: sleeps.append(seconds))
 
     result = client.send_message(chat_id="@news", text="hello")
 

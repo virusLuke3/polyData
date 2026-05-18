@@ -1,9 +1,15 @@
-# Telegram Publisher
+# Telegram
 
-This directory is the Telegram processing layer for polyData. It reads the
-existing runtime panel API snapshots, formats them into concise Telegram
-messages, deduplicates already-sent updates, and sends them through the
-Telegram Bot API.
+This directory is the Telegram processing layer for polyData.
+
+- `topics/`: group/forum topic publishing. It reads runtime panel API snapshots,
+  formats them into Telegram messages, deduplicates already-sent updates, and
+  sends them through the Telegram Bot API.
+- `bot/`: reserved for the interactive user-called bot, similar in spirit to
+  GMGN/AVE bots. Command handlers and query routing should live here.
+
+The old root module entrypoints remain as compatibility shims, but new code
+should import from `telegram.topics.*`.
 
 ## First Run
 
@@ -27,7 +33,7 @@ POLYDATA_TELEGRAM_THREAD_MACRO=8
 Dry run:
 
 ```bash
-python -m telegram.publisher --once --dry-run
+python -m telegram.topics.publisher --once --dry-run
 ```
 
 The publisher probes configured API candidates with `/health` and uses the
@@ -37,13 +43,13 @@ looks like `http://<gcp-host>/wm-api`; local development API is only a fallback.
 Prime state without sending the current backlog:
 
 ```bash
-python -m telegram.publisher --once --prime
+python -m telegram.topics.publisher --once --prime
 ```
 
 Run continuously:
 
 ```bash
-python -m telegram.publisher --watch
+python -m telegram.topics.publisher --watch
 ```
 
 To publish the same payload when the live website/API fetches a supported panel,
