@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import re
+import threading
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,9 @@ from weather.cities import load_weather_cities
 WEATHER_NEWS_SNAPSHOT_NAMESPACE = "snapshot:weather:news"
 WEATHER_NEWS_CACHE_KEY = "panel-v1"
 DEFAULT_NEWS_LIMIT = 24
+
+_LIVE_REFRESH_LOCK = threading.Lock()
+_LIVE_REFRESHING: set[str] = set()
 
 RELEVANCE_RE = re.compile(r"\b(weather|forecast|storm|rain|heat|heatwave|cold|wind|snow|flood|warning|alert|temperature|typhoon|hurricane)\b", re.I)
 WEATHER_CONTEXT_RE = re.compile(
@@ -255,14 +259,44 @@ def _store_live(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> None
         setter(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY, payload, ttl_seconds)
 
 
+def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: str) -> bool:
+    refresh_key = f"{WEATHER_NEWS_SNAPSHOT_NAMESPACE}:{WEATHER_NEWS_CACHE_KEY}"
+    with _LIVE_REFRESH_LOCK:
+        if refresh_key in _LIVE_REFRESHING:
+            return False
+        _LIVE_REFRESHING.add(refresh_key)
+
+    def refresh() -> None:
+        logger = getattr(ctx.get("app"), "logger", None)
+        try:
+            build_limit = max(limit, int(getattr(ctx["SETTINGS"], "weather_news_limit", 40) or 40))
+            payload = _with_cache_mode(build_weather_news_payload(ctx, limit=build_limit), "live-build")
+            if payload.get("items"):
+                _store_live(ctx, payload, ttl_seconds=ttl_seconds)
+                if logger is not None and hasattr(logger, "info"):
+                    logger.info("weather news async refresh stored reason=%s items=%s", reason, len(payload.get("items") or []))
+            elif logger is not None and hasattr(logger, "warning"):
+                logger.warning("weather news async refresh skipped empty payload reason=%s", reason)
+        except Exception:
+            if logger is not None:
+                logger.exception("weather news async refresh failed reason=%s", reason)
+        finally:
+            with _LIVE_REFRESH_LOCK:
+                _LIVE_REFRESHING.discard(refresh_key)
+
+    thread = threading.Thread(target=refresh, name="weather-news-refresh", daemon=True)
+    thread.start()
+    return True
+
+
 def get_weather_news_snapshot(ctx: dict, limit: int = DEFAULT_NEWS_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
     ttl_seconds = max(300, int(getattr(ctx["SETTINGS"], "weather_news_ttl_seconds", 900) or 900))
     seeded = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
     if seeded is not None:
+        if allow_live_build and seeded.get("cacheMode") == "stale-seed":
+            _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="stale-seed")
         return normalize_weather_news_payload(seeded, ctx=ctx, limit=limit)
     if not allow_live_build:
         return normalize_weather_news_payload({**_empty_payload(ctx), "cacheMode": "seed-miss"}, ctx=ctx, limit=limit)
-    payload = _with_cache_mode(build_weather_news_payload(ctx, limit=max(limit, int(getattr(ctx["SETTINGS"], "weather_news_limit", 40) or 40))), "live-build")
-    if payload.get("items"):
-        _store_live(ctx, payload, ttl_seconds=ttl_seconds)
-    return normalize_weather_news_payload(payload, ctx=ctx, limit=limit)
+    scheduled = _schedule_live_refresh(ctx, limit=limit, ttl_seconds=ttl_seconds, reason="seed-miss")
+    return normalize_weather_news_payload({**_empty_payload(ctx), "cacheMode": "seed-miss-refreshing" if scheduled else "seed-miss-refresh-inflight"}, ctx=ctx, limit=limit)

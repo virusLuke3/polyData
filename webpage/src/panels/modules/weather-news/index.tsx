@@ -8,10 +8,11 @@ import { runtimePanelFromRenderer } from '../helpers';
 
 type SortMode = 'latest' | 'severity' | 'city';
 
-function statusBadge(status?: string | null) {
+function statusBadge(status?: string | null, cacheMode?: string | null) {
   const text = String(status || '').toLowerCase();
   if (text === 'ok') return 'LIVE';
   if (text === 'degraded') return 'PARTIAL';
+  if (text === 'warming' || String(cacheMode || '').includes('refresh')) return 'WARMING';
   return text ? text.toUpperCase() : 'SEED';
 }
 
@@ -46,6 +47,16 @@ function modeLabel(mode: SortMode) {
   if (mode === 'latest') return 'Latest';
   if (mode === 'severity') return 'Alerts';
   return 'City';
+}
+
+function emptyMessage(payload?: RuntimeWeatherNewsPayload | null) {
+  if (!payload) return 'Weather news API unavailable';
+  const cacheMode = String(payload.cacheMode || '').toLowerCase();
+  const status = String(payload.status || '').toLowerCase();
+  if (cacheMode.includes('refresh')) return 'Weather headlines warming';
+  if (cacheMode === 'seed-miss') return 'Weather headlines seed missing';
+  if (status === 'degraded') return 'Weather news source degraded';
+  return 'No weather headlines seeded';
 }
 
 function displaySeverity(severity: string) {
@@ -108,7 +119,7 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
       controls={(
         <button type="button" className="wm-weather-sort-button" aria-label="Change weather news sort" onClick={() => setSortMode((current) => nextMode(current))}>{modeLabel(sortMode)}</button>
       )}
-      badge={statusBadge(payload?.status)}
+      badge={statusBadge(payload?.status, payload?.cacheMode)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
       count={items.length}
       headerOverlay={showHelp ? (
@@ -122,7 +133,7 @@ function WeatherNewsPanel({ payload }: { payload?: RuntimeWeatherNewsPayload | n
     >
       <div className="wm-weather-news-list">
         {items.length ? items.map((item) => <NewsItem key={item.id || `${item.city}-${item.title}`} item={item} />) : (
-          <div className="wm-registry-empty"><strong>No weather headlines seeded</strong></div>
+          <div className="wm-registry-empty"><strong>{emptyMessage(payload)}</strong></div>
         )}
       </div>
     </Panel>
