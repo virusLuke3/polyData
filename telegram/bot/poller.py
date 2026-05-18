@@ -6,6 +6,7 @@ import sys
 import time
 from typing import Iterable
 
+from .alerts import due_alert_replies, utc_now_text
 from .client import TelegramBotClient
 from .commands import handle_command
 from .config import BotSettings, load_settings
@@ -16,7 +17,7 @@ from .state import BotState
 from telegram.topics.api_client import resolve_polydata_api_base
 
 
-def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, api: PolyDataBotApi) -> Iterable[tuple[int, int | str, BotReply]]:
+def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, state: BotState, api: PolyDataBotApi) -> Iterable[tuple[int, int | str, BotReply]]:
     for update in updates:
         request = parse_update(update)
         if request is None:
@@ -24,7 +25,7 @@ def _iter_replies(updates: Iterable[dict], *, settings: BotSettings, api: PolyDa
         if not settings.chat_allowed(request.chat_id, request.user_id):
             yield request.update_id, request.chat_id, BotReply("⚠️ 当前 chat 未授权使用此 bot。")
             continue
-        yield request.update_id, request.chat_id, handle_command(request, api)
+        yield request.update_id, request.chat_id, handle_command(request, api, state=state)
 
 
 def run_once(
@@ -38,7 +39,7 @@ def run_once(
 ) -> int:
     updates = telegram.get_updates(offset=state.offset, timeout_seconds=settings.long_poll_timeout_seconds, limit=limit)
     handled = 0
-    for update_id, chat_id, reply in _iter_replies(updates, settings=settings, api=api):
+    for update_id, chat_id, reply in _iter_replies(updates, settings=settings, state=state, api=api):
         if dry_run:
             print(json.dumps({"chatId": chat_id, "text": reply.text}, ensure_ascii=False))
         else:
@@ -53,6 +54,30 @@ def run_once(
     if handled and not dry_run:
         state.save()
     return handled
+
+
+def check_alerts(
+    *,
+    settings: BotSettings,
+    state: BotState,
+    telegram: TelegramBotClient,
+    api: PolyDataBotApi,
+    dry_run: bool = False,
+) -> int:
+    now = time.time()
+    if now - state.last_alert_check_ts < settings.alert_check_interval_seconds:
+        return 0
+    sent = 0
+    for chat_id, alert_id, reply, price in due_alert_replies(state, api):
+        if dry_run:
+            print(json.dumps({"chatId": chat_id, "alertId": alert_id, "text": reply.text}, ensure_ascii=False))
+        else:
+            telegram.send_message(chat_id=str(chat_id), text=reply.text, disable_web_page_preview=True)
+        state.mark_alert_triggered(alert_id=alert_id, timestamp=utc_now_text(), price=price)
+        sent += 1
+    state.mark_alert_check(now)
+    state.save()
+    return sent
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -88,7 +113,8 @@ def main() -> int:
     while True:
         try:
             handled = run_once(settings=settings, state=state, telegram=telegram, api=api, dry_run=dry_run, limit=args.limit)
-            print(json.dumps({"handled": handled, "offset": state.offset, "dryRun": dry_run}, ensure_ascii=True), file=sys.stderr)
+            alerts_sent = check_alerts(settings=settings, state=state, telegram=telegram, api=api, dry_run=dry_run)
+            print(json.dumps({"handled": handled, "alertsSent": alerts_sent, "offset": state.offset, "dryRun": dry_run}, ensure_ascii=True), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:

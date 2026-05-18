@@ -57,6 +57,9 @@ class PolyDataBotApi:
     def alpha_signals(self, *, limit: int = 5) -> Dict[str, Any]:
         return self.get_json("/runtime/signals/alpha", params={"limit": limit})
 
+    def crypto_markets(self) -> Dict[str, Any]:
+        return self.get_json("/runtime/markets/crypto")
+
     def wallet_summary(self, address: str, *, days: int = 30) -> Dict[str, Any]:
         return self.get_json(f"/analytics/addresses/{address}", params={"days": days})
 

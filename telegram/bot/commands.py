@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from typing import Protocol
+from datetime import datetime, timezone
+from typing import Optional, Protocol
 
 import requests
 
-from .formatters import format_market_search, format_pnl_coverage, format_signals, format_wallet, help_text, is_address, start_text
+from .formatters import (
+    crypto_price_map,
+    format_alert_created,
+    format_alert_removed,
+    format_alerts,
+    format_market_search,
+    format_pnl_coverage,
+    format_signals,
+    format_wallet,
+    help_text,
+    is_address,
+    start_text,
+)
 from .models import BotReply, CommandRequest
+from .state import BotState
 
 
 class BotApi(Protocol):
@@ -14,6 +28,7 @@ class BotApi(Protocol):
     def wallet_summary(self, address: str, *, days: int = 30): ...
     def wallet_trades(self, address: str, *, limit: int = 5): ...
     def pnl(self, address: str): ...
+    def crypto_markets(self): ...
 
 
 def _usage(command: str) -> BotReply:
@@ -22,6 +37,7 @@ def _usage(command: str) -> BotReply:
         "wallet": "请使用：/wallet 0x...",
         "pnl": "请使用：/pnl 0x...",
         "signal": "请使用：/signal polymarket",
+        "alert": "请使用：/alert BTC 95000",
     }
     return BotReply(f"⚠️ {command}\n{usages.get(command, '请使用 /help 查看命令')}")
 
@@ -30,7 +46,21 @@ def _service_error(label: str) -> BotReply:
     return BotReply(f"⚠️ {label}\n服务暂时不可用，稍后再试。")
 
 
-def handle_command(request: CommandRequest, api: BotApi) -> BotReply:
+def _parse_alert_args(args: str) -> tuple[str, float] | None:
+    parts = args.split()
+    if len(parts) < 2:
+        return None
+    symbol = parts[0].strip().upper().replace("-USD", "")
+    try:
+        threshold = float(parts[1].replace(",", ""))
+    except ValueError:
+        return None
+    if not symbol or threshold <= 0:
+        return None
+    return symbol, threshold
+
+
+def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotState] = None) -> BotReply:
     command = request.command
     args = request.args.strip()
     if command == "start":
@@ -78,4 +108,45 @@ def handle_command(request: CommandRequest, api: BotApi) -> BotReply:
         except requests.RequestException:
             payload = {}
         return BotReply(format_pnl_coverage(address, payload), link_preview=False)
+    if command == "alert":
+        if state is None:
+            return BotReply("⚠️ Alert\n状态存储不可用。")
+        parsed = _parse_alert_args(args)
+        if parsed is None:
+            return _usage("alert")
+        symbol, threshold = parsed
+        current_price = None
+        try:
+            current_price = crypto_price_map(api.crypto_markets()).get(symbol)
+        except requests.RequestException:
+            current_price = None
+        direction = "above" if current_price is None or threshold >= current_price else "below"
+        alert = {
+            "id": state.next_alert_id(),
+            "chatId": request.chat_id,
+            "userId": request.user_id,
+            "symbol": symbol,
+            "threshold": threshold,
+            "direction": direction,
+            "createdPrice": current_price,
+            "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "enabled": True,
+        }
+        state.add_alert(alert)
+        state.save()
+        return BotReply(format_alert_created(alert))
+    if command == "alerts":
+        if state is None:
+            return BotReply("⚠️ Alerts\n状态存储不可用。")
+        return BotReply(format_alerts(state.alerts_for(chat_id=request.chat_id, user_id=request.user_id)))
+    if command in {"alert_remove", "alertremove", "remove_alert"}:
+        if state is None:
+            return BotReply("⚠️ Alert\n状态存储不可用。")
+        try:
+            alert_id = int(args.split()[0])
+        except (IndexError, ValueError):
+            return BotReply("⚠️ Alert\n请使用：/alert_remove <id>")
+        removed = state.remove_alert(alert_id=alert_id, chat_id=request.chat_id, user_id=request.user_id)
+        state.save()
+        return BotReply(format_alert_removed(alert_id, removed))
     return BotReply(f"⚠️ Unknown command: /{command}\n使用 /help 查看可用命令。")

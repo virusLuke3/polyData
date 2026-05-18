@@ -89,6 +89,7 @@ class BotSettings:
     request_timeout_seconds: int
     poll_interval_seconds: int
     long_poll_timeout_seconds: int
+    alert_check_interval_seconds: int
     dry_run: bool
     allowed_chat_ids: set[str]
     admin_user_ids: set[int]
@@ -128,6 +129,7 @@ def load_settings() -> BotSettings:
         request_timeout_seconds=max(3, _get_int("POLYDATA_TELEGRAM_BOT_TIMEOUT_SECONDS", _get_int("POLYDATA_TELEGRAM_TIMEOUT_SECONDS", 12))),
         poll_interval_seconds=max(1, _get_int("POLYDATA_TELEGRAM_BOT_POLL_INTERVAL_SECONDS", 2)),
         long_poll_timeout_seconds=max(1, _get_int("POLYDATA_TELEGRAM_BOT_LONG_POLL_TIMEOUT_SECONDS", 25)),
+        alert_check_interval_seconds=max(5, _get_int("POLYDATA_TELEGRAM_BOT_ALERT_CHECK_INTERVAL_SECONDS", 30)),
         dry_run=_get_bool("POLYDATA_TELEGRAM_BOT_DRY_RUN", _get_bool("POLYDATA_TELEGRAM_DRY_RUN", False)),
         allowed_chat_ids=_csv_set(_get_str("POLYDATA_TELEGRAM_BOT_ALLOWED_CHAT_IDS", "")),
         admin_user_ids=_csv_int_set(_get_str("POLYDATA_TELEGRAM_BOT_ADMIN_USER_IDS", "")),

@@ -11,6 +11,9 @@ Interactive Telegram bot for user-called polyData queries.
 - `/wallet 0xabc...`
 - `/pnl 0xabc...`
 - `/signal polymarket`
+- `/alert BTC 95000`
+- `/alerts`
+- `/alert_remove 1`
 
 `/pnl` is intentionally coverage-only in v1. It does not output a full PnL
 number until the cashflow / position snapshot serving layer is ready.
@@ -28,6 +31,8 @@ python -m telegram.bot.poller
 POLYDATA_TELEGRAM_BOT_TOKEN=123:abc
 POLYDATA_TELEGRAM_BOT_POLYDATA_API_BASE=http://127.0.0.1:18500
 POLYDATA_TELEGRAM_BOT_STATE_PATH=data/telegram_bot_state.json
+POLYDATA_TELEGRAM_BOT_POLL_INTERVAL_SECONDS=2
+POLYDATA_TELEGRAM_BOT_ALERT_CHECK_INTERVAL_SECONDS=30
 POLYDATA_TELEGRAM_BOT_ALLOWED_CHAT_IDS=
 POLYDATA_TELEGRAM_BOT_ADMIN_USER_IDS=
 ```

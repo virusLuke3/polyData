@@ -11,7 +11,7 @@ from telegram.bot.commands import handle_command
 from telegram.bot.config import BotSettings
 from telegram.bot.formatters import format_market_search, format_pnl_coverage, format_wallet
 from telegram.bot.models import CommandRequest
-from telegram.bot.poller import run_once
+from telegram.bot.poller import check_alerts, run_once
 from telegram.bot.polydata_api import PolyDataBotApi
 from telegram.bot.router import parse_update
 from telegram.bot.state import BotState
@@ -64,6 +64,14 @@ class FakeApi:
     def pnl(self, address: str):
         return {"status": "not_ready", "coverage": {"tradeCashflows": False, "nonTradeCashflows": False, "positionSnapshot": False}}
 
+    def crypto_markets(self):
+        return {
+            "items": [
+                {"id": "btc", "label": "BTC", "symbol": "BTC-USD", "price": 76000.0},
+                {"id": "eth", "label": "ETH", "symbol": "ETH-USD", "price": 2100.0},
+            ]
+        }
+
 
 class FakeTelegram:
     def __init__(self, updates):
@@ -113,6 +121,7 @@ def make_settings(state_path: str) -> BotSettings:
         request_timeout_seconds=12,
         poll_interval_seconds=2,
         long_poll_timeout_seconds=1,
+        alert_check_interval_seconds=5,
         dry_run=False,
         allowed_chat_ids=set(),
         admin_user_ids=set(),
@@ -192,6 +201,66 @@ def test_handle_command_routes_first_version_commands():
         CommandRequest(command="pnl", args="0x1234567890abcdef1234567890abcdef12345678", **base),
         api,
     ).text
+
+
+def test_alert_commands_create_list_and_remove(tmp_path: Path):
+    api = FakeApi()
+    state = BotState(str(tmp_path / "bot_state.json"))
+    base = {
+        "update_id": 1,
+        "chat_id": 1,
+        "user_id": 2,
+        "message_id": 3,
+        "text": "",
+        "raw": {},
+    }
+
+    created = handle_command(CommandRequest(command="alert", args="BTC 95000", **base), api, state=state)
+
+    assert "Alert Created" in created.text
+    assert "BTC" in created.text
+    assert "95,000" in created.text
+    assert state.active_alerts()[0]["direction"] == "above"
+
+    listed = handle_command(CommandRequest(command="alerts", args="", **base), api, state=state)
+
+    assert "Active Alerts" in listed.text
+    assert "BTC >= 95,000" in listed.text
+
+    removed = handle_command(CommandRequest(command="alert_remove", args="1", **base), api, state=state)
+
+    assert "Alert Removed" in removed.text
+    assert state.active_alerts() == []
+
+
+def test_check_alerts_triggers_and_marks_once(tmp_path: Path):
+    state = BotState(str(tmp_path / "bot_state.json"))
+    state.add_alert(
+        {
+            "id": 1,
+            "chatId": 123,
+            "userId": 456,
+            "symbol": "BTC",
+            "threshold": 70000,
+            "direction": "above",
+            "enabled": True,
+        }
+    )
+    state.save()
+    telegram = FakeTelegram([])
+    settings = make_settings(str(tmp_path / "bot_state.json"))
+
+    sent = check_alerts(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=False)
+
+    assert sent == 1
+    assert "Alert Triggered" in telegram.sent[0]["text"]
+    assert telegram.sent[0]["chat_id"] == "123"
+    assert state.active_alerts() == []
+
+    sent_again = check_alerts(settings=settings, state=state, telegram=telegram, api=FakeApi(), dry_run=False)
+
+    assert sent_again == 0
+    assert len(telegram.sent) == 1
 
 
 def test_run_once_dry_run_processes_updates_without_persisting_offset(tmp_path: Path, capsys):

@@ -44,6 +44,10 @@ def _pct(value: Any) -> str:
     return f"{number:.1f}%"
 
 
+def money(value: Any) -> str:
+    return _money(value)
+
+
 def _text(value: Any, default: str = "") -> str:
     text = str(value or "").strip()
     return text or default
@@ -120,6 +124,7 @@ def start_text() -> str:
             "/wallet 0x... - 查看地址交易画像",
             "/pnl 0x... - 查看地址 PnL 覆盖状态",
             "/signal polymarket - 查看最新 alpha signals",
+            "/alert BTC 95000 - 创建价格提醒",
             "",
             "示例：/market nba",
         ]
@@ -141,6 +146,11 @@ def help_text() -> str:
             "",
             "Signals:",
             "  /signal polymarket",
+            "",
+            "Alerts:",
+            "  /alert BTC 95000",
+            "  /alerts",
+            "  /alert_remove 1",
         ]
     )
 
@@ -293,3 +303,67 @@ def format_signals(topic: str, payload: Dict[str, Any]) -> str:
             lines.append(url)
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def crypto_price_map(payload: Dict[str, Any]) -> Dict[str, float]:
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    prices: Dict[str, float] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        label = _text(item.get("label") or item.get("id") or item.get("symbol")).upper()
+        symbol = _text(item.get("symbol")).upper().replace("-USD", "")
+        price = _decimal(item.get("price"))
+        if price is None:
+            continue
+        for key in (label, symbol):
+            if key:
+                prices[key] = float(price)
+    return prices
+
+
+def format_alert_created(alert: Dict[str, Any]) -> str:
+    direction_text = "高于或等于" if alert.get("direction") == "above" else "低于或等于"
+    current = alert.get("createdPrice")
+    current_line = f"当前价格：{_money(current)}" if current not in (None, "") else "当前价格：暂不可用"
+    return "\n".join(
+        [
+            "🔔 Alert Created",
+            f"ID：{alert.get('id')}",
+            f"标的：{alert.get('symbol')}",
+            f"条件：价格{direction_text} {_money(alert.get('threshold'))}",
+            current_line,
+            "",
+            "查看：/alerts",
+            f"删除：/alert_remove {alert.get('id')}",
+        ]
+    )
+
+
+def format_alerts(alerts: list[Dict[str, Any]]) -> str:
+    if not alerts:
+        return "🔔 Alerts\n当前没有活跃提醒。\n创建示例：/alert BTC 95000"
+    lines = ["🔔 Active Alerts", ""]
+    for alert in alerts[:20]:
+        direction_text = ">=" if alert.get("direction") == "above" else "<="
+        lines.append(f"{alert.get('id')}. {alert.get('symbol')} {direction_text} {_money(alert.get('threshold'))}")
+    lines.extend(["", "删除：/alert_remove <id>"])
+    return "\n".join(lines)
+
+
+def format_alert_removed(alert_id: int, removed: bool) -> str:
+    if removed:
+        return f"🔕 Alert Removed\n已删除提醒：{alert_id}"
+    return f"⚠️ Alert\n没有找到可删除的提醒：{alert_id}"
+
+
+def format_alert_triggered(alert: Dict[str, Any], price: float) -> str:
+    direction_text = "突破" if alert.get("direction") == "above" else "跌破"
+    return "\n".join(
+        [
+            "🚨 Alert Triggered",
+            f"{alert.get('symbol')} 已{direction_text} {_money(alert.get('threshold'))}",
+            f"当前价格：{_money(price)}",
+            f"Alert ID：{alert.get('id')}",
+        ]
+    )
