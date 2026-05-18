@@ -32,11 +32,11 @@ const CHART_RANGE_TABS: Array<{ label: string; value: MarketGroupChartRange }> =
 ];
 const FOCUS_CHART = {
   width: 520,
-  height: 220,
-  top: 12,
-  right: 62,
-  bottom: 18,
-  left: 10,
+  height: 258,
+  top: 18,
+  right: 58,
+  bottom: 34,
+  left: 12,
 };
 
 function tradeNotional(trade: TradeRow) {
@@ -139,6 +139,27 @@ function formatUnderlyingValue(value?: string | number | null) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   return `$${numeric.toLocaleString('en-US', { maximumFractionDigits: numeric >= 1000 ? 0 : 2 })}`;
+}
+
+function compactDateLabel(value: number) {
+  if (!Number.isFinite(value)) return '';
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
+  const stamps = points
+    .map((point) => new Date(point.timestamp).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (!stamps.length) return [];
+  const minTs = stamps[0] ?? 0;
+  const maxTs = stamps[stamps.length - 1] ?? minTs;
+  if (maxTs <= minTs) return [{ ts: minTs, ratio: 0, label: compactDateLabel(minTs) }];
+  return Array.from({ length: count }, (_, index) => {
+    const ratio = index / Math.max(count - 1, 1);
+    const ts = minTs + (maxTs - minTs) * ratio;
+    return { ts, ratio, label: compactDateLabel(ts) };
+  });
 }
 
 function buildLinePath(
@@ -319,9 +340,10 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
         return left + ((new Date(lastPoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * (width - left - right);
       })()
     : null;
+  const timeTicks = chartTimeTicks(cleanSeries.flatMap((entry) => entry.points), 4);
 
   return (
-    <div className="wm-focus-chart-shell">
+    <div className="wm-focus-chart-shell wm-focus-event-chart-shell">
       {selectedSeries && selectedLast != null && Number.isFinite(selectedLast) ? (
         <div
           className="wm-focus-chart-overlay-label current"
@@ -331,6 +353,7 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           <strong>{formatPercent(selectedLast)}</strong>
         </div>
       ) : null}
+      <div className="wm-focus-chart-watermark" aria-hidden="true">Polymarket</div>
       <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
         <defs>
           <linearGradient id="wm-event-selected-area" x1="0" x2="0" y1="0" y2="1">
@@ -351,6 +374,14 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
         {Array.from({ length: 4 }, (_, index) => {
           const x = left + ((width - left - right) / 3) * index;
           return <line key={index} x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />;
+        })}
+        {timeTicks.map((tick) => {
+          const x = left + tick.ratio * (width - left - right);
+          return (
+            <text key={`${tick.ts}-${tick.label}`} x={x} y={height - 9} className="wm-focus-chart-time-text">
+              {tick.label}
+            </text>
+          );
         })}
         {selectedAreaPath ? <path d={selectedAreaPath} className="wm-focus-chart-area event-selected" /> : null}
         {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points }) => {
@@ -388,7 +419,10 @@ function eventChartLegend(
 ) {
   const outcomes = detail?.outcomes || [];
   const seriesColorMap = new Map((chart?.series || []).map((entry) => [entry.outcomeKey || '', entry.color || '#7cb6ff']));
-  const visible = outcomes.slice(0, 6);
+  const visible = outcomes
+    .slice()
+    .sort((left, right) => Number(right.yesPrice || 0) - Number(left.yesPrice || 0))
+    .slice(0, 6);
   if (!visible.length) return null;
   return (
     <div className="wm-focus-event-legend" aria-label="event outcomes legend">
@@ -409,6 +443,7 @@ function eventChartLegend(
             />
             <span className="wm-focus-event-legend-label">{outcome.label || 'Outcome'}</span>
             <strong>{formatPercent(outcome.yesPrice)}</strong>
+            <em className={signedClass(outcome.change24h)}>{formatSignedPercent(outcome.change24h)}</em>
           </button>
         );
       })}
@@ -575,6 +610,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
   const noTradesYet = executionAvailable && trades.length === 0 && Number(displayedTrades || 0) === 0;
+  const eventCategory = detail?.category || focusedMarket?.category || marketStats?.category || 'market';
+  const outcomeCount = detail?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -609,32 +646,44 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           className="wm-focus-panel wm-focus-detail-panel"
         >
           <div className="wm-focus-detail">
-            <div className="wm-focus-detail-top">
+            <div className="wm-focus-event-head">
+              <div className="wm-focus-event-mark" aria-hidden="true">
+                <span>{String(eventCategory || 'M').slice(0, 1).toUpperCase()}</span>
+              </div>
               <div className="wm-focus-detail-copy">
-                <strong className="wm-focus-title">{detail?.title || focusedMarket?.title || 'No market selected.'}</strong>
-                <div className="wm-focus-subtitle">
-                  {marketTimeSubtitle(detail?.endDate || focusedMarket?.endDate || null, detail?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null)}
+                <div className="wm-focus-kicker">
+                  <span>{eventCategory}</span>
+                  <i>{outcomeCount ? `${outcomeCount} outcomes` : 'event'}</i>
+                  <i>{marketTimeSubtitle(detail?.endDate || focusedMarket?.endDate || null, detail?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null)}</i>
                 </div>
+                <strong className="wm-focus-title">{detail?.title || focusedMarket?.title || 'No market selected.'}</strong>
               </div>
               <div className="wm-focus-price-hero">
                 <strong>{formatPercent(displayedYesPrice)}</strong>
-                <span className={signedClass(displayedChange)}>{formatSignedPercent(displayedChange)}</span>
+                <span className={signedClass(displayedChange)}>{selectedOutcome?.label || 'Selected'} {formatSignedPercent(displayedChange)}</span>
               </div>
             </div>
 
             <div className="wm-focus-chart-card">
-              <div className="wm-focus-chart-tabs">
-                {CHART_RANGE_TABS.map((tab) => (
-                  <button
-                    type="button"
-                    key={tab.value}
-                    className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
-                    onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-                <i>UTC</i>
+              <div className="wm-focus-chart-topline">
+                <div className="wm-focus-chart-tabs" aria-label="chart range">
+                  <button type="button" className="ghost">Past</button>
+                  {CHART_RANGE_TABS.map((tab) => (
+                    <button
+                      type="button"
+                      key={tab.value}
+                      className={ctx.selectedMarketGroupChartRange === tab.value ? 'active' : ''}
+                      onClick={() => ctx.setSelectedMarketGroupChartRange(tab.value)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                  <i>UTC</i>
+                </div>
+                <div className="wm-focus-chart-summary">
+                  <span>Vol <strong>{formatCurrencyCompact(displayedVolume)}</strong></span>
+                  <span>24h <strong>{formatCompact(displayedTrades)}</strong></span>
+                </div>
               </div>
               {detail ? eventChartLegend(detail, eventChart, ctx.selectedMarketGroupOutcomeKey, (outcome) => {
                 ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
