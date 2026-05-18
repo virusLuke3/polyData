@@ -166,6 +166,8 @@ function isSuppressedDefaultMarket(market?: Partial<DefaultMarketCandidate> | nu
     || text.includes('updown-15m')
     || text.includes('recurring')
     || text.includes('hide-from-new')
+    || text.includes('onchain-registry')
+    || text.includes('on-chain recovered market')
   );
 }
 

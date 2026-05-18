@@ -577,7 +577,20 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     if featured_market_id is None:
         featured_market_id = _get_fallback_featured_market_id(ctx)
     if featured_market_id is None:
-        row = ctx["query_one"]("SELECT id FROM markets ORDER BY created_at DESC LIMIT 1")
+        now_iso = ctx["utc_now_iso"]()
+        row = ctx["query_one"](
+            """
+            SELECT m.id
+            FROM markets m
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            WHERE (m.end_date IS NULL OR m.end_date >= ?)
+              AND COALESCE(mss.has_settle, FALSE) = FALSE
+              AND """ + DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL + """
+            ORDER BY m.created_at DESC NULLS LAST, m.id DESC
+            LIMIT 1
+            """,
+            (now_iso,),
+        )
         featured_market_id = row.get("id") if row else None
 
     featured_market = (
