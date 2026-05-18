@@ -110,7 +110,11 @@ function orderBookRows(levels: L2Level[], tone: 'bid' | 'ask') {
     const total = level.cumulative;
     const depth = Math.min(100, (total / max) * 100);
     return (
-      <div className={`wm-focus-book-row ${tone}`} key={`${tone}-${index}-${level.price}`}>
+      <div
+        className={`wm-focus-book-row ${tone}`}
+        key={`${tone}-${index}-${level.price}-${level.size}`}
+        style={{ '--wm-book-row-delay': `${index * 28}ms` } as Record<string, string>}
+      >
         <div className="wm-focus-book-depth-track" aria-hidden="true">
           <div className="wm-focus-book-side-fill" style={{ width: `${depth}%` }} />
         </div>
@@ -723,7 +727,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           ) : !lob || !activeBook ? (
             emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
           ) : (
-            <div className="wm-focus-book">
+            <div className="wm-focus-book" key={`book-${bookSide}`}>
               <div className="wm-focus-book-topbar">
                 <div className="wm-focus-book-tabs" aria-label="order book outcome">
                   <button type="button" className={bookSide === 'yes' ? 'active' : ''} onClick={() => setBookSide('yes')}>YES</button>
@@ -735,15 +739,15 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 </div>
               </div>
               <div className="wm-focus-book-overview">
-                <article>
+                <article className="wm-book-stat-spread">
                   <span>Spread</span>
                   <strong>{formatBookPrice(spreadValue)}</strong>
                 </article>
-                <article>
+                <article className="wm-book-stat-last">
                   <span>Last</span>
                   <strong>{formatBookPrice(activePrice)}</strong>
                 </article>
-                <article>
+                <article className="wm-book-stat-depth">
                   <span>Top Depth</span>
                   <strong>{formatBookTotal(askDepthTotal + bidDepthTotal)}</strong>
                 </article>
