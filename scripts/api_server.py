@@ -75,6 +75,7 @@ from db.trade_v2 import (
 from runtime.content_runtime import RuntimeContentProvider
 from runtime.lob_runtime import LOBRuntimeManager
 from runtime.snapshot_store import SnapshotStore
+from oracle.settlement_parser import parse_oracle_settlement_event
 from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
@@ -1020,8 +1021,8 @@ def handle_unexpected_exception(error: Exception):
 def build_market_status_case(now_iso: str) -> str:
     return (
         "CASE "
-        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND mss.has_settle = 1) THEN 'Settled' "
-        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND mss.has_propose = 1) THEN 'Proposed' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND (COALESCE(mss.has_settle, FALSE) = TRUE OR mss.settlement_code IN (1, 2, 3))) THEN 'Settled' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND COALESCE(mss.has_propose, FALSE) = TRUE) THEN 'Proposed' "
         "WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed' "
         "ELSE 'Active' END"
     )
@@ -1165,6 +1166,13 @@ def normalize_market(row: Dict[str, Any]) -> Dict[str, Any]:
         "category": row.get("category") or "Uncategorized",
         "tags": parse_json_list(row.get("tags")),
         "gammaMarketId": row.get("gamma_market_id"),
+        "settlementCode": row.get("settlement_code") or 0,
+        "settlementOutcome": row.get("settlement_outcome") or "UNKNOWN",
+        "settlementSource": row.get("settlement_source"),
+        "settlementRaw": row.get("settlement_raw"),
+        "settlementEventId": row.get("settlement_event_id"),
+        "settlementEventTime": row.get("settlement_event_time"),
+        "settlementTransaction": row.get("settlement_transaction"),
     }
 
 
@@ -1206,6 +1214,7 @@ def normalize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
+    settlement = parse_oracle_settlement_event(row)
     return {
         "id": row.get("id"),
         "txHash": row.get("tx_hash"),
@@ -1222,6 +1231,11 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "conditionId": row.get("condition_id"),
         "proposedPrice": row.get("proposed_price"),
         "settledPrice": row.get("settled_price"),
+        "payout": row.get("payout"),
+        "settlementCode": settlement.settlement_code,
+        "settlementOutcome": settlement.settlement_outcome,
+        "settlementSource": settlement.settlement_source,
+        "settlementRaw": settlement.settlement_raw,
         "requester": row.get("requester"),
         "proposer": row.get("proposer"),
         "disputer": row.get("disputer"),
@@ -1614,9 +1628,6 @@ def main():
     add_db_cli_args(parser)
 
     args = parser.parse_args()
-    explicit_backend = "--backend" in sys.argv
-    if not explicit_backend and args.backend == "mysql" and args.sqlite_path != DEFAULT_DB_PATH:
-        args.backend = "sqlite"
     configure_db_from_args(args)
     global DB_PATH
     DB_PATH = args.sqlite_path

@@ -3,8 +3,13 @@ import preact from '@preact/preset-vite';
 import { resolve } from 'path';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const target = env.VITE_POLYDATA_API_BASE_URL || 'http://127.0.0.1:18500';
+  const env = {
+    ...loadEnv(mode, resolve(__dirname, '..'), ''),
+    ...loadEnv(mode, process.cwd(), ''),
+  };
+  const apiHost = env.POLYDATA_API_HOST || '127.0.0.1';
+  const apiPort = env.POLYDATA_API_PORT || '5000';
+  const target = env.VITE_POLYDATA_API_BASE_URL || `http://${apiHost}:${apiPort}`;
 
   return {
     plugins: [preact()],

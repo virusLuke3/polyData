@@ -851,6 +851,12 @@ export function App() {
     }
     const matchedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
     if (!matchedGroup) {
+      if (selectedMarketGroupId || selectedMarketGroupDetail || selectedMarketGroupChart || selectedMarketGroupOutcomeKey) {
+        setSelectedMarketGroupId(null);
+        setSelectedMarketGroupOutcomeKey(null);
+        setSelectedMarketGroupDetail(null);
+        setSelectedMarketGroupChart(null);
+      }
       return;
     }
     const nextEventId = matchedGroup.eventId != null ? String(matchedGroup.eventId) : null;
@@ -864,7 +870,14 @@ export function App() {
     if (nextOutcomeKey && nextOutcomeKey !== selectedMarketGroupOutcomeKey) {
       setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
     }
-  }, [marketGroups, selectedMarketGroupId, selectedMarketGroupOutcomeKey, selectedMarketId]);
+  }, [
+    marketGroups,
+    selectedMarketGroupChart,
+    selectedMarketGroupDetail,
+    selectedMarketGroupId,
+    selectedMarketGroupOutcomeKey,
+    selectedMarketId,
+  ]);
 
   useEffect(() => () => {
     slowRefreshCancelRef.current?.();
@@ -1371,8 +1384,8 @@ export function App() {
         <section className="wm-map-section">
           <div className="wm-map-header">
             <div className="wm-map-heading">
-              <span className="wm-map-kicker">Market Intelligence Map</span>
-              <div className="wm-map-title">Global Situation</div>
+              <span className="wm-map-kicker">Live Odds & Oracle Monitor</span>
+              <div className="wm-map-title">Polymarket Signal Atlas</div>
             </div>
             <div className="wm-map-status-strip" aria-label="Global map status">
               <span className="wm-status-chip">POLYDATA MONITOR</span>
