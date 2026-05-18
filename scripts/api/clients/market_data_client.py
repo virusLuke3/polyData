@@ -36,7 +36,7 @@ def range_to_seconds(range_name: str) -> int:
         "1w": 604800,
         "30d": 2592000,
         "1m": 2592000,
-        "all": 180 * 86400,
+        "all": 30 * 86400,
     }
     return mapping.get(normalized, 86400)
 
@@ -256,7 +256,35 @@ def get_market_clob_price_series(ctx: dict, market: Optional[Dict[str, Any]], ra
     fidelity = max(1, min(step_minutes, 60))
 
     try:
-        history = _fetch_clob_prices_history(ctx, yes_token_id, start_ts=start_ts, end_ts=now_ts, fidelity_minutes=fidelity)
+        if range_seconds > 14 * 86400:
+            combined: Dict[int, Dict[str, Any]] = {}
+            chunk_seconds = 13 * 86400
+            chunk_start = start_ts
+            while chunk_start < now_ts:
+                chunk_end = min(now_ts, chunk_start + chunk_seconds)
+                try:
+                    for row in _fetch_clob_prices_history(
+                        ctx,
+                        yes_token_id,
+                        start_ts=chunk_start,
+                        end_ts=chunk_end,
+                        fidelity_minutes=fidelity,
+                    ):
+                        row_ts = int(row.get("timestamp") or 0)
+                        if row_ts:
+                            combined[row_ts] = row
+                except Exception:
+                    ctx["app"].logger.warning(
+                        "clob price series chunk failed market_id=%s start_ts=%s end_ts=%s",
+                        market_id,
+                        chunk_start,
+                        chunk_end,
+                        exc_info=True,
+                    )
+                chunk_start = chunk_end + 1
+            history = [combined[key] for key in sorted(combined)]
+        else:
+            history = _fetch_clob_prices_history(ctx, yes_token_id, start_ts=start_ts, end_ts=now_ts, fidelity_minutes=fidelity)
     except Exception:
         ctx["app"].logger.exception("clob price series failed market_id=%s", market_id)
         return []
