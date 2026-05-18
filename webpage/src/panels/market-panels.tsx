@@ -177,6 +177,14 @@ function complementPrice(value?: string | number | null) {
   return Math.max(0, Math.min(1, 1 - numeric));
 }
 
+function positiveValue(...values: Array<string | number | null | undefined>) {
+  return values.find((value) => {
+    if (value === null || value === undefined || value === '') return false;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0;
+  }) ?? null;
+}
+
 function marketSummaryOracleHint(ctx: PanelRenderContext, endDate?: string | null) {
   const timeline = ctx.bundle?.oracle?.timeline || [];
   const latest = timeline[0] || null;
@@ -442,25 +450,41 @@ export const marketPanelRenderers: PanelRenderMap = {
   },
   'market-summary': {
     render: (ctx) => {
+      const selectedGroup = ctx.selectedMarketGroupDetail
+        || ctx.marketGroups.find((group) => {
+          const eventId = group.eventId != null ? String(group.eventId) : null;
+          const groupOutcomeMarketIds = [...(group.outcomes || []), ...(group.topOutcomes || [])]
+            .map((outcome) => Number(outcome.marketId))
+            .filter(Number.isFinite);
+          return (eventId && eventId === ctx.selectedMarketGroupId)
+            || (ctx.selectedMarketId != null && (Number(group.defaultMarketId) === ctx.selectedMarketId || groupOutcomeMarketIds.includes(ctx.selectedMarketId)));
+        })
+        || null;
+      const selectedOutcome = selectedGroup
+        ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
+            (ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+            || (ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+          )) || null
+        : null;
       const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
       const listMarket = globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId);
       const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
-      const yesPrice = price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
-      const noPrice = price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
-      const volume24h = price?.volume24h ?? listMarket?.volume24h;
-      const tradeCount24h = price?.tradeCount24h ?? listMarket?.tradeCount24h;
+      const yesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
+      const noPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
+      const volume24h = positiveValue(selectedOutcome?.volume24h, selectedGroup?.volume24h, listMarket?.volume24h, price?.volume24h);
+      const tradeCount24h = positiveValue(selectedOutcome?.tradeCount24h, selectedGroup?.tradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
       const status = selected?.status || listMarket?.status || 'market';
-      const endDate = selected?.endDate || listMarket?.endDate || null;
+      const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
       const oracleHint = marketSummaryOracleHint(ctx, endDate);
       return (
         <Panel title="MARKET SUMMARY" badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
           <div className="wm-market-summary">
             <section className="wm-market-summary-hero">
               <div className="wm-market-summary-kicker">
-                <span>{selected?.category || listMarket?.category || 'market'}</span>
+                <span>{selectedGroup?.category || selected?.category || listMarket?.category || 'market'}</span>
                 <em>{endDate ? formatRelative(endDate) : 'rolling'}</em>
               </div>
-              <strong>{selected?.title || 'No market selected.'}</strong>
+              <strong>{selectedGroup?.title || selected?.title || 'No market selected.'}</strong>
             </section>
 
             <div className="wm-market-summary-prices" aria-label="current market prices">

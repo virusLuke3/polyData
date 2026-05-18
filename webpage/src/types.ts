@@ -78,6 +78,7 @@ export type MarketGroupItem = {
   createdAt?: string | null;
   endDate?: string | null;
   volume24h?: string | number | null;
+  tradeCount24h?: number | string | null;
   outcomeCount?: number | null;
   defaultOutcomeKey?: string | null;
   defaultMarketId?: number | null;
