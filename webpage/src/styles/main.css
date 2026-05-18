@@ -1743,112 +1743,232 @@ body {
   font-size: 10px;
 }
 
+.wm-focus-book-topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
 .wm-focus-book-tabs {
-  display: flex;
-  gap: 6px;
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid rgba(126, 220, 255, 0.14);
+  border-radius: 6px;
+  background: #0d1011;
 }
 
 .wm-focus-book-tabs button {
+  min-width: 48px;
   padding: 6px 11px;
+  border: 1px solid transparent;
   border-radius: 4px;
-  border: 1px solid #283028;
-  background: #121212;
-  color: var(--wm-text-dim);
+  background: transparent;
+  color: #7f8888;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 900;
   cursor: pointer;
   text-transform: uppercase;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
 .wm-focus-book-tabs button.active {
-  background: rgba(18, 68, 39, 0.72);
-  border-color: rgba(57, 255, 115, 0.28);
-  color: #7dffab;
+  border-color: rgba(57, 255, 115, 0.24);
+  background:
+    linear-gradient(180deg, rgba(57, 255, 115, 0.16), rgba(57, 255, 115, 0.06)),
+    #0d2216;
+  color: #78ffab;
+  box-shadow: inset 0 0 0 1px rgba(57, 255, 115, 0.08);
 }
 
-.wm-focus-book-header {
-  display: grid;
-  grid-template-columns: var(--wm-book-col-side) var(--wm-book-col-a) minmax(0, 1fr) var(--wm-book-col-c);
-  gap: 8px;
-  font-size: var(--wm-book-header-size);
-  color: var(--wm-text-dim);
-  letter-spacing: 0.8px;
-  padding: 2px 12px 0;
+.wm-focus-book-market {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  color: #858e8e;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-focus-book-market strong {
+  margin-left: 3px;
+  font-size: 10px;
+}
+
+.wm-focus-book-market strong.ask {
+  color: #ff727d;
+}
+
+.wm-focus-book-market strong.bid {
+  color: #55f292;
+}
+
+.wm-focus-book-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wm-focus-book-overview article {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #252d2f;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    #101314;
+}
+
+.wm-focus-book-overview span {
+  display: block;
+  margin-bottom: 4px;
+  color: #778181;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.wm-focus-book-overview strong {
+  display: block;
+  overflow: hidden;
+  color: #eef2f2;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-focus-book-ladder {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 6px;
   min-height: 0;
-  border: 1px solid #232323;
-  background: #101010;
+  padding: 7px;
+  border: 1px solid rgba(126, 220, 255, 0.13);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(126, 220, 255, 0.04), transparent 46%),
+    #0c0f10;
   overflow: hidden;
+}
+
+.wm-focus-book-side {
+  min-width: 0;
+  border: 1px solid #202829;
+  background: #0f1112;
+}
+
+.wm-focus-book-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #202829;
+  font-family: var(--font-mono);
+}
+
+.wm-focus-book-side-head strong {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.wm-focus-book-side.ask .wm-focus-book-side-head strong {
+  color: #ff6875;
+}
+
+.wm-focus-book-side.bid .wm-focus-book-side-head strong {
+  color: #57f294;
+}
+
+.wm-focus-book-side-head span {
+  min-width: 0;
+  overflow: hidden;
+  color: #798585;
+  font-size: 9px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-focus-book-header {
+  display: grid;
+  grid-template-columns: minmax(58px, 0.8fr) minmax(62px, 1fr) minmax(72px, 1fr);
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid #1d2425;
+  color: #6f7b7b;
+  font-family: var(--font-mono);
+  font-size: var(--wm-book-header-size);
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.wm-focus-book-header span:nth-child(2),
+.wm-focus-book-header span:nth-child(3) {
+  text-align: right;
+}
+
+.wm-focus-book-rows {
+  display: grid;
 }
 
 .wm-focus-book-row {
   position: relative;
   display: grid;
-  grid-template-columns: var(--wm-book-col-side) var(--wm-book-col-a) minmax(0, 1fr) var(--wm-book-col-c);
+  grid-template-columns: minmax(58px, 0.8fr) minmax(62px, 1fr) minmax(72px, 1fr);
   gap: 8px;
   align-items: center;
-  padding: var(--wm-book-row-pad-y) var(--wm-book-row-pad-x);
+  min-height: 26px;
+  padding: 0 8px;
   overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--wm-book-row-size);
-  border-top: 1px solid #1f1f1f;
-  background: #111111;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  background: #0f1112;
   line-height: 1.1;
+}
+
+.wm-focus-book-row:first-child {
+  border-top: 0;
 }
 
 .wm-focus-book-row strong,
 .wm-focus-book-row span,
 .wm-focus-book-row em,
-.wm-focus-book-side-cell,
 .wm-focus-book-mid {
   position: relative;
   z-index: 1;
 }
 
-.wm-focus-book-side-cell {
-  position: relative;
-  align-self: stretch;
-  min-height: 100%;
-  overflow: hidden;
+.wm-focus-book-depth-track {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
 .wm-focus-book-side-fill {
   position: absolute;
-  inset: 0 auto 0 0;
-  background: rgba(57, 255, 115, 0.14);
+  inset: 0 0 0 auto;
+  background:
+    linear-gradient(90deg, rgba(57, 255, 115, 0), rgba(57, 255, 115, 0.18));
 }
 
 .wm-focus-book-row.ask .wm-focus-book-side-fill {
-  background: rgba(255, 100, 100, 0.14);
-}
-
-.wm-focus-book-chip {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  margin: 4px 0 0 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.wm-focus-book-chip.ask {
-  background: #e54242;
-  color: #fff6f6;
-}
-
-.wm-focus-book-chip.bid {
-  background: #2ca85b;
-  color: #f3fff7;
+  background:
+    linear-gradient(90deg, rgba(255, 91, 103, 0), rgba(255, 91, 103, 0.2));
 }
 
 .wm-focus-book-row.ask strong {
@@ -1865,6 +1985,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
 }
 
 .wm-focus-book-row em {
@@ -1879,15 +2000,16 @@ body {
 
 .wm-focus-book-mid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: var(--wm-book-mid-size);
-  border-top: 1px solid #252525;
-  border-bottom: 1px solid #252525;
-  background: #121212;
+  border: 1px solid rgba(126, 220, 255, 0.15);
+  background:
+    linear-gradient(90deg, rgba(255, 91, 103, 0.08), rgba(126, 220, 255, 0.05) 50%, rgba(57, 255, 115, 0.08)),
+    #101314;
   text-transform: none;
 }
 
@@ -1897,9 +2019,25 @@ body {
 }
 
 .wm-focus-book-mid strong {
-  justify-self: start;
-  color: var(--wm-text);
-  font-size: 14px;
+  justify-self: center;
+  color: #f3f7f7;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.wm-focus-book-mid em {
+  justify-self: end;
+  color: #8d9898;
+  font-style: normal;
+}
+
+.wm-focus-book-empty {
+  padding: 11px 8px;
+  color: #697575;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 @container focused-right (max-width: 1500px) {

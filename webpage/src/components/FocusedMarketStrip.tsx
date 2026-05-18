@@ -75,6 +75,15 @@ function formatBookTotal(value?: number | null) {
   return `$${value.toLocaleString('en-US', { maximumFractionDigits: value >= 100 ? 0 : 2 })}`;
 }
 
+function bookDepthTotal(levels?: L2Level[]) {
+  return (levels || []).slice(0, 6).reduce((total, level) => {
+    const price = Number(level.price);
+    const size = Number(level.size);
+    if (!Number.isFinite(price) || !Number.isFinite(size)) return total;
+    return total + price * size;
+  }, 0);
+}
+
 function accumulateNotional(levels: L2Level[]) {
   const working = levels.slice(0, 6).map((level) => ({
     price: Number(level.price) || 0,
@@ -99,11 +108,11 @@ function orderBookRows(levels: L2Level[], tone: 'bid' | 'ask') {
   const max = Math.max(...rows.map((row) => row.cumulative), 1);
   return rows.map((level, index) => {
     const total = level.cumulative;
+    const depth = Math.min(100, (total / max) * 100);
     return (
       <div className={`wm-focus-book-row ${tone}`} key={`${tone}-${index}-${level.price}`}>
-        <div className="wm-focus-book-side-cell">
-          <div className="wm-focus-book-side-fill" style={{ width: `${Math.min(100, (total / max) * 100)}%` }} />
-          {index === 0 ? <span className={`wm-focus-book-chip ${tone}`}>{tone === 'ask' ? 'Asks' : 'Bids'}</span> : null}
+        <div className="wm-focus-book-depth-track" aria-hidden="true">
+          <div className="wm-focus-book-side-fill" style={{ width: `${depth}%` }} />
         </div>
         <strong>{formatBookPrice(level.price)}</strong>
         <span>{formatBookShares(level.size)}</span>
@@ -546,6 +555,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     ? (price?.latestNoPrice ?? price?.latestPrice)
     : (price?.latestYesPrice ?? price?.latestPrice);
   const spreadValue = activeBook?.spread;
+  const askLevels = activeBook?.asks || [];
+  const bidLevels = activeBook?.bids || [];
+  const askDepthTotal = bookDepthTotal(askLevels);
+  const bidDepthTotal = bookDepthTotal(bidLevels);
   const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
   const legacyOutcomes = detail ? [] : (outcomeCards(price) as LegacyOutcomeCard[]);
   const shouldShowOutcomeRail = detail ? (detail.outcomes || []).length > 1 : Number(marketStats?.outcomeCount || 2) > 2;
@@ -711,23 +724,64 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
             emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
           ) : (
             <div className="wm-focus-book">
-              <div className="wm-focus-book-tabs">
-                <button type="button" className={bookSide === 'yes' ? 'active' : ''} onClick={() => setBookSide('yes')}>YES</button>
-                <button type="button" className={bookSide === 'no' ? 'active' : ''} onClick={() => setBookSide('no')}>NO</button>
+              <div className="wm-focus-book-topbar">
+                <div className="wm-focus-book-tabs" aria-label="order book outcome">
+                  <button type="button" className={bookSide === 'yes' ? 'active' : ''} onClick={() => setBookSide('yes')}>YES</button>
+                  <button type="button" className={bookSide === 'no' ? 'active' : ''} onClick={() => setBookSide('no')}>NO</button>
+                </div>
+                <div className="wm-focus-book-market">
+                  <span>Best Ask <strong className="ask">{formatBookPrice(activeBook?.bestAsk)}</strong></span>
+                  <span>Best Bid <strong className="bid">{formatBookPrice(activeBook?.bestBid)}</strong></span>
+                </div>
               </div>
-              <div className="wm-focus-book-header">
-                <span>BOOK</span>
-                <span>PRICE</span>
-                <span>SHARES</span>
-                <span>TOTAL</span>
+              <div className="wm-focus-book-overview">
+                <article>
+                  <span>Spread</span>
+                  <strong>{formatBookPrice(spreadValue)}</strong>
+                </article>
+                <article>
+                  <span>Last</span>
+                  <strong>{formatBookPrice(activePrice)}</strong>
+                </article>
+                <article>
+                  <span>Top Depth</span>
+                  <strong>{formatBookTotal(askDepthTotal + bidDepthTotal)}</strong>
+                </article>
               </div>
               <div className="wm-focus-book-ladder">
-                {orderBookRows(activeBook.asks || [], 'ask')}
-                <div className="wm-focus-book-mid">
-                  <span>Last: {formatBookPrice(activePrice)}</span>
-                  <strong>Spread: {formatBookPrice(spreadValue)}</strong>
+                <div className="wm-focus-book-side ask">
+                  <div className="wm-focus-book-side-head">
+                    <strong>Asks</strong>
+                    <span>{askLevels.length} levels · {formatBookTotal(askDepthTotal)}</span>
+                  </div>
+                  <div className="wm-focus-book-header">
+                    <span>Price</span>
+                    <span>Shares</span>
+                    <span>Total</span>
+                  </div>
+                  <div className="wm-focus-book-rows">
+                    {askLevels.length ? orderBookRows(askLevels, 'ask') : <div className="wm-focus-book-empty">No asks</div>}
+                  </div>
                 </div>
-                {orderBookRows(activeBook.bids || [], 'bid')}
+                <div className="wm-focus-book-mid" aria-label="order book spread">
+                  <span>Mid Market</span>
+                  <strong>{formatBookPrice(activePrice)}</strong>
+                  <em>Spread {formatBookPrice(spreadValue)}</em>
+                </div>
+                <div className="wm-focus-book-side bid">
+                  <div className="wm-focus-book-side-head">
+                    <strong>Bids</strong>
+                    <span>{bidLevels.length} levels · {formatBookTotal(bidDepthTotal)}</span>
+                  </div>
+                  <div className="wm-focus-book-header">
+                    <span>Price</span>
+                    <span>Shares</span>
+                    <span>Total</span>
+                  </div>
+                  <div className="wm-focus-book-rows">
+                    {bidLevels.length ? orderBookRows(bidLevels, 'bid') : <div className="wm-focus-book-empty">No bids</div>}
+                  </div>
+                </div>
               </div>
             </div>
           )}
