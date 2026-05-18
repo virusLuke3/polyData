@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
+import { fetchMarketAiInsights } from '@/services/api';
+import type { MarketAiInsightPayload, MarketAiInsightResponse, MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem, PanelRenderContext } from '@/types';
 import type { PanelRenderMap } from './types';
 import { formatCompact, formatCurrencyCompact, formatDate, formatPercent, formatRelative, formatSignedPercent, shortHash, signedClass } from './shared/formatters';
 import { emptyState, priceLine } from './shared/renderers';
@@ -423,6 +424,184 @@ function ActiveMarketsPanel({
   );
 }
 
+function resolveFocusedMarketContext(ctx: PanelRenderContext) {
+  const selectedGroup = ctx.selectedMarketGroupDetail
+    || ctx.marketGroups.find((group) => {
+      const eventId = group.eventId != null ? String(group.eventId) : null;
+      const groupOutcomeMarketIds = [...(group.outcomes || []), ...(group.topOutcomes || [])]
+        .map((outcome) => Number(outcome.marketId))
+        .filter(Number.isFinite);
+      return (eventId && eventId === ctx.selectedMarketGroupId)
+        || (ctx.selectedMarketId != null && (Number(group.defaultMarketId) === ctx.selectedMarketId || groupOutcomeMarketIds.includes(ctx.selectedMarketId)));
+    })
+    || null;
+  const selectedOutcome = selectedGroup
+    ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
+        (ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+        || (ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+      )) || null
+    : null;
+  const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
+  const listMarket = globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId) || null;
+  const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
+  return { selectedGroup, selectedOutcome, selected, listMarket, price };
+}
+
+function buildLocalAiInsight(payload: MarketAiInsightPayload): MarketAiInsightResponse {
+  const price = payload.price || null;
+  const market = payload.market || null;
+  const trades = payload.trades || [];
+  const oracle = payload.oracle || null;
+  const yesPrice = price?.latestYesPrice ?? price?.latestPrice ?? market?.latestPrice ?? null;
+  const noPrice = price?.latestNoPrice ?? complementPrice(yesPrice);
+  const marketRuntime = market as { volume24h?: string | number | null; tradeCount24h?: number | string | null } | null;
+  const volume = price?.volume24h ?? marketRuntime?.volume24h ?? null;
+  const tradeCount = price?.tradeCount24h ?? marketRuntime?.tradeCount24h ?? trades.length;
+  const title = market?.title || payload.selectedGroup?.title || 'Selected market';
+  const status = market?.status || 'active';
+  return {
+    status: 'fallback',
+    model: 'local-panel-fallback',
+    brief: `${title} is trading at YES ${formatPercent(yesPrice)} versus NO ${formatPercent(noPrice)}. Watch liquidity and oracle timing before reading the move as conviction.`,
+    focus: [
+      {
+        label: 'ODDS',
+        title: 'Current probability',
+        summary: `YES is ${formatPercent(yesPrice)} and NO is ${formatPercent(noPrice)}.`,
+        severity: 'neutral',
+        evidence: `YES ${formatPercent(yesPrice)}`,
+      },
+      {
+        label: 'LIQUIDITY',
+        title: 'Visible activity',
+        summary: `24h volume is ${formatCurrencyCompact(volume)} across ${formatCompact(tradeCount)} trades.`,
+        severity: Number(volume || 0) > 0 ? 'positive' : 'warning',
+        evidence: formatCurrencyCompact(volume),
+      },
+      {
+        label: 'ORACLE',
+        title: 'Resolution watch',
+        summary: oracle?.currentStatus ? `Oracle status is ${oracle.currentStatus}.` : 'Oracle context is pending for this market.',
+        severity: statusTone(oracle?.currentStatus || status),
+        evidence: oracle?.currentStatus || status,
+      },
+    ],
+    evidence: [
+      `YES ${formatPercent(yesPrice)}`,
+      `24h volume ${formatCurrencyCompact(volume)}`,
+      `${formatCompact(tradeCount)} trades`,
+    ],
+  };
+}
+
+function aiSeverityClass(severity?: string | null) {
+  const normalized = String(severity || '').toLowerCase();
+  if (/critical|bear|risk|high/.test(normalized)) return 'critical';
+  if (/warn|watch|medium/.test(normalized)) return 'warning';
+  if (/positive|bull|good|strong/.test(normalized)) return 'positive';
+  return 'neutral';
+}
+
+function AiMarketInsightsPanel({ ctx }: { ctx: PanelRenderContext }) {
+  const { selectedGroup, selectedOutcome, selected, listMarket, price } = resolveFocusedMarketContext(ctx);
+  const payload = useMemo<MarketAiInsightPayload>(() => ({
+    market: selected || listMarket || null,
+    selectedGroup,
+    selectedOutcome,
+    price,
+    lob: ctx.bundle?.lob || null,
+    trades: (ctx.bundle?.trades?.length ? ctx.bundle.trades : ctx.globalTrades).slice(0, 12),
+    oracle: ctx.bundle?.oracle || null,
+    content: (ctx.bundle?.content?.items?.length ? ctx.bundle.content.items : ctx.latestContent).slice(0, 6),
+  }), [
+    ctx.bundle?.content?.items,
+    ctx.bundle?.lob,
+    ctx.bundle?.oracle,
+    ctx.bundle?.trades,
+    ctx.globalTrades,
+    ctx.latestContent,
+    listMarket,
+    price,
+    selected,
+    selectedGroup,
+    selectedOutcome,
+  ]);
+  const requestKey = useMemo(() => JSON.stringify({
+    marketId: payload.market?.id,
+    groupId: payload.selectedGroup?.groupId,
+    outcomeKey: payload.selectedOutcome?.outcomeKey,
+    price: payload.price?.latestPrice,
+    yes: payload.price?.latestYesPrice,
+    volume: payload.price?.volume24h,
+    trades: payload.trades?.[0]?.txHash || payload.trades?.length || 0,
+    oracle: payload.oracle?.currentStatus || payload.oracle?.timeline?.[0]?.txHash || '',
+  }), [payload]);
+  const fallback = useMemo(() => buildLocalAiInsight(payload), [payload]);
+  const [insight, setInsight] = useState<MarketAiInsightResponse>(fallback);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setInsight(fallback);
+    setLoading(true);
+    fetchMarketAiInsights(payload)
+      .then((response) => {
+        if (!cancelled) setInsight(response);
+      })
+      .catch(() => {
+        if (!cancelled) setInsight(fallback);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fallback, payload, requestKey]);
+
+  const focusItems = insight.focus?.length ? insight.focus : fallback.focus;
+  const evidenceItems = insight.evidence?.length ? insight.evidence : (fallback.evidence || []);
+  const isLive = insight.status === 'live';
+
+  return (
+    <Panel
+      title="AI MARKET INSIGHTS"
+      badge={loading ? 'THINKING' : (isLive ? 'AI' : 'LOCAL')}
+      status={isLive ? 'live' : 'muted'}
+      count={focusItems.length}
+      className="wm-market-panel wm-ai-market-panel"
+    >
+      <div className="wm-ai-market">
+        <section className="wm-ai-market-brief">
+          <span>Market Brief</span>
+          <p>{insight.brief || fallback.brief}</p>
+        </section>
+
+        <section className="wm-ai-market-focus" aria-label="AI focus signals">
+          <div className="wm-ai-market-section-head">
+            <span>Focus</span>
+            <em>{insight.model || 'local'}</em>
+          </div>
+          {focusItems.map((item, index) => (
+            <article className={`wm-ai-market-card ${aiSeverityClass(item.severity)}`} key={`${item.label}-${index}`}>
+              <div className="wm-ai-market-card-head">
+                <span>{item.label}</span>
+                <b>{item.evidence || item.severity || 'signal'}</b>
+              </div>
+              <strong>{item.title}</strong>
+              <p>{item.summary}</p>
+            </article>
+          ))}
+        </section>
+
+        <section className="wm-ai-market-evidence" aria-label="AI evidence">
+          {evidenceItems.slice(0, 4).map((item) => <span key={item}>{item}</span>)}
+        </section>
+      </div>
+    </Panel>
+  );
+}
+
 
 export const marketPanelRenderers: PanelRenderMap = {
   'active-markets': {
@@ -482,25 +661,7 @@ export const marketPanelRenderers: PanelRenderMap = {
   },
   'market-summary': {
     render: (ctx) => {
-      const selectedGroup = ctx.selectedMarketGroupDetail
-        || ctx.marketGroups.find((group) => {
-          const eventId = group.eventId != null ? String(group.eventId) : null;
-          const groupOutcomeMarketIds = [...(group.outcomes || []), ...(group.topOutcomes || [])]
-            .map((outcome) => Number(outcome.marketId))
-            .filter(Number.isFinite);
-          return (eventId && eventId === ctx.selectedMarketGroupId)
-            || (ctx.selectedMarketId != null && (Number(group.defaultMarketId) === ctx.selectedMarketId || groupOutcomeMarketIds.includes(ctx.selectedMarketId)));
-        })
-        || null;
-      const selectedOutcome = selectedGroup
-        ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
-            (ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
-            || (ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
-          )) || null
-        : null;
-      const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
-      const listMarket = globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId);
-      const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
+      const { selectedGroup, selectedOutcome, selected, listMarket, price } = resolveFocusedMarketContext(ctx);
       const yesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
       const noPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
       const groupOutcomes = selectedGroup ? uniqueGroupOutcomes([...(selectedGroup.outcomes || []), ...(selectedGroup.topOutcomes || [])]) : [];
@@ -563,23 +724,7 @@ export const marketPanelRenderers: PanelRenderMap = {
     },
   },
   'price-implications': {
-    render: (ctx) => (
-      <Panel title="AI MARKET IMPLICATIONS" badge="LIVE" status="live">
-        <div className="wm-implications-grid">
-          {[
-            { label: 'LATEST', value: formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice), tone: 'positive' },
-            { label: '1H', value: formatPercent(ctx.bundle?.price?.change1h), tone: 'muted' },
-            { label: '24H VOL', value: formatCompact(ctx.bundle?.price?.volume24h), tone: 'warning' },
-            { label: '24H TRADES', value: String(ctx.bundle?.price?.tradeCount24h || 0), tone: 'muted' },
-          ].map((row) => (
-            <article className={`wm-implication-card ${row.tone}`} key={row.label}>
-              <span>{row.label}</span>
-              <strong>{row.value}</strong>
-            </article>
-          ))}
-        </div>
-      </Panel>
-    ),
+    render: (ctx) => <AiMarketInsightsPanel ctx={ctx} />,
   },
   'price-chart': {
     render: (ctx) => (

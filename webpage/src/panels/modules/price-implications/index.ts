@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(marketPanelRenderers, {
   id: 'price-implications',
-  title: 'Price Implications',
-  eyebrow: 'price',
-  description: 'Latest price and derived trade stats.',
+  title: 'AI Market Insights',
+  eyebrow: 'agent',
+  description: 'Agent-generated market brief, focus signals, and evidence.',
   defaultEnabled: true,
 });

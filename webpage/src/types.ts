@@ -302,6 +302,40 @@ export type WorkspaceBundle = {
   lob: LobPayload | null;
 };
 
+export type MarketAiInsightFocus = {
+  label: string;
+  title: string;
+  summary: string;
+  severity: 'positive' | 'warning' | 'critical' | 'neutral' | string;
+  evidence?: string | null;
+};
+
+export type MarketAiInsightPayload = {
+  market?: MarketSummary | MarketListItem | null;
+  selectedGroup?: MarketGroupItem | MarketGroupDetail | null;
+  selectedOutcome?: MarketGroupOutcome | null;
+  price?: PriceSummary | null;
+  lob?: LobPayload | null;
+  trades?: TradeRow[];
+  oracle?: OraclePayload | null;
+  content?: ContentItem[];
+};
+
+export type MarketAiInsightResponse = {
+  status: 'live' | 'fallback' | 'missing-api-key' | 'agent-error' | 'invalid-payload' | string;
+  generatedAt?: string;
+  model?: string;
+  brief: string;
+  focus: MarketAiInsightFocus[];
+  evidence?: string[];
+  searchResults?: Array<{
+    title?: string;
+    url?: string;
+    content?: string;
+  }>;
+  error?: string;
+};
+
 export type SparkPoint = {
   timestamp: string;
   value: number;

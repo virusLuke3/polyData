@@ -3,6 +3,8 @@ import type {
   ChartPayload,
   ContentPayload,
   LobPayload,
+  MarketAiInsightPayload,
+  MarketAiInsightResponse,
   MarketSummary,
   MarketGroupChartPayload,
   MarketGroupDetail,
@@ -56,6 +58,24 @@ async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T>
 
 async function apiGet<T>(path: string): Promise<T> {
   return apiGetWithTimeout<T>(path, 12000);
+}
+
+async function apiPostWithTimeout<T>(path: string, body: unknown, timeoutMs = 18000): Promise<T> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  }).finally(() => window.clearTimeout(timer));
+  if (!response.ok) {
+    throw new Error(`API ${response.status} for ${path}`);
+  }
+  return response.json() as Promise<T>;
 }
 
 export function fetchBootstrap() {
@@ -307,6 +327,10 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
   if (noTokenId.trim()) params.set('noTokenId', noTokenId.trim());
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
+}
+
+export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs = 20000) {
+  return apiPostWithTimeout<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
 }
 
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
