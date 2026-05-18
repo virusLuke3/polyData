@@ -4,7 +4,9 @@ import json
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from weather.cities import load_weather_cities
@@ -90,6 +92,41 @@ def _normalize_text(*parts: Any) -> str:
     return " ".join(str(part or "").lower() for part in parts)
 
 
+def _row_to_dict(row: Any) -> Dict[str, Any]:
+    if row is None:
+        return {}
+    if hasattr(row, "as_dict"):
+        return row.as_dict()
+    if isinstance(row, dict):
+        return dict(row)
+    if hasattr(row, "keys"):
+        return {key: row[key] for key in row.keys()}
+    return {}
+
+
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    return value
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "t", "yes", "y", "closed", "resolved"}
+
+
+def _slugify(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return re.sub(r"-+", "-", text)
+
+
 def _matches_alias(text: str, city: Dict[str, Any]) -> bool:
     aliases = [city.get("city"), *list(city.get("polymarket_aliases") or [])]
     for alias in aliases:
@@ -101,6 +138,10 @@ def _matches_alias(text: str, city: Dict[str, Any]) -> bool:
 
 def _matches_weather_market(text: str) -> bool:
     return any(term in text for term in WEATHER_MARKET_TERMS)
+
+
+def _matches_high_temperature_market(text: str) -> bool:
+    return "highest-temperature-in-" in text or "highest temperature" in text or "high temperature" in text
 
 
 def _matches_date(text: str, dates: List[Dict[str, str]]) -> bool:
@@ -115,6 +156,29 @@ def _matches_date(text: str, dates: List[Dict[str, str]]) -> bool:
         if any(candidate in text for candidate in candidates):
             return True
     return False
+
+
+def _matched_date_iso(text: str, dates: List[Dict[str, str]]) -> Optional[str]:
+    for item in dates:
+        candidates = (
+            item["iso"],
+            f"{item['month']} {item['day']}",
+            f"{item['monthShort']} {item['day']}",
+            f"{item['month']} {item['day']} {item['year']}",
+            f"{item['monthShort']} {item['day']} {item['year']}",
+        )
+        if any(candidate in text for candidate in candidates):
+            return item["iso"]
+    return None
+
+
+def _date_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, str]:
+    now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
+    first = datetime.fromisoformat(dates[0]["iso"]).replace(tzinfo=timezone.utc) if dates else now
+    last = datetime.fromisoformat(dates[-1]["iso"]).replace(tzinfo=timezone.utc) if dates else now
+    start = min(now - timedelta(days=1), first - timedelta(hours=12))
+    end = last + timedelta(days=2)
+    return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
 
 
 def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -352,6 +416,269 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
     }
 
 
+def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
+    connector = ctx.get("get_connection")
+    if not callable(connector):
+        return [], "empty"
+    start_iso, end_iso = _date_window_bounds(ctx, dates)
+    conn = None
+    try:
+        conn = connector(ctx.get("DB_PATH"), readonly=True)
+    except TypeError:
+        conn = connector(ctx.get("DB_PATH"))
+    try:
+        cursor = conn.execute(
+            """
+            SELECT
+                m.id AS market_id,
+                m.gamma_market_id,
+                m.slug,
+                m.condition_id,
+                m.yes_token_id,
+                m.no_token_id,
+                m.clob_token_ids,
+                m.title,
+                m.description,
+                m.end_date,
+                m.created_at,
+                mlp.latest_yes_price,
+                mlp.latest_price AS latest_trade_price,
+                mlp.latest_trade_at,
+                mls.latest_price AS serving_latest_price,
+                mls.latest_trade_at AS serving_latest_trade_at,
+                mss.is_trading_closed,
+                mss.is_resolved,
+                mss.gamma_closed
+            FROM markets m
+            LEFT JOIN market_latest_prices mlp ON mlp.market_id = m.id
+            LEFT JOIN market_list_serving mls ON mls.market_id = m.id
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            WHERE
+                (
+                    lower(COALESCE(m.title, '')) LIKE '%%highest temperature%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE 'highest-temperature-in-%%'
+                )
+                AND (m.end_date IS NULL OR (m.end_date >= ? AND m.end_date <= ?))
+            ORDER BY m.end_date ASC, m.id ASC
+            LIMIT 6000
+            """,
+            (start_iso, end_iso),
+        )
+        rows = [_row_to_dict(row) for row in cursor.fetchall()]
+        return rows, "ok" if rows else "empty"
+    except Exception as exc:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("global weather map market db query failed error=%s", exc)
+        return [], "error"
+    finally:
+        if conn is not None and hasattr(conn, "close"):
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _db_market_object(row: Dict[str, Any]) -> Dict[str, Any]:
+    token_ids = _as_list(row.get("clob_token_ids"))
+    if not token_ids and row.get("yes_token_id"):
+        token_ids = [row.get("yes_token_id"), row.get("no_token_id")]
+    return {
+        "id": row.get("market_id"),
+        "slug": row.get("slug"),
+        "question": row.get("title"),
+        "title": row.get("title"),
+        "clobTokenIds": [token for token in token_ids if token],
+        "active": not (_truthy(row.get("is_trading_closed")) or _truthy(row.get("is_resolved")) or _truthy(row.get("gamma_closed"))),
+    }
+
+
+def _db_price_fallback(row: Dict[str, Any]) -> Optional[float]:
+    for key in ("latest_yes_price", "latest_trade_price", "serving_latest_price"):
+        price = _float(row.get(key))
+        if price is not None:
+            return round(price, 4)
+    return None
+
+
+def _fetch_gamma_market_by_id(ctx: dict, market_id: Any) -> Optional[Dict[str, Any]]:
+    if not market_id:
+        return None
+    cache = ctx.setdefault("_weather_gamma_market_cache", {})
+    key = str(market_id)
+    if key in cache:
+        return cache[key]
+    base_url = str(ctx["SETTINGS"].gamma_api_base or "").rstrip("/")
+    if not base_url:
+        cache[key] = None
+        return None
+    stats = ctx.setdefault("_weather_gamma_market_stats", {"attempts": 0, "errors": 0, "priced": 0})
+    stats["attempts"] = int(stats.get("attempts") or 0) + 1
+    try:
+        payload = ctx["http_json_get"](
+            f"{base_url}/markets/{key}",
+            timeout=GAMMA_QUERY_TIMEOUT_SECONDS,
+            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+        )
+    except Exception:
+        stats["errors"] = int(stats.get("errors") or 0) + 1
+        cache[key] = None
+        return None
+    market = payload if isinstance(payload, dict) else None
+    if market and _market_yes_price(market) is not None:
+        stats["priced"] = int(stats.get("priced") or 0) + 1
+    cache[key] = market
+    return market
+
+
+def _gamma_price_fallback(ctx: dict, row: Dict[str, Any]) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
+    market = _fetch_gamma_market_by_id(ctx, row.get("gamma_market_id"))
+    price = _market_yes_price(market or {})
+    return (round(price, 4) if price is not None else None), market
+
+
+def _prefetch_gamma_markets(ctx: dict, rows: Iterable[Dict[str, Any]]) -> None:
+    cache = ctx.setdefault("_weather_gamma_market_cache", {})
+    ids: List[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        if _db_price_fallback(row) is not None:
+            continue
+        market_id = row.get("gamma_market_id")
+        if not market_id:
+            continue
+        key = str(market_id)
+        if key in seen or key in cache:
+            continue
+        seen.add(key)
+        ids.append(key)
+    if not ids:
+        return
+    max_workers = max(1, min(16, len(ids)))
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="weather-gamma-market") as executor:
+        futures = [executor.submit(_fetch_gamma_market_by_id, ctx, market_id) for market_id in ids]
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                pass
+
+
+def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: str, rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    bins: List[Dict[str, Any]] = []
+    for row in rows:
+        market = _db_market_object(row)
+        label = str(row.get("title") or row.get("slug") or "").strip()
+        parsed = parse_temperature_bin(label, default_unit=str(city.get("unit") or "F"))
+        if not parsed:
+            continue
+        fallback = _db_price_fallback(row)
+        gamma_market = None
+        if fallback is None:
+            fallback, gamma_market = _gamma_price_fallback(ctx, row)
+        if gamma_market:
+            market = {**market, **gamma_market}
+        clob = {"bestBidYes": None, "bestAskYes": None} if fallback is not None else _clob_yes_quote(ctx, market)
+        bid = clob.get("bestBidYes")
+        ask = clob.get("bestAskYes")
+        mid = round((bid + ask) / 2, 4) if bid is not None and ask is not None else fallback
+        bins.append(
+            {
+                **parsed,
+                "bestBidYes": bid,
+                "bestAskYes": ask,
+                "midPriceYes": round(float(mid), 4) if mid is not None else None,
+                "marketSlug": row.get("slug"),
+                "marketStatus": "live" if market.get("active") else "inactive",
+            }
+        )
+    if not bins:
+        return None
+    bins.sort(key=lambda item: float(item.get("sortKey") or 0))
+    quoted = len([row for row in bins if row.get("midPriceYes") is not None])
+    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
+    if top is None:
+        forecast_high = _float(city.get("forecastHigh"))
+        if forecast_high is not None:
+            top = min(bins, key=lambda row: abs(float(row.get("sortKey") or 0) - forecast_high))
+    city_slug = _slugify(city.get("city"))
+    date_slug = ""
+    try:
+        parsed_date = datetime.fromisoformat(date_iso)
+        date_slug = parsed_date.strftime("on-%B-%-d-%Y").lower()
+    except Exception:
+        date_slug = date_iso
+    event_slug = f"highest-temperature-in-{city_slug}-{date_slug}".strip("-")
+    updated_at = max(
+        (
+            _json_safe_value(row.get("serving_latest_trade_at") or row.get("latest_trade_at") or row.get("end_date") or row.get("created_at"))
+            for row in rows
+        ),
+        key=_parse_ts,
+        default=None,
+    )
+    return {
+        "eventSlug": event_slug,
+        "eventTitle": f"Highest temperature in {city.get('city')} on {date_iso}?",
+        "eventStatus": "live" if any((not _truthy(row.get("is_trading_closed")) and not _truthy(row.get("is_resolved")) and not _truthy(row.get("gamma_closed"))) for row in rows) else "inactive",
+        "marketUrl": f"https://polymarket.com/event/{event_slug}",
+        "quoteCoverage": f"{quoted}/{len(bins)}",
+        "topBin": top,
+        "bins": bins,
+        "updatedAt": updated_at,
+    }
+
+
+def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+    rows, db_status = _db_temperature_rows(ctx, dates)
+    if not rows:
+        return {}, {str(city["city_id"]): db_status for city in cities}
+
+    date_order = {item["iso"]: index for index, item in enumerate(dates)}
+    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    city_by_id = {str(city["city_id"]): city for city in cities}
+    for row in rows:
+        if _truthy(row.get("is_resolved")):
+            continue
+        haystack = _normalize_text(row.get("title"), row.get("description"), row.get("slug"))
+        if not _matches_high_temperature_market(haystack) or not _matches_date(haystack, dates):
+            continue
+        date_iso = _matched_date_iso(haystack, dates)
+        if not date_iso:
+            continue
+        for city in cities:
+            if _matches_alias(haystack, city):
+                grouped.setdefault((str(city["city_id"]), date_iso), []).append(row)
+                break
+
+    result: Dict[str, Dict[str, Any]] = {}
+    source_states: Dict[str, str] = {}
+    selected_groups: Dict[str, Tuple[Dict[str, Any], str, List[Dict[str, Any]]]] = {}
+    for city_id, city in city_by_id.items():
+        candidate_groups: List[Tuple[int, int, float, str, List[Dict[str, Any]]]] = []
+        for (group_city_id, date_iso), group_rows in grouped.items():
+            if group_city_id != city_id:
+                continue
+            newest = max((_parse_ts(row.get("serving_latest_trade_at") or row.get("latest_trade_at") or row.get("end_date") or row.get("created_at")) for row in group_rows), default=0.0)
+            candidate_groups.append((date_order.get(date_iso, 999), -len(group_rows), -newest, date_iso, group_rows))
+        candidate_groups.sort(key=lambda item: (item[0], item[1], item[2]))
+        if candidate_groups:
+            _, _, _, date_iso, group_rows = candidate_groups[0]
+            selected_groups[city_id] = (city, date_iso, group_rows)
+        else:
+            source_states[city_id] = "empty" if db_status == "ok" else db_status
+
+    _prefetch_gamma_markets(ctx, (row for _, _, group_rows in selected_groups.values() for row in group_rows))
+    for city_id, (city, date_iso, group_rows) in selected_groups.items():
+        normalized = _normalize_temperature_db_group(ctx, city, date_iso, group_rows)
+        if normalized:
+            result[city_id] = normalized
+            source_states[city_id] = "ok"
+        else:
+            source_states[city_id] = "partial"
+    return result, source_states
+
+
 def _market_source_status(stats: Dict[str, Any]) -> str:
     if stats.get("match"):
         return "ok"
@@ -365,9 +692,9 @@ def _market_source_status(stats: Dict[str, Any]) -> str:
 
 def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     dates = _date_labels(ctx, int(getattr(ctx["SETTINGS"], "global_weather_market_days", 4) or 4))
-    result: Dict[str, Dict[str, Any]] = {}
-    source_states: Dict[str, str] = {}
-    for city in cities:
+    result, source_states = _db_markets_by_city(ctx, cities, dates)
+    missing_cities = [city for city in cities if str(city["city_id"]) not in result]
+    for city in missing_cities:
         city_id = str(city["city_id"])
         name = str(city.get("city") or "").strip()
         queries = [f"{name} temperature", f"{name} highest temperature"][:GAMMA_QUERIES_PER_CITY]
@@ -384,7 +711,12 @@ def _markets_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Tuple[Dict[str,
             matches.sort(key=lambda row: (_parse_ts(row.get("updatedAt")), len(row.get("bins") or [])), reverse=True)
             result[city_id] = matches[0]
             stats["match"] = True
-        source_states[city_id] = _market_source_status(stats)
+        gamma_status = _market_source_status(stats)
+        prior_status = source_states.get(city_id)
+        if gamma_status == "ok" or prior_status in {None, "", "empty"}:
+            source_states[city_id] = gamma_status
+        else:
+            source_states[city_id] = prior_status
     return result, source_states
 
 
@@ -454,7 +786,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         elif clob_quoted > 0:
             sources["clob"] = "partial"
         else:
-            sources["clob"] = "error"
+            sources["clob"] = "empty"
     except Exception as exc:
         markets = {}
         market_source_states = {str(city["city_id"]): "error" for city in cities}
