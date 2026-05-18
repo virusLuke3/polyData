@@ -6760,7 +6760,7 @@ body.panel-resize-active iframe {
 .wm-weather-deck-basemap {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   opacity: 0;
   transition: opacity 180ms ease;
 }
@@ -6797,8 +6797,20 @@ body.panel-resize-active iframe {
 .wm-weather-static-fallback {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
   background: #030405;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.wm-weather-deck-map.map-ready.has-screen-points .wm-weather-static-fallback {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wm-weather-deck-map.map-fallback .wm-weather-deck-basemap,
+.wm-weather-deck-map.no-screen-points .wm-weather-deck-basemap {
+  opacity: 0;
 }
 
 .wm-weather-static-fallback svg {
@@ -6870,7 +6882,7 @@ body.panel-resize-active iframe {
 .wm-weather-html-label-layer {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 4;
   pointer-events: none;
 }
 
@@ -6938,7 +6950,7 @@ body.panel-resize-active iframe {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  z-index: 2;
+  z-index: 5;
   padding: 2px 6px;
   border: 1px solid rgba(68, 255, 136, 0.18);
   background: rgba(0, 200, 100, 0.15);
@@ -6954,7 +6966,7 @@ body.panel-resize-active iframe {
   position: absolute;
   left: 50%;
   bottom: 8px;
-  z-index: 2;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 10px;

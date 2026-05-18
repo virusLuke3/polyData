@@ -70,6 +70,7 @@ type WeatherScreenPoint = WeatherMapPoint & {
 };
 
 function numberValue(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
@@ -340,6 +341,8 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
   const [mapFailed, setMapFailed] = useState(false);
   const [screenPoints, setScreenPoints] = useState<WeatherScreenPoint[]>([]);
   const points = useMemo(() => normalizePoints(items), [items]);
+  const hasProjectedPoints = screenPoints.some((point) => point.visible);
+  const showWebglLayer = mapReady && !mapFailed && hasProjectedPoints;
 
   useEffect(() => {
     onSelectRef.current = onSelectCity;
@@ -371,6 +374,12 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     const syncScreenPoints = () => {
       setScreenPoints(projectScreenPoints(map, pointsRef.current));
     };
+    const resizeAndSync = () => {
+      if (!mapRef.current) return;
+      map.resize();
+      map.triggerRepaint();
+      syncScreenPoints();
+    };
 
     const overlay = new MapboxOverlay({
       interleaved: false,
@@ -388,13 +397,12 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
 
     map.on('load', () => {
       map.addControl(overlay as unknown as maplibregl.IControl);
-      map.resize();
-      syncScreenPoints();
+      resizeAndSync();
     });
 
     map.on('idle', () => {
       setMapReady(true);
-      syncScreenPoints();
+      resizeAndSync();
     });
 
     map.on('move', syncScreenPoints);
@@ -402,9 +410,11 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     map.on('resize', syncScreenPoints);
 
     let tileErrorCount = 0;
+    const initialFrame = window.requestAnimationFrame(resizeAndSync);
+    const settleTimer = window.setTimeout(resizeAndSync, 250);
     const fallbackTimer = window.setTimeout(() => {
       if (!mapRef.current || fallbackAppliedRef.current) return;
-      if (!map.loaded()) {
+      if (!map.loaded() || !projectScreenPoints(map, pointsRef.current).some((point) => point.visible)) {
         setMapFailed(true);
       }
     }, 4500);
@@ -422,10 +432,14 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
     };
     map.on('error', onError);
 
-    const resizeObserver = new ResizeObserver(() => map.resize());
+    const resizeObserver = new ResizeObserver(() => {
+      window.requestAnimationFrame(resizeAndSync);
+    });
     if (rootRef.current) resizeObserver.observe(rootRef.current);
 
     return () => {
+      window.cancelAnimationFrame(initialFrame);
+      window.clearTimeout(settleTimer);
       window.clearTimeout(fallbackTimer);
       resizeObserver.disconnect();
       map.off('error', onError);
@@ -451,16 +465,20 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
   }, [points, selectedCityId]);
 
   return (
-    <div ref={rootRef} className="wm-weather-deck-map" style={{ height: `${height}px` }}>
-      {(!mapReady || mapFailed) ? <WeatherStaticFallback points={points} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
-      <div ref={mapHostRef} className={`wm-weather-deck-basemap ${mapReady && !mapFailed ? 'ready' : ''}`} />
-      {showLabels && mapReady && !mapFailed ? <WeatherHtmlLabels points={screenPoints} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
+    <div
+      ref={rootRef}
+      className={`wm-weather-deck-map ${showWebglLayer ? 'map-ready' : 'map-fallback'} ${hasProjectedPoints ? 'has-screen-points' : 'no-screen-points'}`}
+      style={{ height: `${height}px` }}
+    >
+      <WeatherStaticFallback points={points} selectedCityId={selectedCityId} onSelectCity={onSelectCity} />
+      <div ref={mapHostRef} className={`wm-weather-deck-basemap ${showWebglLayer ? 'ready' : ''}`} />
+      {showLabels && showWebglLayer ? <WeatherHtmlLabels points={screenPoints} selectedCityId={selectedCityId} onSelectCity={onSelectCity} /> : null}
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>
         <span><i className="market" />PMKT QUOTE</span>
       </div>
-      <div className="wm-weather-deck-status">WebGL</div>
+      <div className="wm-weather-deck-status">{showWebglLayer ? 'WebGL' : 'SVG'}</div>
     </div>
   );
 }
