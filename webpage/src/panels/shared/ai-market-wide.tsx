@@ -30,10 +30,38 @@ type MarketCandidate = {
   source: 'market' | 'group';
 };
 
-const PANEL_COPY: Record<MarketWideAiInsightLens, { section: string; kicker: string; fallbackTitle: string }> = {
-  overview: { section: 'Market Brief', kicker: 'MARKET-WIDE', fallbackTitle: 'Market universe loaded' },
-  special: { section: 'Special Markets', kicker: 'TODAY RADAR', fallbackTitle: 'Unusual market watch' },
-  trend: { section: 'Trend Radar', kicker: 'MACRO READ', fallbackTitle: 'Polymarket trend watch' },
+const PANEL_COPY: Record<MarketWideAiInsightLens, {
+  source: string;
+  eyebrow: string;
+  focusLabel: string;
+  focusMeta: string;
+  watchLabel: string;
+  fallbackTitle: string;
+}> = {
+  overview: {
+    source: 'WORLD BRIEF',
+    eyebrow: 'Market-wide read',
+    focusLabel: 'Focus',
+    focusMeta: 'market structure',
+    watchLabel: 'Watch next',
+    fallbackTitle: 'Market universe loaded',
+  },
+  special: {
+    source: 'TODAY RADAR',
+    eyebrow: 'Unusual markets',
+    focusLabel: 'Special markets',
+    focusMeta: 'ranked signals',
+    watchLabel: 'Why it matters',
+    fallbackTitle: 'Unusual market watch',
+  },
+  trend: {
+    source: 'MACRO READ',
+    eyebrow: 'Trend radar',
+    focusLabel: 'Trend thesis',
+    focusMeta: 'cross-market',
+    watchLabel: 'Next catalysts',
+    fallbackTitle: 'Polymarket trend watch',
+  },
 };
 
 function numericValue(value: string | number | null | undefined) {
@@ -229,6 +257,12 @@ function severityClass(severity?: string | null) {
   return 'neutral';
 }
 
+function sourceStatus(insight: MarketWideAiInsightResponse) {
+  if (insight.viaGateway) return 'AI LIVE';
+  if (insight.cacheStatus === 'hit') return 'CACHED';
+  return 'LOCAL';
+}
+
 function requestSignature(payload: MarketWideAiInsightPayload) {
   return JSON.stringify({
     lens: payload.lens,
@@ -302,6 +336,9 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   const themeLimit = lens === 'trend' ? 4 : 3;
   const specialLimit = lens === 'special' ? 4 : 2;
   const panelCount = Math.max(specialMarkets.length, themes.length, focus.length);
+  const primaryCards = lens === 'special' ? specialMarkets.slice(0, specialLimit) : [];
+  const narrativeCards = lens === 'overview' ? focus : themes;
+  const focusCards = lens === 'special' ? themes.slice(0, 2) : narrativeCards.slice(0, themeLimit);
 
   return (
     <Panel
@@ -311,24 +348,24 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
       count={panelCount}
       className={`wm-market-panel wm-ai-market-panel wm-ai-market-wide-panel wm-ai-${lens}`}
     >
-      <div className="wm-ai-market">
-        <section className="wm-ai-market-brief">
-          <div className="wm-ai-market-brief-head">
-            <span>{copy.kicker}</span>
-            <b>{insight.viaGateway ? 'AI LIVE' : 'LOCAL'}</b>
+      <div className="wm-ai-insights">
+        <section className="wm-ai-insight-hero">
+          <div className="wm-ai-insight-source">
+            <span><i aria-hidden="true" />{copy.source}</span>
+            <b>{sourceStatus(insight)}</b>
           </div>
-          <strong>{copy.section}</strong>
+          <em>{copy.eyebrow}</em>
           <p>{insight.brief || fallback.brief}</p>
         </section>
 
-        {specialMarkets.length ? (
-          <section className="wm-ai-special-list" aria-label={`${title} special markets`}>
-            <div className="wm-ai-market-section-head">
-              <span>Special Markets</span>
+        {primaryCards.length ? (
+          <section className="wm-ai-insight-list wm-ai-special-list" aria-label={`${title} special markets`}>
+            <div className="wm-ai-insight-section-head">
+              <span>{copy.focusLabel}</span>
               <em>{specialMarkets.length} picked</em>
             </div>
-            {specialMarkets.slice(0, specialLimit).map((item, index) => (
-              <article className={`wm-ai-special-card ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
+            {primaryCards.map((item, index) => (
+              <article className={`wm-ai-insight-market-card ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
                 <div>
                   <span>{item.trend || 'Watch'}</span>
                   <strong>{item.title}</strong>
@@ -340,14 +377,14 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
           </section>
         ) : null}
 
-        <section className="wm-ai-market-focus" aria-label={`${title} trend signals`}>
-          <div className="wm-ai-market-section-head">
-            <span>{lens === 'trend' ? 'Trend Thesis' : 'Focus'}</span>
+        <section className="wm-ai-insight-list wm-ai-market-focus" aria-label={`${title} trend signals`}>
+          <div className="wm-ai-insight-section-head">
+            <span>{lens === 'special' ? copy.watchLabel : copy.focusLabel}</span>
             <em>{insight.viaGateway ? 'gateway' : (insight.model || 'local')}</em>
           </div>
-          {themes.slice(0, themeLimit).map((item, index) => (
-            <article className={`wm-ai-market-card ${severityClass(item.severity)}`} key={`${lens}-${item.label}-${index}`}>
-              <div className="wm-ai-market-card-head">
+          {focusCards.map((item, index) => (
+            <article className={`wm-ai-insight-card ${severityClass(item.severity)}`} key={`${lens}-${item.label}-${index}`}>
+              <div className="wm-ai-insight-card-head">
                 <span>{item.label}</span>
                 <b>{item.evidence || copy.fallbackTitle}</b>
               </div>
@@ -358,13 +395,13 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
         </section>
 
         {watchlist.length ? (
-          <section className="wm-ai-watchlist" aria-label={`${title} watchlist`}>
-            <div className="wm-ai-market-section-head">
-              <span>Watch Next</span>
+          <section className="wm-ai-insight-list wm-ai-watchlist" aria-label={`${title} watchlist`}>
+            <div className="wm-ai-insight-section-head">
+              <span>{copy.watchLabel}</span>
               <em>{watchlist.length} items</em>
             </div>
             {watchlist.slice(0, 3).map((item, index) => (
-              <article className={`wm-ai-watch-card ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
+              <article className={`wm-ai-insight-watch ${severityClass(item.severity)}`} key={`${item.title}-${index}`}>
                 <span>{item.horizon || 'today'}</span>
                 <strong>{item.title}</strong>
                 <p>{item.reason}</p>
@@ -373,7 +410,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
           </section>
         ) : null}
 
-        <section className="wm-ai-market-evidence" aria-label={`${title} evidence`}>
+        <section className="wm-ai-insight-evidence" aria-label={`${title} evidence`}>
           {evidence.slice(0, 4).map((item) => <span key={item}>{item}</span>)}
         </section>
       </div>

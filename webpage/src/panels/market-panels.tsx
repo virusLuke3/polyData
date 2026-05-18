@@ -568,7 +568,7 @@ export const marketPanelRenderers: PanelRenderMap = {
     },
   },
   'price-implications': {
-    render: (ctx) => <AiMarketWidePanel ctx={ctx} lens="overview" title="AI MARKET BRIEF" badge="LIVE" />,
+    render: (ctx) => <AiMarketWidePanel ctx={ctx} lens="overview" title="AI INSIGHTS" badge="LIVE" />,
   },
   'price-chart': {
     render: (ctx) => (

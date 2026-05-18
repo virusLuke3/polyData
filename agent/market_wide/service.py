@@ -176,12 +176,13 @@ def _special_markets(payload: dict[str, Any], limit: int = 4) -> list[dict[str, 
 def _fallback_themes(payload: dict[str, Any], lens: str) -> list[dict[str, str]]:
     metrics = _summary_metrics(payload)
     top_categories = ", ".join(metrics["topCategories"]) or "category data loading"
+    lead_market = (_special_markets(payload, limit=1) or [{"title": "No standout market yet"}])[0]["title"]
     if lens == "special":
         return [
             {
                 "label": "SPECIAL",
                 "title": "Unusual-market radar",
-                "summary": "Markets are ranked by visible volume, trade count, close odds, and outcome complexity.",
+                "summary": f"{lead_market} is the strongest current candidate for a closer read.",
                 "severity": "neutral",
                 "evidence": f"{metrics['coveredMarkets']} covered",
             },
@@ -198,14 +199,14 @@ def _fallback_themes(payload: dict[str, Any], lens: str) -> list[dict[str, str]]
             {
                 "label": "TREND",
                 "title": "Polymarket narrative breadth",
-                "summary": f"Loaded markets cluster around {top_categories}.",
+                "summary": f"Attention is rotating around {top_categories}; watch whether one category becomes the dominant narrative.",
                 "severity": "neutral",
                 "evidence": f"{metrics['coveredMarkets']} covered",
             },
             {
                 "label": "CATALYSTS",
                 "title": "Catalyst feed",
-                "summary": f"{metrics['contentItems']} content items and {metrics['alphaSignals']} alpha signals are available for context.",
+                "summary": "News and signal feeds are being used to connect market moves with outside catalysts.",
                 "severity": "positive" if metrics["contentItems"] else "warning",
                 "evidence": f"{metrics['contentItems']} items",
             },
@@ -214,7 +215,7 @@ def _fallback_themes(payload: dict[str, Any], lens: str) -> list[dict[str, str]]
         {
             "label": "BREADTH",
             "title": "Market universe",
-            "summary": f"{metrics['coveredMarkets']} markets/events are visible across the dashboard.",
+            "summary": f"The strongest current read starts with {lead_market}.",
             "severity": "positive" if metrics["coveredMarkets"] else "neutral",
             "evidence": f"{metrics['coveredMarkets']} covered",
         },
@@ -315,11 +316,12 @@ def _fallback_response(payload: dict[str, Any], lens: str, *, reason: str, searc
     categories = ", ".join(metrics["topCategories"]) or "categories still loading"
     if lens == "special":
         lead = special[0]["title"] if special else "No standout market"
-        brief = f"Today's unusual-market radar is led by {lead}. The broader loaded set clusters around {categories}."
+        brief = f"{lead} is the clearest unusual market on the board. Attention is also clustering around {categories}."
     elif lens == "trend":
-        brief = f"Polymarket attention is clustering around {categories}. Watch whether isolated event interest turns into a category-wide trend."
+        brief = f"Polymarket attention is rotating toward {categories}. Watch whether isolated event interest turns into a category-wide trend."
     else:
-        brief = f"Market-wide dashboard covers {metrics['coveredMarkets']} markets/events with {metrics['visible24hVolume']} visible 24h volume. Current attention clusters around {categories}."
+        lead = special[0]["title"] if special else categories
+        brief = f"{lead} is anchoring the current market-wide read. The broader board is clustering around {categories}."
     evidence = [
         f"{metrics['coveredMarkets']} covered markets",
         f"{metrics['tradeRows']} recent trades",

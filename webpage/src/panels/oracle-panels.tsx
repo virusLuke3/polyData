@@ -14,7 +14,7 @@ export const oraclePanelRenderers: PanelRenderMap = {
   },
   'oracle-timeline': {
     render: (ctx) => (
-      <AiMarketWidePanel ctx={ctx} lens="trend" title="AI TREND RADAR" badge="TREND" />
+      <AiMarketWidePanel ctx={ctx} lens="trend" title="TREND WATCH" badge="TREND" />
     ),
   },
 };
