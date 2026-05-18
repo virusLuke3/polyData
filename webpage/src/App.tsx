@@ -676,7 +676,8 @@ export function App() {
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
   const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
   const [runtimeData, setRuntimeData] = useState<PanelRuntimeData>({});
-  const [marketQuery, setMarketQuery] = useState('');
+  const [marketQuery] = useState('');
+  const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
   const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
@@ -1228,6 +1229,8 @@ export function App() {
   }, [notice]);
 
   const toggleLayer = (layerId: string) => {
+    const target = layers.find((layer) => layer.id === layerId);
+    if (target) setNotice(`${target.label} ${target.enabled ? 'hidden' : 'enabled'}`);
     setLayers((current) => current.map((layer) => (layer.id === layerId ? { ...layer, enabled: !layer.enabled } : layer)));
   };
 
@@ -1278,13 +1281,13 @@ export function App() {
   );
 
   const filteredMarkets = useMemo(() => {
-    const query = marketQuery.trim().toLowerCase();
+    const query = commandQuery.trim().toLowerCase();
     if (!query) return availableMarkets;
     return availableMarkets.filter((market) => {
       const text = `${market.title} ${market.slug} ${market.category || ''} ${(market.tags || []).join(' ')}`.toLowerCase();
       return text.includes(query);
     });
-  }, [availableMarkets, marketQuery]);
+  }, [availableMarkets, commandQuery]);
 
   const selectedMarket = useMemo<MarketSummary | null>(() => {
     if (bundle?.market && bundle.market.id === selectedMarketId) return bundle.market;
@@ -1313,6 +1316,13 @@ export function App() {
     { label: 'ORACLE', value: currentGlobalOracle.length || 0 },
     { label: 'INTEL', value: currentLatestContent.length || 0 },
   ];
+  const visibleLayers = useMemo(() => {
+    const query = layerQuery.trim().toLowerCase();
+    if (!query) return layers;
+    return layers.filter((layer) => `${layer.label} ${layer.hint || ''} ${layer.id}`.toLowerCase().includes(query));
+  }, [layerQuery, layers]);
+  const enabledLayerIds = useMemo(() => layers.filter((layer) => layer.enabled).map((layer) => layer.id), [layers]);
+  const activeLayerCount = enabledLayerIds.length;
 
   const runtimeValue = <T,>(panelId: string): T | null => (runtimeData[panelId] as T | undefined) || null;
 
@@ -1486,30 +1496,34 @@ export function App() {
                 </div>
                 <input
                   className="wm-layer-search"
-                  value={marketQuery}
-                  onInput={(event) => setMarketQuery((event.currentTarget as HTMLInputElement).value)}
+                  value={layerQuery}
+                  onInput={(event) => setLayerQuery((event.currentTarget as HTMLInputElement).value)}
                   placeholder="Search layers..."
                 />
 
                 <div className="wm-layer-list">
-                  {layers.map((layer) => (
+                  {visibleLayers.length ? visibleLayers.map((layer) => (
                     <label
                       key={layer.id}
                       className={`wm-layer-row ${layer.enabled ? 'enabled' : ''}`}
+                      title={`${layer.enabled ? 'Hide' : 'Show'} ${layer.label}`}
                     >
                       <input
                         type="checkbox"
                         checked={layer.enabled}
                         onChange={() => toggleLayer(layer.id)}
+                        aria-label={`${layer.enabled ? 'Hide' : 'Show'} ${layer.label}`}
                       />
                       <span className="wm-layer-icon">{layer.icon}</span>
                       <span>{layer.label}</span>
                       {layer.hint ? <em className="wm-layer-hint">{layer.hint}</em> : null}
                     </label>
-                  ))}
+                  )) : (
+                    <div className="wm-layer-empty">No matching layers</div>
+                  )}
                 </div>
 
-                <div className="wm-sidebar-footer">polyData Monitor • live terminal</div>
+                <div className="wm-sidebar-footer">{activeLayerCount}/{layers.length} layers active</div>
               </aside>
 
               <div className="wm-globe-hero">
@@ -1523,6 +1537,7 @@ export function App() {
                     contentItems={currentLatestContent}
                     region={region}
                     zoomLevel={mapZoom}
+                    enabledLayerIds={enabledLayerIds}
                   />
                 ) : (
                   <WeatherInlineMap

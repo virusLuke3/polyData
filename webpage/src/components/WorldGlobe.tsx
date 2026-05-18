@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'preact/hooks';
 import type { ContentItem, MarketListItem, MarketSummary, OracleEvent, TradeRow } from '@/types';
 
 type GlobePoint = {
+  layer: GlobeLayerId;
   lat: number;
   lng: number;
   size: number;
@@ -11,12 +12,22 @@ type GlobePoint = {
 };
 
 type GlobeArc = {
+  layer: GlobeLayerId;
   startLat: number;
   startLng: number;
   endLat: number;
   endLng: number;
   color: string[];
 };
+
+type GlobeRing = {
+  layer: GlobeLayerId;
+  lat: number;
+  lng: number;
+  color: string;
+};
+
+type GlobeLayerId = 'markets' | 'oracle' | 'trade' | 'lob' | 'intel';
 
 type WorldGlobeProps = {
   markets: MarketListItem[];
@@ -26,6 +37,7 @@ type WorldGlobeProps = {
   contentItems: ContentItem[];
   region: string;
   zoomLevel: number;
+  enabledLayerIds: string[];
 };
 
 const GLOBAL_VIEW = { lat: 20, lng: 6, altitude: 1.54 };
@@ -98,13 +110,17 @@ function buildPoints(
   recentTrades: TradeRow[],
   recentOracle: OracleEvent[],
   contentItems: ContentItem[],
+  enabledLayerIds: string[],
 ) {
+  const enabledLayers = new Set(enabledLayerIds);
+  const isEnabled = (layer: GlobeLayerId) => enabledLayers.has(layer);
   const selectedText = `${selectedMarket?.title || ''} ${selectedMarket?.category || ''} ${(selectedMarket?.tags || []).join(' ')}`;
   const selectedGeo = resolveGeo(selectedText || 'selected-market');
 
   const marketPoints: GlobePoint[] = markets.slice(0, 24).map((market, index) => {
     const geo = resolveGeo(`${market.title} ${market.category || ''} ${(market.tags || []).join(' ')}`, index);
     return {
+      layer: 'markets',
       lat: geo.lat,
       lng: geo.lng,
       size: market.id === selectedMarket?.id ? 0.45 : 0.2 + (index % 3) * 0.05,
@@ -117,6 +133,7 @@ function buildPoints(
   const oraclePoints: GlobePoint[] = recentOracle.slice(0, 10).map((event, index) => {
     const geo = resolveGeo(`${event.marketTitle || ''} ${event.questionId || ''}`, index + 40);
     return {
+      layer: 'oracle',
       lat: geo.lat,
       lng: geo.lng,
       size: 0.26,
@@ -129,6 +146,7 @@ function buildPoints(
   const contentPoints: GlobePoint[] = contentItems.slice(0, 8).map((item, index) => {
     const geo = resolveGeo(`${item.title || ''} ${item.summary || ''} ${item.source || ''}`, index + 80);
     return {
+      layer: 'intel',
       lat: geo.lat,
       lng: geo.lng,
       size: 0.18,
@@ -141,6 +159,7 @@ function buildPoints(
   const tradePoints: GlobePoint[] = recentTrades.slice(0, 12).map((trade, index) => {
     const geo = resolveGeo(`${trade.marketId || ''} ${trade.outcome || ''} ${trade.side || ''}`, index + 120);
     return {
+      layer: 'trade',
       lat: (selectedGeo.lat + geo.lat) / 2,
       lng: (selectedGeo.lng + geo.lng) / 2,
       size: 0.16,
@@ -151,6 +170,7 @@ function buildPoints(
   });
 
   const arcs: GlobeArc[] = marketPoints.slice(0, 10).map((point, index) => ({
+    layer: 'lob',
     startLat: selectedGeo.lat,
     startLng: selectedGeo.lng,
     endLat: point.lat,
@@ -160,22 +180,28 @@ function buildPoints(
       : ['rgba(88,166,255,0.05)', 'rgba(88,166,255,0.72)', 'rgba(88,166,255,0.05)'],
   }));
 
+  const rings: GlobeRing[] = [
+    { layer: 'lob', ...selectedGeo, color: '#ffcf4b' },
+    ...oraclePoints.slice(0, 3).map((point) => ({ layer: 'oracle' as const, lat: point.lat, lng: point.lng, color: '#ff5c5c' })),
+    ...contentPoints.slice(0, 2).map((point) => ({ layer: 'intel' as const, lat: point.lat, lng: point.lng, color: '#39ff73' })),
+  ];
+
   return {
-    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints],
-    rings: [selectedGeo, ...oraclePoints.slice(0, 3), ...contentPoints.slice(0, 2)],
-    arcs,
+    points: [...marketPoints, ...oraclePoints, ...contentPoints, ...tradePoints].filter((point) => isEnabled(point.layer)),
+    rings: rings.filter((ring) => isEnabled(ring.layer)),
+    arcs: arcs.filter((arc) => isEnabled(arc.layer)),
     selectedGeo,
   };
 }
 
-export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, region, zoomLevel }: WorldGlobeProps) {
+export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle, contentItems, region, zoomLevel, enabledLayerIds }: WorldGlobeProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const globeRef = useRef<any>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const globeData = useMemo(
-    () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems),
-    [contentItems, markets, recentOracle, recentTrades, selectedMarket],
+    () => buildPoints(markets, selectedMarket, recentTrades, recentOracle, contentItems, enabledLayerIds),
+    [contentItems, enabledLayerIds, markets, recentOracle, recentTrades, selectedMarket],
   );
 
   useEffect(() => {
@@ -206,7 +232,10 @@ export function WorldGlobe({ markets, selectedMarket, recentTrades, recentOracle
         .arcDashGap(3.5)
         .arcDashAnimateTime(5000)
         .arcColor(((arc: object) => (arc as GlobeArc).color) as any)
-        .ringColor(() => (t: number) => `rgba(255,186,33,${Math.max(0, 1 - t)})`)
+        .ringColor(((ring: object) => {
+          const color = (ring as GlobeRing).color || '#ffba21';
+          return (t: number) => `${color}${Math.round(Math.max(0, 1 - t) * 255).toString(16).padStart(2, '0')}`;
+        }) as any)
         .ringMaxRadius(5.4)
         .ringPropagationSpeed(1.9)
         .ringRepeatPeriod(1280)

@@ -546,7 +546,12 @@ body {
   border-color: rgba(57, 255, 115, 0.08);
 }
 
+.wm-layer-row:not(.enabled) {
+  opacity: 0.54;
+}
+
 .wm-layer-row:hover {
+  opacity: 1;
   transform: translateX(2px);
   border-color: rgba(57, 255, 115, 0.18);
   background: rgba(57, 255, 115, 0.045);
@@ -607,6 +612,17 @@ body {
   font-style: normal;
   font-size: 9px;
   letter-spacing: 0.7px;
+}
+
+.wm-layer-empty {
+  padding: 18px 10px;
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .wm-sidebar-footer {
