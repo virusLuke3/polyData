@@ -126,13 +126,23 @@ function defaultGroupMarketId(group: MarketGroupItem) {
 }
 
 function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
-  const visible = outcomes.slice(0, 3);
+  const visible = outcomes.slice(0, 2);
+  const remaining = Math.max(0, outcomes.length - visible.length);
   if (!visible.length) return <span className="wm-poly-market-outcome">Pending outcomes</span>;
-  return visible.map((outcome) => (
-    <span className="wm-poly-market-outcome" key={`${outcome.marketId || outcome.gammaMarketId || outcome.label}`}>
-      {outcome.label || 'Outcome'} <b>{formatPercent(outcome.yesPrice)}</b>
-    </span>
-  ));
+  return (
+    <>
+      {visible.map((outcome) => (
+        <span
+          className="wm-poly-market-outcome"
+          key={`${outcome.marketId || outcome.gammaMarketId || outcome.label}`}
+          title={outcome.label || 'Outcome'}
+        >
+          {outcome.label || 'Outcome'} <b>{formatPercent(outcome.yesPrice)}</b>
+        </span>
+      ))}
+      {remaining ? <span className="wm-poly-market-more">+{remaining}</span> : null}
+    </>
+  );
 }
 
 function activeMarketGroupsList(

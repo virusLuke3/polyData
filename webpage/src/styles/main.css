@@ -953,36 +953,98 @@ body {
 }
 
 .wm-focused-market-list .wm-market-sort {
-  width: 104px;
+  width: 96px;
   padding-inline: 8px;
   font-size: 10px;
 }
 
 .wm-focused-market-list .wm-poly-market-card {
-  min-height: 67px;
-  margin-bottom: 4px;
-  padding: 7px 7px 6px 10px;
+  grid-template-columns: 1fr;
+  min-height: 92px;
+  margin-bottom: 5px;
+  padding: 8px 9px 8px 11px;
+}
+
+.wm-focused-market-list .wm-poly-market-card-main {
+  padding-right: 27px;
 }
 
 .wm-focused-market-list .wm-poly-market-meta,
 .wm-focused-market-list .wm-poly-market-bottom {
-  gap: 5px;
   font-size: 9px;
   letter-spacing: 0.25px;
 }
 
+.wm-focused-market-list .wm-poly-market-meta {
+  gap: 5px;
+  margin-bottom: 6px;
+  padding-right: 2px;
+}
+
 .wm-focused-market-list .wm-poly-market-title {
-  min-height: 28px;
-  margin-bottom: 4px;
-  font-size: 11px;
-  line-height: 1.25;
+  min-height: 34px;
+  margin-bottom: 7px;
+  padding-right: 4px;
+  font-size: 12px;
+  line-height: 1.22;
+}
+
+.wm-focused-market-list .wm-poly-market-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 5px;
+  align-items: center;
+  white-space: normal;
+  line-height: 1.1;
 }
 
 .wm-focused-market-list .wm-poly-market-prob {
   font-size: 11px;
 }
 
+.wm-focused-market-list .wm-poly-market-outcome {
+  flex: 1 1 calc(50% - 4px);
+  max-width: calc(50% - 4px);
+  min-width: 88px;
+  padding: 2px 5px;
+  border: 1px solid rgba(126, 220, 255, 0.16);
+  background: rgba(126, 220, 255, 0.045);
+  color: #aeb7b7;
+  line-height: 1.2;
+}
+
+.wm-focused-market-list .wm-poly-market-outcome b {
+  color: #eef1ee;
+}
+
+.wm-focused-market-list .wm-poly-market-more {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid #2f3437;
+  background: #1b1d1d;
+  color: #8d9696;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.wm-focused-market-list .wm-poly-market-volume {
+  margin-left: 0;
+  padding: 2px 5px;
+  border: 1px solid rgba(57, 255, 115, 0.18);
+  background: rgba(57, 255, 115, 0.055);
+  line-height: 1.2;
+}
+
+.wm-focused-market-list .wm-poly-market-change,
+.wm-focused-market-list .wm-poly-market-trades {
+  padding: 2px 0;
+}
+
 .wm-focused-market-list .wm-poly-market-star {
+  position: absolute;
+  top: 12px;
+  right: 10px;
   font-size: 20px;
 }
 
