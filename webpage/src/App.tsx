@@ -92,7 +92,7 @@ const REGION_OPTIONS: Array<{ value: RegionKey; label: string }> = [
 ];
 
 const MAP_BOTTOM_PANEL_IDS: string[] = [];
-const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled']);
+const FOCUSED_STRIP_PANEL_IDS = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
 const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 const PANEL_ROW_RESIZE_STEP = 170;
 const PANEL_COL_RESIZE_STEP = 260;
@@ -1197,6 +1197,7 @@ export function App() {
   const mapBottomPanelIds = displayPanelIds.filter((panelId) => MAP_BOTTOM_PANEL_IDS.includes(panelId));
   const sidePanelIds = displayPanelIds.filter((panelId) => !MAP_BOTTOM_PANEL_IDS.includes(panelId));
   const activeMarketsEntry = PANEL_REGISTRY['active-markets'];
+  const oracleFeedEntry = PANEL_REGISTRY['oracle-feed'];
   const remainingSidePanelIds = sidePanelIds.filter((panelId) => !FOCUSED_STRIP_PANEL_IDS.has(panelId));
 
   const liveMetrics = [
@@ -1466,6 +1467,11 @@ export function App() {
           <div className="wm-focused-market-right">
             <FocusedMarketStrip {...panelContext} />
           </div>
+          {oracleFeedEntry ? (
+            <div className="wm-panel-slot wm-focused-oracle-feed">
+              {oracleFeedEntry.render(panelContext)}
+            </div>
+          ) : null}
         </section>
 
         <section className="wm-panels-grid">

@@ -855,9 +855,9 @@ body {
 }
 
 .wm-focused-market-row {
-  --wm-focused-row-height: 468px;
+  --wm-focused-row-height: 424px;
   display: grid;
-  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 0.88fr) minmax(0, 2.82fr) minmax(250px, 0.72fr);
   gap: 4px;
   padding: 4px;
   background: #101010;
@@ -865,7 +865,8 @@ body {
 }
 
 .wm-focused-market-list,
-.wm-focused-market-right {
+.wm-focused-market-right,
+.wm-focused-oracle-feed {
   min-width: 0;
   min-height: 0;
   height: var(--wm-focused-row-height);
@@ -878,26 +879,26 @@ body {
 
 .wm-focus-strip {
   --wm-focus-gap: 4px;
-  --wm-focus-title-size: 16px;
-  --wm-focus-hero-size: 34px;
-  --wm-focus-hero-change-size: 18px;
-  --wm-focus-meta-size: 11px;
-  --wm-focus-inline-size: 12px;
-  --wm-front-stat-size: 18px;
-  --wm-front-stat-emphasis-size: 24px;
-  --wm-timer-size: 24px;
-  --wm-book-metric-size: 18px;
-  --wm-book-header-size: 10px;
-  --wm-book-row-size: 12px;
-  --wm-book-mid-size: 11px;
-  --wm-book-col-side: 84px;
-  --wm-book-col-a: 96px;
-  --wm-book-col-c: 104px;
-  --wm-book-row-pad-y: 7px;
-  --wm-book-row-pad-x: 12px;
-  --wm-outcome-rail-width: 180px;
+  --wm-focus-title-size: 14px;
+  --wm-focus-hero-size: 28px;
+  --wm-focus-hero-change-size: 15px;
+  --wm-focus-meta-size: 10px;
+  --wm-focus-inline-size: 10px;
+  --wm-front-stat-size: 15px;
+  --wm-front-stat-emphasis-size: 19px;
+  --wm-timer-size: 19px;
+  --wm-book-metric-size: 15px;
+  --wm-book-header-size: 9px;
+  --wm-book-row-size: 10px;
+  --wm-book-mid-size: 9px;
+  --wm-book-col-side: 68px;
+  --wm-book-col-a: 72px;
+  --wm-book-col-c: 80px;
+  --wm-book-row-pad-y: 5px;
+  --wm-book-row-pad-x: 8px;
+  --wm-outcome-rail-width: 140px;
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(330px, 0.92fr) minmax(300px, 0.78fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.82fr) minmax(220px, 0.72fr);
   gap: var(--wm-focus-gap);
   align-items: stretch;
   height: 100%;
@@ -909,9 +910,113 @@ body {
 }
 
 .wm-focused-market-list .wm-panel,
-.wm-focused-market-right .wm-panel {
+.wm-focused-market-right .wm-panel,
+.wm-focused-oracle-feed .wm-panel {
   height: 100%;
   min-height: 0;
+}
+
+.wm-focused-market-row .wm-panel .wm-panel-header {
+  min-height: 42px;
+  padding: 7px 9px;
+}
+
+.wm-focused-market-row .wm-panel .wm-panel-title {
+  font-size: 11px;
+  letter-spacing: 2.4px;
+}
+
+.wm-focused-market-row .wm-panel .wm-panel-badge {
+  min-height: 24px;
+  padding-inline: 9px;
+  font-size: 10px;
+}
+
+.wm-focused-market-row .wm-panel .wm-panel-count {
+  min-width: 34px;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.wm-focused-market-list .wm-market-panel-controls {
+  gap: 6px;
+}
+
+.wm-focused-market-list .wm-market-search {
+  width: min(150px, 34vw);
+}
+
+.wm-focused-market-list .wm-market-sort {
+  width: 104px;
+  padding-inline: 8px;
+  font-size: 10px;
+}
+
+.wm-focused-market-list .wm-poly-market-card {
+  min-height: 67px;
+  margin-bottom: 4px;
+  padding: 7px 7px 6px 10px;
+}
+
+.wm-focused-market-list .wm-poly-market-meta,
+.wm-focused-market-list .wm-poly-market-bottom {
+  gap: 5px;
+  font-size: 9px;
+  letter-spacing: 0.25px;
+}
+
+.wm-focused-market-list .wm-poly-market-title {
+  min-height: 28px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.wm-focused-market-list .wm-poly-market-prob {
+  font-size: 11px;
+}
+
+.wm-focused-market-list .wm-poly-market-star {
+  font-size: 20px;
+}
+
+.wm-focused-oracle-feed .wm-panel-body {
+  padding: 8px;
+}
+
+.wm-focused-oracle-feed .wm-oracle-list {
+  gap: 6px;
+}
+
+.wm-focused-oracle-feed .wm-oracle-event-card {
+  gap: 6px;
+  padding: 8px 9px;
+}
+
+.wm-focused-oracle-feed .wm-oracle-event-top {
+  gap: 8px;
+}
+
+.wm-focused-oracle-feed .wm-oracle-event-top strong {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: #eef1ee;
+  font-size: 11px;
+  line-height: 1.22;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.wm-focused-oracle-feed .wm-oracle-event-middle,
+.wm-focused-oracle-feed .wm-oracle-event-meta {
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.45px;
+}
+
+.wm-focused-oracle-feed .wm-oracle-event-middle em {
+  font-size: 11px;
 }
 
 .wm-focus-detail,
