@@ -19,6 +19,7 @@ import requests
 
 from api.config import load_api_settings
 from api.services import global_weather_map_service
+from db.db import DEFAULT_DB_PATH, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -83,6 +84,8 @@ class GlobalWeatherMapWatcher:
             "get_cached_json": self._get_cached_json,
             "set_cached_json": self._set_cached_json,
             "utc_now_iso": utc_now_iso,
+            "get_connection": get_connection,
+            "DB_PATH": DEFAULT_DB_PATH,
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
@@ -175,4 +178,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -286,6 +286,20 @@ def test_global_weather_map_cold_start_returns_fast_and_schedules_refresh(monkey
     assert ctx["_calls"]["json"] == 0
 
 
+def test_global_weather_map_watcher_context_can_read_market_database():
+    watcher = global_weather_map_watcher.GlobalWeatherMapWatcher.__new__(global_weather_map_watcher.GlobalWeatherMapWatcher)
+    watcher.settings = make_settings()
+    watcher.snapshot_store = FakeStore()
+    watcher._get_cached_json = lambda namespace, cache_key: None
+    watcher._set_cached_json = lambda namespace, cache_key, payload, ttl: None
+    watcher._http_json_get = lambda *args, **kwargs: {}
+
+    ctx = watcher.context()
+
+    assert callable(ctx["get_connection"])
+    assert ctx["DB_PATH"]
+
+
 def test_global_weather_map_market_discovery_is_city_tolerant(monkeypatch):
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bestBidYes": 0.41, "bestAskYes": 0.45})
 
