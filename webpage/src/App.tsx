@@ -9,14 +9,20 @@ import {
   fetchAllActiveMarkets,
   fetchBootstrap,
   fetchLatestContent,
+  fetchMarketChart,
+  fetchMarketContent,
   fetchMarketGroupChart,
   fetchMarketGroupDetail,
   fetchMarketGroups,
+  fetchMarketLob,
+  fetchMarketOracle,
+  fetchMarketPrice,
+  fetchMarketSummary,
+  fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
   fetchRuntimeGlobalWeatherMap,
   fetchSystemHealth,
-  fetchWorkspaceBundle,
 } from '@/services/api';
 import type {
   BootstrapPayload,
@@ -323,6 +329,18 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
             { timestamp: new Date().toISOString(), yesPrice: latest, noPrice: latestNo },
           ],
         },
+    content: null,
+    lob: null,
+  };
+}
+
+function emptyWorkspaceBundle(): WorkspaceBundle {
+  return {
+    market: null,
+    trades: [],
+    oracle: null,
+    price: null,
+    chart: null,
     content: null,
     lob: null,
   };
@@ -1094,35 +1112,97 @@ export function App() {
     const listMarket = markets.find((market) => market.id === currentMarketId)
       || bootstrapRef.current?.activeMarketsPreview?.find((market) => market.id === currentMarketId)
       || null;
-    if (cachedBundle) {
-      setBundle(cachedBundle);
-    } else if (listMarket) {
-      setBundle(optimisticBundleFromMarket(listMarket));
+    const initialBundle = cachedBundle || (listMarket ? optimisticBundleFromMarket(listMarket) : emptyWorkspaceBundle());
+    setBundle(initialBundle);
+    if (!cachedBundle) {
+      bundleCacheRef.current.set(currentMarketId, initialBundle);
     }
 
-    async function loadBundle() {
+    function applyBundlePatch(patch: Partial<WorkspaceBundle>) {
+      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      setBundle((previous) => {
+        const next = {
+          ...emptyWorkspaceBundle(),
+          ...(previous || bundleCacheRef.current.get(currentMarketId) || emptyWorkspaceBundle()),
+          ...patch,
+        };
+        bundleCacheRef.current.set(currentMarketId, next);
+        return next;
+      });
+    }
+
+    function loadBundleProgressively() {
       setBundleLoading(true);
-      try {
-        const payload = await fetchWorkspaceBundle(currentMarketId);
-        bundleCacheRef.current.set(currentMarketId, payload);
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq) setBundle(payload);
-      } catch (loadError) {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load market bundle.');
+      let pendingPrimary = 4;
+      const markPrimaryDone = () => {
+        pendingPrimary -= 1;
+        if (pendingPrimary <= 0 && !cancelled && bundleRequestSeqRef.current === requestSeq) {
+          setBundleLoading(false);
         }
-      } finally {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq) setBundleLoading(false);
-      }
+      };
+
+      fetchMarketSummary(currentMarketId)
+        .then((market) => applyBundlePatch({ market }))
+        .catch((loadError) => {
+          if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket) {
+            setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
+          }
+        })
+        .finally(markPrimaryDone);
+
+      fetchMarketPrice(currentMarketId)
+        .then((price) => applyBundlePatch({ price }))
+        .catch(() => undefined)
+        .finally(markPrimaryDone);
+
+      fetchMarketChart(currentMarketId)
+        .then((chart) => applyBundlePatch({ chart }))
+        .catch(() => undefined)
+        .finally(markPrimaryDone);
+
+      fetchMarketLob(currentMarketId)
+        .then((lob) => applyBundlePatch({ lob }))
+        .catch(() => undefined)
+        .finally(markPrimaryDone);
+
+      fetchMarketTrades(currentMarketId)
+        .then((trades) => applyBundlePatch({ trades }))
+        .catch(() => undefined);
+
+      fetchMarketOracle(currentMarketId)
+        .then((oracle) => applyBundlePatch({ oracle }))
+        .catch(() => undefined);
+
+      fetchMarketContent(currentMarketId)
+        .then((content) => applyBundlePatch({ content }))
+        .catch(() => undefined);
     }
 
-    void loadBundle();
+    function refreshSecondaryBundleData() {
+      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      fetchMarketPrice(currentMarketId).then((price) => applyBundlePatch({ price })).catch(() => undefined);
+      fetchMarketChart(currentMarketId).then((chart) => applyBundlePatch({ chart })).catch(() => undefined);
+      fetchMarketLob(currentMarketId).then((lob) => applyBundlePatch({ lob })).catch(() => undefined);
+      fetchMarketTrades(currentMarketId).then((trades) => applyBundlePatch({ trades })).catch(() => undefined);
+      fetchMarketOracle(currentMarketId).then((oracle) => applyBundlePatch({ oracle })).catch(() => undefined);
+      fetchMarketContent(currentMarketId).then((content) => applyBundlePatch({ content })).catch(() => undefined);
+    }
+
+    loadBundleProgressively();
     const timer = window.setInterval(() => {
-      void loadBundle();
+      refreshSecondaryBundleData();
     }, 20000);
+
+    const loadingTimer = window.setTimeout(() => {
+      if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
+        setBundleLoading(false);
+      }
+    }, 5500);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.clearTimeout(loadingTimer);
     };
   }, [selectedMarketId]);
 

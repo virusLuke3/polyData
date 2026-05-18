@@ -273,14 +273,42 @@ export function fetchRuntimeSuspicious(limit = 12) {
   return apiGet<RuntimeSignalPayload>(`/runtime/trades/suspicious?limit=${limit}`);
 }
 
+export function fetchMarketSummary(marketId: number, timeoutMs = 3500) {
+  return apiGetWithTimeout<MarketSummary>(`/markets/${marketId}`, timeoutMs);
+}
+
+export function fetchMarketPrice(marketId: number, timeoutMs = 5000) {
+  return apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, timeoutMs);
+}
+
+export function fetchMarketChart(marketId: number, timeoutMs = 5000) {
+  return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, timeoutMs);
+}
+
+export function fetchMarketTrades(marketId: number, limit = 24, timeoutMs = 4000) {
+  return apiGetWithTimeout<TradeRow[]>(`/markets/${marketId}/trades?limit=${limit}`, timeoutMs);
+}
+
+export function fetchMarketOracle(marketId: number, timeoutMs = 2200) {
+  return apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, timeoutMs);
+}
+
+export function fetchMarketContent(marketId: number, limit = 6, timeoutMs = 2200) {
+  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}`, timeoutMs);
+}
+
+export function fetchMarketLob(marketId: number, timeoutMs = 4000) {
+  return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs);
+}
+
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
-  const marketPromise = apiGetWithTimeout<MarketSummary>(`/markets/${marketId}`, 3500);
-  const pricePromise = apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, 5000);
-  const chartPromise = apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, 5000);
-  const tradesPromise = apiGetWithTimeout<TradeRow[]>(`/markets/${marketId}/trades?limit=24`, 4000);
-  const oraclePromise = apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, 2200);
-  const contentPromise = apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=6`, 2200);
-  const lobPromise = apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, 4000);
+  const marketPromise = fetchMarketSummary(marketId);
+  const pricePromise = fetchMarketPrice(marketId);
+  const chartPromise = fetchMarketChart(marketId);
+  const tradesPromise = fetchMarketTrades(marketId);
+  const oraclePromise = fetchMarketOracle(marketId);
+  const contentPromise = fetchMarketContent(marketId);
+  const lobPromise = fetchMarketLob(marketId);
 
   const [
     marketResult,
