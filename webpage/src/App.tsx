@@ -962,23 +962,30 @@ export function App() {
 
         const defaultPanelIds = sanitizePanelIds(bootstrapPayload.defaultWorkspace?.panels || []);
         const immediatePanelIds = activePanelIds.length ? sanitizePanelIds([...activePanelIds, ...defaultPanelIds]) : defaultPanelIds;
-        const initialDefaultMarketId = pickDefaultMarketId(
+        const bootstrapMarketGroups = bootstrapPayload.activeMarketGroupsPreview || [];
+        const initialDefaultGroup = pickDefaultMarketGroup(bootstrapMarketGroups);
+        const initialDefaultMarketId = initialDefaultGroup ? null : pickDefaultMarketId(
           bootstrapPayload.activeMarketsPreview || [],
           bootstrapPayload.featuredMarket,
         );
 
         setBootstrap(bootstrapPayload);
         setMarkets(bootstrapPayload.activeMarketsPreview || []);
+        setMarketGroups(bootstrapMarketGroups);
         setHealth(bootstrapPayload.systemHealth || null);
         setGlobalTrades(bootstrapPayload.globalTradesPreview || []);
         setGlobalOracle(bootstrapPayload.globalOraclePreview || []);
         setLatestContent(bootstrapPayload.latestContentPreview || []);
         setRuntimeData((current) => mergeRuntimeData(current, bootstrapPayload.commoditiesPreview ? { 'commodities-watch': bootstrapPayload.commoditiesPreview } : {}));
-        selectedMarketGroupIdRef.current = null;
         selectedMarketIdRef.current = initialDefaultMarketId;
-        setSelectedMarketGroupId(null);
-        setSelectedMarketGroupOutcomeKey(null);
-        setSelectedMarketId(initialDefaultMarketId);
+        if (initialDefaultGroup) {
+          focusMarketGroup(initialDefaultGroup, initialDefaultGroup.defaultOutcomeKey || null, initialDefaultGroup.defaultMarketId ?? null);
+        } else {
+          selectedMarketGroupIdRef.current = null;
+          setSelectedMarketGroupId(null);
+          setSelectedMarketGroupOutcomeKey(null);
+          setSelectedMarketId(initialDefaultMarketId);
+        }
         setActivePanelIds((current) => (
           current.length
             ? sanitizePanelIds([...current, ...defaultPanelIds])

@@ -28,6 +28,7 @@ export type BootstrapPayload = {
   };
   featuredMarket: MarketSummary | null;
   activeMarketsPreview: MarketListItem[];
+  activeMarketGroupsPreview?: MarketGroupItem[];
   globalTradesPreview: TradeRow[];
   globalOraclePreview: OracleEvent[];
   latestContentPreview: ContentItem[];

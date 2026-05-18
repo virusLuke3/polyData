@@ -9,7 +9,7 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v11"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v12"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -573,6 +573,16 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     )
     preview_rows = preview_payload.get("rows", [])
     active_markets_preview = preview_payload.get("items", [])
+    try:
+        active_market_groups_preview = ctx["get_market_groups_payload"](
+            query="",
+            page=1,
+            page_size=20,
+            sort="active",
+        ).get("items", [])
+    except Exception:
+        ctx["app"].logger.exception("bootstrap active market groups preview failed")
+        active_market_groups_preview = []
     featured_market_id = _select_featured_market_id(preview_rows)
     if featured_market_id is None:
         featured_market_id = _get_fallback_featured_market_id(ctx)
@@ -645,6 +655,7 @@ def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
         },
         "featuredMarket": featured_market,
         "activeMarketsPreview": active_markets_preview,
+        "activeMarketGroupsPreview": active_market_groups_preview,
         "globalTradesPreview": global_trades_preview,
         "globalOraclePreview": global_oracle_preview,
         "latestContentPreview": latest_content_preview,
@@ -737,6 +748,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
             lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
             ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
+        ("market-groups:active:80", 15, lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
         ("whales", 30, lambda: ctx["get_whale_trades_snapshot"](limit=14)),
         ("suspicious", 30, lambda: ctx["get_suspicious_trades_snapshot"](limit=12)),
         ("alpha", 45, lambda: ctx["get_alpha_signal_snapshot"](limit=8)),
@@ -762,6 +774,7 @@ def prewarm_critical_payloads(ctx: dict) -> None:
             lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities"),
             ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
+        ("market-groups:active:80", lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
         ("bootstrap", ctx["get_bootstrap_payload_cached"]),
     ]
     for name, builder in tasks:
