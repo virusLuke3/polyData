@@ -117,6 +117,32 @@ function groupAccent(group: MarketGroupItem) {
   return '#22c55e';
 }
 
+function diversifyByTopic<T>(items: T[], topicOf: (item: T) => string) {
+  const buckets = new Map<string, T[]>();
+  items.forEach((item) => {
+    const topic = topicOf(item) || 'market';
+    const bucket = buckets.get(topic) || [];
+    bucket.push(item);
+    buckets.set(topic, bucket);
+  });
+  const topics = Array.from(buckets.keys()).sort((a, b) => {
+    const sizeDelta = (buckets.get(b)?.length || 0) - (buckets.get(a)?.length || 0);
+    return sizeDelta || a.localeCompare(b);
+  });
+  const diversified: T[] = [];
+  while (diversified.length < items.length && topics.length) {
+    for (const topic of topics) {
+      const next = buckets.get(topic)?.shift();
+      if (next) diversified.push(next);
+    }
+    for (let index = topics.length - 1; index >= 0; index -= 1) {
+      const topic = topics[index];
+      if (!topic || !(buckets.get(topic) || []).length) topics.splice(index, 1);
+    }
+  }
+  return diversified;
+}
+
 function defaultGroupMarketId(group: MarketGroupItem) {
   if (group.defaultMarketId) return group.defaultMarketId;
   const topWithMarket = (group.topOutcomes || []).find((outcome) => outcome.marketId);
@@ -276,7 +302,7 @@ function ActiveMarketsPanel({
     if (marketGroupSort === 'volume') {
       return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
     }
-    return filtered;
+    return query ? filtered : diversifyByTopic(filtered, groupTopic);
   }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {
@@ -296,7 +322,8 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : markets.filter((market) => !isDefaultSuppressedMarket(market));
-    return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
+    const ranked = filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
+    return query ? ranked : diversifyByTopic(ranked, marketTopic);
   }, [markets, search]);
 
   const hasGroups = marketGroups.length > 0;
