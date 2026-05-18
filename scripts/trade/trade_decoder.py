@@ -16,7 +16,7 @@ import json
 import sys
 import argparse
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, Tuple
 from decimal import Decimal, ROUND_DOWN
 
 try:
@@ -36,12 +36,15 @@ from data_sources import POLYGON_RPC_URL
 # Polymarket 交易所合约地址
 CTF_EXCHANGE_ADDRESS = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"  # 普通二元市场 (CTF Exchange)
 NEG_RISK_EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"  # 负风险市场 (NegRisk CTF Exchange)
+POLYMARKET_EXCHANGE_2026_ADDRESS = "0xE111180000d2663C0091e4f400237545B87B996B"  # 2026 新撮合合约
+POLYMARKET_EXCHANGE_2026_ALT_ADDRESS = "0xe2222d279d744050d28e00520010520000310F59"  # 2026 新撮合合约（体育/新路由）
 
 # OrderFilled 事件签名
 # 事件签名: OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)
 # 计算方式: keccak256("OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)")
 # 注意：这里使用完整的事件签名字符串，Web3会自动计算哈希
 ORDER_FILLED_EVENT_SIGNATURE = "OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)"
+ORDER_FILLED_2026_EVENT_SIGNATURE = "OrderFilled(bytes32,address,address,uint8,uint256,uint256,uint256,uint256,bytes32,bytes32)"
 
 ORDER_FILLED_EVENT_ABI = {
     "anonymous": False,
@@ -59,12 +62,64 @@ ORDER_FILLED_EVENT_ABI = {
     "type": "event",
 }
 
+ORDER_FILLED_2026_EVENT_ABI = {
+    "anonymous": False,
+    "inputs": [
+        {"indexed": True, "name": "orderHash", "type": "bytes32"},
+        {"indexed": True, "name": "maker", "type": "address"},
+        {"indexed": True, "name": "taker", "type": "address"},
+        {"indexed": False, "name": "side", "type": "uint8"},
+        {"indexed": False, "name": "assetId", "type": "uint256"},
+        {"indexed": False, "name": "amount0", "type": "uint256"},
+        {"indexed": False, "name": "amount1", "type": "uint256"},
+        {"indexed": False, "name": "fee", "type": "uint256"},
+        {"indexed": False, "name": "makerOrderHash", "type": "bytes32"},
+        {"indexed": False, "name": "takerOrderHash", "type": "bytes32"},
+    ],
+    "name": "OrderFilled",
+    "type": "event",
+}
+
 # USDC 精度（6位小数）
 USDC_DECIMALS = 6
 USDC_DIVISOR = 10 ** USDC_DECIMALS
 
 # 资产ID为0表示USDC
 COLLATERAL_ASSET_ID = "0"
+ZERO_ASSET_ID = "0"
+
+
+def _hex_bytes(value: Any) -> str:
+    if hasattr(value, "hex"):
+        return value.hex()
+    return str(value)
+
+
+def _topic_hex(value: Any) -> str:
+    text = _hex_bytes(value)
+    return text if text.startswith("0x") else "0x" + text
+
+
+def _topic_address(value: Any) -> str:
+    raw = bytes(value) if not isinstance(value, str) else bytes.fromhex(value[2:] if value.startswith("0x") else value)
+    return "0x" + raw[-20:].hex()
+
+
+def _log_data_words(value: Any) -> List[bytes]:
+    if isinstance(value, str):
+        body = value[2:] if value.startswith("0x") else value
+        raw = bytes.fromhex(body)
+    else:
+        raw = bytes(value)
+    return [raw[i : i + 32] for i in range(0, len(raw), 32)]
+
+
+def _word_int(word: bytes) -> int:
+    return int.from_bytes(word, byteorder="big", signed=False)
+
+
+def _word_hex(word: bytes) -> str:
+    return "0x" + word.hex()
 
 
 def is_collateral_asset(asset_id: str) -> bool:
@@ -75,6 +130,46 @@ def is_collateral_asset(asset_id: str) -> bool:
 def get_order_filled_event_decoder(w3: Web3) -> Any:
     """复用 event decoder，避免每条日志都重复构造 ABI 对象。"""
     return w3.eth.contract(abi=[ORDER_FILLED_EVENT_ABI]).events.OrderFilled()
+
+
+def get_order_filled_2026_event_decoder(w3: Web3) -> Any:
+    """2026 新撮合合约 OrderFilled decoder。"""
+    return w3.eth.contract(abi=[ORDER_FILLED_2026_EVENT_ABI]).events.OrderFilled()
+
+
+def get_order_filled_event_decoders(w3: Web3) -> Dict[str, Any]:
+    """返回按版本命名的 OrderFilled decoder。"""
+    return {
+        "legacy": get_order_filled_event_decoder(w3),
+        "v2026": get_order_filled_2026_event_decoder(w3),
+    }
+
+
+def get_order_filled_topics(w3: Web3) -> Tuple[bytes, bytes]:
+    return (
+        w3.keccak(text=ORDER_FILLED_EVENT_SIGNATURE),
+        w3.keccak(text=ORDER_FILLED_2026_EVENT_SIGNATURE),
+    )
+
+
+def is_supported_order_filled_log(log: Dict, w3: Web3) -> bool:
+    """判断日志是否是当前支持的 Polymarket OrderFilled 事件。"""
+    if not log.get("topics"):
+        return False
+    legacy_topic, topic_2026 = get_order_filled_topics(w3)
+    topic0 = log["topics"][0]
+    address = str(log.get("address") or "").lower()
+    if topic0 == legacy_topic:
+        return address in {
+            CTF_EXCHANGE_ADDRESS.lower(),
+            NEG_RISK_EXCHANGE_ADDRESS.lower(),
+        }
+    if topic0 == topic_2026:
+        return address in {
+            POLYMARKET_EXCHANGE_2026_ADDRESS.lower(),
+            POLYMARKET_EXCHANGE_2026_ALT_ADDRESS.lower(),
+        }
+    return False
 
 
 def decode_order_filled_log(
@@ -96,13 +191,36 @@ def decode_order_filled_log(
         if event_decoder is None:
             if w3 is None:
                 raise ValueError("decode_order_filled_log requires either w3 or event_decoder")
-            event_decoder = get_order_filled_event_decoder(w3)
+            event_decoder = get_order_filled_event_decoders(w3)
+
+        if isinstance(event_decoder, dict):
+            if w3 is not None:
+                legacy_topic, topic_2026 = get_order_filled_topics(w3)
+                topic0 = log["topics"][0] if log.get("topics") else None
+                decoder_key = "v2026" if topic0 == topic_2026 else "legacy"
+            else:
+                log_address = str(log.get("address") or "").lower()
+                decoder_key = (
+                    "v2026"
+                    if log_address
+                    in {
+                        POLYMARKET_EXCHANGE_2026_ADDRESS.lower(),
+                        POLYMARKET_EXCHANGE_2026_ALT_ADDRESS.lower(),
+                    }
+                    else "legacy"
+                )
+            selected_decoder = event_decoder[decoder_key]
+        else:
+            selected_decoder = event_decoder
 
         # 解码日志
-        decoded = event_decoder.process_log(log)
+        decoded = selected_decoder.process_log(log)
         
         # 提取事件参数
         args = decoded['args']
+
+        if "assetId" in args:
+            return _decode_order_filled_2026(log, args)
         
         maker_asset_id = str(args['makerAssetId'])
         taker_asset_id = str(args['takerAssetId'])
@@ -143,7 +261,7 @@ def decode_order_filled_log(
             "logIndex": log['logIndex'],
             "exchange": log['address'],
             "contract": log['address'],
-            "orderHash": decoded['args']['orderHash'].hex() if hasattr(decoded['args']['orderHash'], 'hex') else str(decoded['args']['orderHash']),
+            "orderHash": _hex_bytes(decoded['args']['orderHash']),
             "maker": args['maker'],
             "taker": args['taker'],
             "makerAssetId": maker_asset_id,
@@ -161,6 +279,209 @@ def decode_order_filled_log(
     except Exception as e:
         print(f"Error decoding log: {e}", file=sys.stderr)
         return None
+
+
+def fast_decode_order_filled_log(log: Dict, w3: Web3) -> Optional[Dict]:
+    """Fast path for supported OrderFilled logs.
+
+    Web3's generic ABI event decoder is convenient but expensive when
+    backfilling hundreds of thousands of logs per window. These events only
+    contain static ABI types, so direct 32-byte word parsing is enough.
+    """
+
+    try:
+        topics = list(log.get("topics") or [])
+        if len(topics) < 4:
+            return None
+        legacy_topic, topic_2026 = get_order_filled_topics(w3)
+        topic0 = topics[0]
+        is_2026 = topic0 == topic_2026
+        if topic0 != legacy_topic and not is_2026:
+            return None
+
+        words = _log_data_words(log.get("data") or b"")
+        tx_hash = _hex_bytes(log["transactionHash"])
+        order_hash = _topic_hex(topics[1])
+        maker = _topic_address(topics[2])
+        taker = _topic_address(topics[3])
+
+        if is_2026:
+            if len(words) < 7:
+                return None
+            side_code = _word_int(words[0])
+            asset_id = str(_word_int(words[1]))
+            amount0 = _word_int(words[2])
+            amount1 = _word_int(words[3])
+            fee = _word_int(words[4])
+            maker_order_hash = _word_hex(words[5])
+            taker_order_hash = _word_hex(words[6])
+
+            if side_code == 0:
+                side = "BUY"
+                maker_asset_id = ZERO_ASSET_ID
+                taker_asset_id = asset_id
+                maker_amount = amount0
+                taker_amount = amount1
+                usdc_amount = amount0
+                token_amount = amount1
+            elif side_code == 1:
+                side = "SELL"
+                maker_asset_id = asset_id
+                taker_asset_id = ZERO_ASSET_ID
+                maker_amount = amount0
+                taker_amount = amount1
+                token_amount = amount0
+                usdc_amount = amount1
+            else:
+                side = "UNKNOWN"
+                maker_asset_id = asset_id
+                taker_asset_id = ZERO_ASSET_ID
+                maker_amount = amount0
+                taker_amount = amount1
+                token_amount = amount0
+                usdc_amount = amount1
+
+            price = (
+                (Decimal(usdc_amount) / Decimal(token_amount)).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
+                if token_amount > 0
+                else Decimal("0")
+            )
+            return {
+                "txHash": tx_hash,
+                "logIndex": log["logIndex"],
+                "exchange": log["address"],
+                "contract": log["address"],
+                "orderHash": order_hash,
+                "maker": maker,
+                "taker": taker,
+                "makerAssetId": maker_asset_id,
+                "takerAssetId": taker_asset_id,
+                "makerAmountFilled": str(maker_amount),
+                "takerAmountFilled": str(taker_amount),
+                "fee": str(fee),
+                "price": str(price),
+                "tokenId": asset_id,
+                "side": side,
+                "makerOrderHash": maker_order_hash,
+                "takerOrderHash": taker_order_hash,
+                "eventVersion": "v2026",
+            }
+
+        if len(words) < 5:
+            return None
+        maker_asset_id = str(_word_int(words[0]))
+        taker_asset_id = str(_word_int(words[1]))
+        maker_amount = _word_int(words[2])
+        taker_amount = _word_int(words[3])
+        fee = _word_int(words[4])
+
+        if is_collateral_asset(maker_asset_id):
+            token_id = taker_asset_id
+            usdc_amount = maker_amount
+            token_amount = taker_amount
+            side = "BUY"
+        elif is_collateral_asset(taker_asset_id):
+            token_id = maker_asset_id
+            usdc_amount = taker_amount
+            token_amount = maker_amount
+            side = "SELL"
+        else:
+            token_id = taker_asset_id
+            usdc_amount = maker_amount
+            token_amount = taker_amount
+            side = "BUY"
+
+        price = (
+            (Decimal(usdc_amount) / Decimal(token_amount)).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
+            if token_amount > 0
+            else Decimal("0")
+        )
+        return {
+            "txHash": tx_hash,
+            "logIndex": log["logIndex"],
+            "exchange": log["address"],
+            "contract": log["address"],
+            "orderHash": order_hash,
+            "maker": maker,
+            "taker": taker,
+            "makerAssetId": maker_asset_id,
+            "takerAssetId": taker_asset_id,
+            "makerAmountFilled": str(maker_amount),
+            "takerAmountFilled": str(taker_amount),
+            "fee": str(fee),
+            "price": str(price),
+            "tokenId": token_id,
+            "side": side,
+        }
+    except Exception as exc:
+        print(f"Error fast decoding log: {exc}", file=sys.stderr)
+        return None
+
+
+def _decode_order_filled_2026(log: Dict, args: Any) -> Dict:
+    """解码 2026 新撮合合约 OrderFilled。
+
+    新事件的 `side` 是 maker 视角：
+    - 0: maker 用 USDC 买入 outcome token
+    - 1: maker 卖出 outcome token 换 USDC
+    """
+    side_code = int(args["side"])
+    asset_id = str(args["assetId"])
+    amount0 = int(args["amount0"])
+    amount1 = int(args["amount1"])
+    fee = int(args["fee"])
+
+    if side_code == 0:
+        side = "BUY"
+        maker_asset_id = ZERO_ASSET_ID
+        taker_asset_id = asset_id
+        maker_amount = amount0
+        taker_amount = amount1
+        usdc_amount = amount0
+        token_amount = amount1
+    elif side_code == 1:
+        side = "SELL"
+        maker_asset_id = asset_id
+        taker_asset_id = ZERO_ASSET_ID
+        maker_amount = amount0
+        taker_amount = amount1
+        token_amount = amount0
+        usdc_amount = amount1
+    else:
+        side = "UNKNOWN"
+        maker_asset_id = asset_id
+        taker_asset_id = ZERO_ASSET_ID
+        maker_amount = amount0
+        taker_amount = amount1
+        token_amount = amount0
+        usdc_amount = amount1
+
+    if token_amount > 0:
+        price = Decimal(usdc_amount) / Decimal(token_amount)
+        price = price.quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
+    else:
+        price = Decimal("0")
+
+    return {
+        "txHash": log["transactionHash"].hex(),
+        "logIndex": log["logIndex"],
+        "exchange": log["address"],
+        "contract": log["address"],
+        "orderHash": _hex_bytes(args["orderHash"]),
+        "maker": args["maker"],
+        "taker": args["taker"],
+        "makerAssetId": maker_asset_id,
+        "takerAssetId": taker_asset_id,
+        "makerAmountFilled": str(maker_amount),
+        "takerAmountFilled": str(taker_amount),
+        "fee": str(fee),
+        "price": str(price),
+        "tokenId": asset_id,
+        "side": side,
+        "makerOrderHash": _hex_bytes(args["makerOrderHash"]),
+        "takerOrderHash": _hex_bytes(args["takerOrderHash"]),
+        "eventVersion": "v2026",
+    }
 
 
 def decode_transaction(tx_hash: str, rpc_url: str = POLYGON_RPC_URL) -> List[Dict]:
@@ -186,31 +507,35 @@ def decode_transaction(tx_hash: str, rpc_url: str = POLYGON_RPC_URL) -> List[Dic
     except TransactionNotFound:
         raise ValueError(f"Transaction not found: {tx_hash}")
     
-    # 计算 OrderFilled 事件的 topic[0] (事件签名的 keccak256 哈希)
-    order_filled_topic = w3.keccak(text=ORDER_FILLED_EVENT_SIGNATURE)
+    legacy_topic, topic_2026 = get_order_filled_topics(w3)
     
     # 过滤 OrderFilled 事件
     order_filled_logs = []
     
     # 构建交易所地址列表（用于过滤）
-    exchange_addresses = [
+    legacy_exchange_addresses = [
         CTF_EXCHANGE_ADDRESS.lower(),
         NEG_RISK_EXCHANGE_ADDRESS.lower()
     ]
     
     for log in receipt['logs']:
-        # 检查是否是 OrderFilled 事件（通过 topic[0] 匹配）
-        if len(log['topics']) > 0 and log['topics'][0] == order_filled_topic:
-            # 检查是否来自 Polymarket 交易所合约
-            log_address = log['address'].lower()
-            if log_address in exchange_addresses:
-                order_filled_logs.append(log)
+        if len(log['topics']) <= 0:
+            continue
+        log_address = log['address'].lower()
+        topic0 = log['topics'][0]
+        if topic0 == legacy_topic and log_address in legacy_exchange_addresses:
+            order_filled_logs.append(log)
+        elif topic0 == topic_2026 and log_address in {
+            POLYMARKET_EXCHANGE_2026_ADDRESS.lower(),
+            POLYMARKET_EXCHANGE_2026_ALT_ADDRESS.lower(),
+        }:
+            order_filled_logs.append(log)
     
     # 解码所有 OrderFilled 日志
-    event_decoder = get_order_filled_event_decoder(w3)
+    event_decoder = get_order_filled_event_decoders(w3)
     decoded_trades = []
     for log in order_filled_logs:
-        decoded = decode_order_filled_log(log, event_decoder=event_decoder)
+        decoded = decode_order_filled_log(log, w3=w3, event_decoder=event_decoder)
         if decoded:
             decoded_trades.append(decoded)
     

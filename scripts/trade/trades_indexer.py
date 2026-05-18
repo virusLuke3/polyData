@@ -58,9 +58,17 @@ from db.trade_v2 import (
 from market.market_discovery import fetch_and_upsert_markets_for_token_ids
 from trade.trade_decoder import (
     decode_order_filled_log,
-    get_order_filled_event_decoder,
+    get_order_filled_event_decoders,
+    get_order_filled_topics,
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_EXCHANGE_ADDRESS,
+    POLYMARKET_EXCHANGE_2026_ADDRESS,
+    POLYMARKET_EXCHANGE_2026_ALT_ADDRESS,
+)
+from trade.orderfilled_raw import (
+    ensure_orderfilled_raw_schema,
+    insert_orderfilled_raw_batch,
+    orderfilled_raw_row,
 )
 from config import get_rpc_url
 
@@ -258,8 +266,11 @@ def _should_split_range(exc: Exception, from_block: int, to_block: int) -> bool:
 
 
 def get_order_filled_topic(w3: Web3) -> bytes:
-    sig = "OrderFilled(bytes32,address,address,uint256,uint256,uint256,uint256,uint256)"
-    return w3.keccak(text=sig)
+    return get_order_filled_topics(w3)[0]
+
+
+def get_order_filled_topic_filter(w3: Web3) -> List[bytes]:
+    return list(get_order_filled_topics(w3))
 
 
 def fetch_logs_with_retry(
@@ -271,6 +282,8 @@ def fetch_logs_with_retry(
     addresses = [
         Web3.to_checksum_address(CTF_EXCHANGE_ADDRESS),
         Web3.to_checksum_address(NEG_RISK_EXCHANGE_ADDRESS),
+        Web3.to_checksum_address(POLYMARKET_EXCHANGE_2026_ADDRESS),
+        Web3.to_checksum_address(POLYMARKET_EXCHANGE_2026_ALT_ADDRESS),
     ]
     recovery_attempt = 0
 
@@ -280,11 +293,11 @@ def fetch_logs_with_retry(
         for attempt in range(MAX_RETRIES):
             try:
                 w3 = _get_thread_local_web3(rpc_url)
-                topic = get_order_filled_topic(w3)
+                topics = get_order_filled_topic_filter(w3)
                 logs = w3.eth.get_logs(
                     {
                         "address": addresses,
-                        "topics": [topic],
+                        "topics": [topics],
                         "fromBlock": from_block,
                         "toBlock": to_block,
                     }
@@ -688,7 +701,7 @@ def resolve_market_by_token_id(
 
 def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: Dict[int, str]) -> Optional[Dict]:
     """解码日志并补充 block_number、timestamp、size"""
-    decoded = decode_order_filled_log(log, event_decoder=event_decoder)
+    decoded = decode_order_filled_log(log, w3=w3, event_decoder=event_decoder)
     if not decoded:
         return None
     
@@ -839,12 +852,15 @@ def run_indexer(
     init_schema(db_path=db_path)
 
     w3 = _build_web3(rpc_url)
-    event_decoder = get_order_filled_event_decoder(w3)
+    event_decoder = get_order_filled_event_decoders(w3)
 
     conn = get_connection(db_path)
     if not test_mode and get_trade_write_mode() == "v2":
         ensure_trade_v2_schema(conn)
+    if not test_mode:
+        ensure_orderfilled_raw_schema(conn)
     inserted = 0
+    raw_inserted = 0
     processed = 0
     unknown_tokens = set()
     backfill_attempted = set()
@@ -881,17 +897,14 @@ def run_indexer(
                 max_workers=max_workers,
             )
 
+            existing_trade_keys = set()
             if logs and not test_mode:
                 existing_trade_keys = prefetch_existing_trade_keys(conn, window_start, window_end)
                 if existing_trade_keys:
-                    original_count = len(logs)
-                    logs = [log for log in logs if build_trade_key_from_log(log) not in existing_trade_keys]
-                    skipped_existing = original_count - len(logs)
-                    if skipped_existing:
-                        print(
-                            f"  ... 预过滤已存在交易 {skipped_existing} 条，剩余待处理 {len(logs)} 条...",
-                            file=sys.stderr,
-                        )
+                    print(
+                        f"  ... 当前窗口命中已存在交易键 {len(existing_trade_keys)} 条；raw 表仍会全量落库，交易聚合表跳过重复写...",
+                        file=sys.stderr,
+                    )
 
             if logs:
                 prefetch_block_timestamps(conn, rpc_url, logs, block_ts_cache, max_workers=max_workers)
@@ -905,17 +918,41 @@ def run_indexer(
 
                 for log in log_chunk:
                     processed += 1
+                    skip_trade_insert = (
+                        not test_mode
+                        and bool(existing_trade_keys)
+                        and build_trade_key_from_log(log) in existing_trade_keys
+                    )
+                    if skip_trade_insert:
+                        skipped_existing += 1
                     decoded = decode_and_enrich(log, w3, event_decoder, block_ts_cache)
                     if not decoded:
                         continue
+                    if log.get("topics"):
+                        topic0 = log["topics"][0]
+                        decoded["event_topic"] = topic0.hex() if hasattr(topic0, "hex") else str(topic0)
+                    if skip_trade_insert:
+                        decoded["_skip_trade_insert"] = True
                     decoded_chunk.append(decoded)
-                    if not test_mode:
+                    if not test_mode and not skip_trade_insert:
                         token_ids_in_chunk.add(str(decoded["tokenId"]))
+
+                if not test_mode and decoded_chunk:
+                    raw_rows = [
+                        orderfilled_raw_row(
+                            {key: value for key, value in decoded.items() if not key.startswith("_")},
+                            event_topic=decoded.get("event_topic") or "",
+                        )
+                        for decoded in decoded_chunk
+                    ]
+                    raw_inserted += insert_orderfilled_raw_batch(conn, raw_rows)
 
                 if not test_mode and token_ids_in_chunk:
                     prefetch_market_cache_for_token_ids(conn, token_ids_in_chunk, market_cache)
 
                 for decoded in decoded_chunk:
+                    if decoded.get("_skip_trade_insert"):
+                        continue
                     token_id = str(decoded["tokenId"])
                     market = None
                     if not test_mode:
@@ -983,7 +1020,7 @@ def run_indexer(
                         pending_trade_rows.clear()
                     progress = (chunk_end / len(logs)) * 100 if logs else 100.0
                     print(
-                        f"  ---> 窗口处理进度: {chunk_end}/{len(logs)} ({progress:.1f}%) | inserted={inserted} | unknown_tokens={len(unknown_tokens)}",
+                        f"  ---> 窗口处理进度: {chunk_end}/{len(logs)} ({progress:.1f}%) | raw_inserted={raw_inserted} | inserted={inserted} | unknown_tokens={len(unknown_tokens)}",
                         file=sys.stderr,
                     )
                     while next_progress_mark <= chunk_end:
@@ -1002,7 +1039,7 @@ def run_indexer(
                 conn.commit()
 
             print(
-                f"Window {window_index} done: blocks {window_start}-{window_end} | logs={len(logs)} | skipped_existing={skipped_existing} | processed={processed} | inserted={inserted} | overall_blocks={overall_progress:.1f}%",
+                f"Window {window_index} done: blocks {window_start}-{window_end} | logs={len(logs)} | skipped_existing={skipped_existing} | processed={processed} | raw_inserted={raw_inserted} | inserted={inserted} | overall_blocks={overall_progress:.1f}%",
                 file=sys.stderr,
                 flush=True,
             )
