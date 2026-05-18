@@ -177,12 +177,37 @@ function complementPrice(value?: string | number | null) {
   return Math.max(0, Math.min(1, 1 - numeric));
 }
 
-function positiveValue(...values: Array<string | number | null | undefined>) {
+function firstFiniteValue(...values: Array<string | number | null | undefined>) {
   return values.find((value) => {
     if (value === null || value === undefined || value === '') return false;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && numeric > 0;
+    return Number.isFinite(Number(value));
   }) ?? null;
+}
+
+function sumFiniteValues(values: Array<string | number | null | undefined>) {
+  const finite = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (!finite.length) return null;
+  return finite.reduce((sum, value) => sum + value, 0);
+}
+
+function uniqueGroupOutcomes(outcomes: MarketGroupOutcome[]) {
+  const seen = new Set<string>();
+  return outcomes.filter((outcome, index) => {
+    const key = String(outcome.marketId ?? outcome.outcomeKey ?? outcome.gammaMarketId ?? `${outcome.label || 'outcome'}-${index}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function statusTone(status?: string | null) {
+  const normalized = String(status || '').toLowerCase();
+  if (/active|open|live|trading/.test(normalized)) return 'active';
+  if (/closed|resolved|settled|final/.test(normalized)) return 'settled';
+  if (/paused|halt|pending|standby/.test(normalized)) return 'pending';
+  return 'neutral';
 }
 
 function marketSummaryOracleHint(ctx: PanelRenderContext, endDate?: string | null) {
@@ -194,8 +219,8 @@ function marketSummaryOracleHint(ctx: PanelRenderContext, endDate?: string | nul
   if (latest?.proposedPrice !== null && latest?.proposedPrice !== undefined && latest?.proposedPrice !== '') {
     return `Oracle proposed ${formatPercent(latest.proposedPrice)}`;
   }
-  if (ctx.bundle?.oracle?.currentStatus) return ctx.bundle.oracle.currentStatus;
-  if (endDate) return `Resolves after ${formatDate(endDate)}`;
+  if (ctx.bundle?.oracle?.currentStatus) return `Oracle status: ${ctx.bundle.oracle.currentStatus}`;
+  if (endDate) return `Awaiting oracle proposal after ${formatDate(endDate)}`;
   return 'Oracle resolution pending';
 }
 
@@ -478,11 +503,15 @@ export const marketPanelRenderers: PanelRenderMap = {
       const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
       const yesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? selected?.latestYesPrice ?? price?.latestPrice ?? selected?.latestPrice;
       const noPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice ?? selected?.latestNoPrice ?? complementPrice(yesPrice);
-      const volume24h = positiveValue(selectedOutcome?.volume24h, selectedGroup?.volume24h, listMarket?.volume24h, price?.volume24h);
-      const tradeCount24h = positiveValue(selectedOutcome?.tradeCount24h, selectedGroup?.tradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
+      const groupOutcomes = selectedGroup ? uniqueGroupOutcomes([...(selectedGroup.outcomes || []), ...(selectedGroup.topOutcomes || [])]) : [];
+      const groupOutcomeVolume24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.volume24h));
+      const groupOutcomeTradeCount24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.tradeCount24h));
+      const volume24h = firstFiniteValue(selectedOutcome?.volume24h, selectedGroup?.volume24h, groupOutcomeVolume24h, listMarket?.volume24h, price?.volume24h);
+      const tradeCount24h = firstFiniteValue(selectedOutcome?.tradeCount24h, selectedGroup?.tradeCount24h, groupOutcomeTradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
       const status = selected?.status || listMarket?.status || 'market';
       const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
       const oracleHint = marketSummaryOracleHint(ctx, endDate);
+      const statusClass = statusTone(status);
       return (
         <Panel title="MARKET SUMMARY" badge={status} status="live" className="wm-market-panel wm-market-summary-panel">
           <div className="wm-market-summary">
@@ -520,7 +549,7 @@ export const marketPanelRenderers: PanelRenderMap = {
               </article>
               <article>
                 <span>STATUS</span>
-                <strong>{status}</strong>
+                <strong className={`wm-market-status-value ${statusClass}`}>{status}</strong>
               </article>
             </div>
 

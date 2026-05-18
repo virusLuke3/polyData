@@ -2582,30 +2582,36 @@ body.panel-resize-active iframe {
 }
 
 .wm-brief-card {
-  min-height: 156px;
+  min-height: 118px;
   padding: 13px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   background:
-    linear-gradient(180deg, rgba(36, 57, 120, 0.34), rgba(15, 15, 18, 0) 62%),
-    linear-gradient(135deg, rgba(130, 152, 255, 0.12), rgba(42, 255, 176, 0.04)),
-    #14161a;
-  border: 1px solid rgba(79, 99, 150, 0.36);
-  box-shadow: inset 0 0 40px rgba(84, 119, 255, 0.06);
+    linear-gradient(135deg, rgba(57, 255, 115, 0.08), rgba(126, 220, 255, 0.045) 54%, transparent 80%),
+    #141716;
+  border: 1px solid #29383d;
+  border-left: 2px solid var(--wm-green);
+  box-shadow: inset 0 0 34px rgba(57, 255, 115, 0.035);
 }
 
 .wm-brief-label {
-  color: #c9d8ff;
+  color: var(--wm-green);
+  font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: 2px;
+  text-transform: uppercase;
 }
 
 .wm-brief-title {
   color: #fafbfb;
   font-size: 14px;
   line-height: 1.28;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .wm-brief-copy {
@@ -2613,6 +2619,28 @@ body.panel-resize-active iframe {
   color: #d7dce1;
   font-size: 11px;
   line-height: 1.5;
+}
+
+.wm-brief-action-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-family: var(--font-mono);
+}
+
+.wm-brief-action-line span {
+  padding: 3px 6px;
+  border: 1px solid #2c3839;
+  background: rgba(126, 220, 255, 0.045);
+  color: #a6b2b2;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.wm-brief-action-line strong {
+  color: #f0f4f4;
 }
 
 .wm-brief-metrics {
@@ -2691,7 +2719,6 @@ body.panel-resize-active iframe {
 
 .wm-market-context-panel .wm-feature-hero {
   gap: 8px;
-  min-height: 150px;
   border-color: #29383d;
   border-left: 2px solid var(--wm-cyan);
   background:
@@ -2729,6 +2756,12 @@ body.panel-resize-active iframe {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 6;
   overflow: hidden;
+}
+
+.wm-market-context-panel .wm-feature-hero p {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
 }
 
 .wm-feature-tags {
@@ -2933,14 +2966,44 @@ body.panel-resize-active iframe {
 
 .wm-market-summary-grid strong {
   min-width: 0;
-  overflow: hidden;
   color: #edf0f0;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 900;
-  line-height: 1.16;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.wm-market-status-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid #343b3d;
+  border-radius: 999px;
+  background: #171b1b;
+  text-transform: uppercase;
+}
+
+.wm-market-status-value.active {
+  border-color: rgba(57, 255, 115, 0.28);
+  background: rgba(57, 255, 115, 0.09);
+  color: var(--wm-green);
+  box-shadow: 0 0 18px rgba(57, 255, 115, 0.1);
+}
+
+.wm-market-status-value.settled {
+  border-color: rgba(126, 220, 255, 0.28);
+  background: rgba(126, 220, 255, 0.08);
+  color: var(--wm-cyan);
+}
+
+.wm-market-status-value.pending {
+  border-color: rgba(255, 181, 79, 0.28);
+  background: rgba(255, 181, 79, 0.08);
+  color: #ffca62;
 }
 
 .wm-market-summary-oracle {

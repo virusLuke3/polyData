@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(briefPanelRenderers, {
   id: 'world-brief',
-  title: 'World Brief',
-  eyebrow: 'context',
-  description: 'Selected market narrative and context.',
+  title: 'Market Brief',
+  eyebrow: 'snapshot',
+  description: 'Selected market action summary without repeating resolution context.',
   defaultEnabled: true,
 });
