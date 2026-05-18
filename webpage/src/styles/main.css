@@ -960,12 +960,16 @@ body {
 
 .wm-focused-market-list .wm-poly-market-card {
   grid-template-columns: 1fr;
-  min-height: 92px;
-  margin-bottom: 5px;
-  padding: 8px 9px 8px 11px;
+  min-height: 114px;
+  margin-bottom: 6px;
+  padding: 9px 9px 9px 11px;
 }
 
 .wm-focused-market-list .wm-poly-market-card-main {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  row-gap: 6px;
+  align-content: start;
   padding-right: 27px;
 }
 
@@ -977,16 +981,17 @@ body {
 
 .wm-focused-market-list .wm-poly-market-meta {
   gap: 5px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   padding-right: 2px;
 }
 
 .wm-focused-market-list .wm-poly-market-title {
-  min-height: 34px;
-  margin-bottom: 7px;
+  min-height: 0;
+  margin-bottom: 0;
   padding-right: 4px;
   font-size: 12px;
-  line-height: 1.22;
+  line-height: 1.24;
+  -webkit-line-clamp: 3;
 }
 
 .wm-focused-market-list .wm-poly-market-bottom {
