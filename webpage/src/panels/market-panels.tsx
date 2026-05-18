@@ -415,38 +415,45 @@ export const marketPanelRenderers: PanelRenderMap = {
     ),
   },
   'featured-market': {
-    render: (ctx) => (
-      <Panel title="FEATURED MARKET" badge={ctx.selectedMarket?.status || 'ACTIVE'} status="live">
-        <div className="wm-feature-panel">
-          <div className="wm-feature-hero">
-            <span className="wm-feature-kicker">{ctx.selectedMarket?.category || 'market focus'}</span>
-            <strong>{ctx.selectedMarket?.title || 'No market selected.'}</strong>
-            <div className="wm-feature-foot">
-              <span>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</span>
-              <em>{ctx.selectedMarket?.endDate ? formatRelative(ctx.selectedMarket.endDate) : 'rolling'}</em>
+    render: (ctx) => {
+      const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
+      const tags = (selected?.tags || []).filter(Boolean).slice(0, 4);
+      const resolutionText = selected?.description || ctx.bundle?.chart?.referenceRule || 'Resolution context is loading for the selected market.';
+      return (
+        <Panel title="MARKET CONTEXT" badge="RULES" status="live" className="wm-market-panel wm-market-context-panel">
+          <div className="wm-feature-panel">
+            <section className="wm-feature-hero">
+              <span className="wm-feature-kicker">Resolution Context</span>
+              <p>{resolutionText}</p>
+            </section>
+
+            <div className="wm-feature-tags" aria-label="market tags">
+              <span>{selected?.category || 'market'}</span>
+              {tags.length ? tags.map((tag) => <span key={tag}>{tag}</span>) : <span>untagged</span>}
+            </div>
+
+            <div className="wm-feature-grid">
+              <article className="wm-feature-stat">
+                <span>ORACLE</span>
+                <strong>{shortHash(selected?.oracle || ctx.bundle?.oracle?.oracle || '', 8, 5)}</strong>
+              </article>
+              <article className="wm-feature-stat">
+                <span>CONDITION</span>
+                <strong>{shortHash(selected?.conditionId || '', 8, 5)}</strong>
+              </article>
+              <article className="wm-feature-stat">
+                <span>QUESTION ID</span>
+                <strong>{shortHash(selected?.questionId || ctx.bundle?.oracle?.questionId || '', 8, 5)}</strong>
+              </article>
+              <article className="wm-feature-stat">
+                <span>GAMMA ID</span>
+                <strong>{selected?.gammaMarketId || '--'}</strong>
+              </article>
             </div>
           </div>
-          <div className="wm-feature-grid">
-            <article className="wm-feature-stat">
-              <span>CATEGORY</span>
-              <strong>{ctx.selectedMarket?.category || '--'}</strong>
-            </article>
-            <article className="wm-feature-stat">
-              <span>PRICE</span>
-              <strong>{formatPercent(ctx.bundle?.price?.latestPrice || ctx.bootstrap?.pricePreview?.latestPrice)}</strong>
-            </article>
-            <article className="wm-feature-stat">
-              <span>VOLUME</span>
-              <strong>{formatCurrencyCompact(globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId)?.volume24h)}</strong>
-            </article>
-            <article className="wm-feature-stat">
-              <span>END</span>
-              <strong>{formatDate(ctx.selectedMarket?.endDate || null)}</strong>
-            </article>
-          </div>
-        </div>
-      </Panel>
-    ),
+        </Panel>
+      );
+    },
   },
   'market-summary': {
     render: (ctx) => {

@@ -3,8 +3,8 @@ import { panelFromRenderer } from '../helpers';
 
 export const panel = panelFromRenderer(marketPanelRenderers, {
   id: 'featured-market',
-  title: 'Featured Market',
+  title: 'Market Context',
   eyebrow: 'focus',
-  description: 'Primary market card with key stats.',
+  description: 'Resolution rules, tags, and oracle references for the selected market.',
   defaultEnabled: true,
 });

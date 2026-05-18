@@ -2670,6 +2670,14 @@ body.panel-resize-active iframe {
   gap: 10px;
 }
 
+.wm-market-context-panel .wm-panel-body {
+  padding: 9px;
+}
+
+.wm-market-context-panel .wm-feature-panel {
+  gap: 8px;
+}
+
 .wm-feature-hero {
   padding: 11px 12px;
   display: flex;
@@ -2681,6 +2689,16 @@ body.panel-resize-active iframe {
     #151615;
 }
 
+.wm-market-context-panel .wm-feature-hero {
+  gap: 8px;
+  min-height: 150px;
+  border-color: #29383d;
+  border-left: 2px solid var(--wm-cyan);
+  background:
+    linear-gradient(135deg, rgba(126, 220, 255, 0.1), rgba(57, 255, 115, 0.035) 48%, transparent 76%),
+    #141716;
+}
+
 .wm-feature-kicker {
   color: var(--wm-green);
   font-family: var(--font-mono);
@@ -2690,10 +2708,51 @@ body.panel-resize-active iframe {
   text-transform: uppercase;
 }
 
+.wm-market-context-panel .wm-feature-kicker {
+  color: var(--wm-cyan);
+}
+
 .wm-feature-hero strong {
   color: #f3f6f5;
   font-size: 13px;
   line-height: 1.3;
+}
+
+.wm-feature-hero p {
+  margin: 0;
+  color: #d7dddd;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1.48;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+}
+
+.wm-feature-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.wm-feature-tags span {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid #2b393d;
+  background:
+    linear-gradient(180deg, rgba(126, 220, 255, 0.05), rgba(255, 255, 255, 0)),
+    #131819;
+  color: #8bdfff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-feature-foot {
@@ -2724,6 +2783,26 @@ body.panel-resize-active iframe {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.wm-market-context-panel .wm-feature-grid {
+  gap: 7px;
+}
+
+.wm-market-context-panel .wm-feature-stat {
+  min-height: 54px;
+  padding: 7px 8px;
+}
+
+.wm-market-context-panel .wm-feature-stat strong {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wm-market-summary-panel .wm-panel-body {
