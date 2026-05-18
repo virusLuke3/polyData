@@ -9,7 +9,7 @@ from api.runtime_panels import get_default_panel_ids
 
 
 BOOTSTRAP_SNAPSHOT_NAMESPACE = "snapshot:bootstrap"
-BOOTSTRAP_CACHE_KEY = "workspace-default-v10"
+BOOTSTRAP_CACHE_KEY = "workspace-default-v11"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
     LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%hide-from-new%%'
     AND LOWER(COALESCE(CAST(m.tags AS TEXT), '')) NOT LIKE '%%recurring%%'
@@ -567,7 +567,7 @@ def _claim_prewarm_slot(task_name: str, interval_seconds: int) -> bool:
 
 def build_bootstrap_payload(ctx: dict) -> Dict[str, Any]:
     preview_payload = ctx["get_bootstrap_component_cached"](
-        "active-markets-preview-v10",
+        "active-markets-preview-v11",
         lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
         ttl_seconds=15,
     )
@@ -713,7 +713,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
-            "active-markets-preview-v10",
+            "active-markets-preview-v11",
             lambda: _build_bootstrap_active_markets_payload(ctx, page_size=20),
             ttl_seconds=15,
         )),
