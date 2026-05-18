@@ -29,16 +29,9 @@ try:
 except ImportError as exc:
     raise SystemExit("web3 is required: pip install web3") from exc
 
-try:
-    from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
-except ImportError:
-    try:
-        from web3.middleware import geth_poa_middleware  # type: ignore[no-redef]
-    except ImportError:
-        geth_poa_middleware = None  # type: ignore[assignment]
-
 from config import get_rpc_url
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_connection, init_schema
+from trade.rpc_utils import build_web3
 from trade.trade_decoder import (
     CTF_EXCHANGE_ADDRESS,
     NEG_RISK_EXCHANGE_ADDRESS,
@@ -60,15 +53,6 @@ from trade.orderfilled_raw import (
 
 USDC_DIVISOR = Decimal("1000000")
 DEFAULT_BATCH_BLOCKS = 5000
-
-
-def build_web3(rpc_url: str) -> Web3:
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    if geth_poa_middleware is not None:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-    if not w3.is_connected():
-        raise ConnectionError("Cannot connect to RPC")
-    return w3
 
 
 def iter_block_windows(from_block: int, to_block: int, batch_blocks: int):
