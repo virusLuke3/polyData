@@ -2,6 +2,7 @@ import { type ComponentChildren } from 'preact';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
+import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
@@ -203,12 +204,6 @@ function currentUtcClock(now: Date) {
   }).replace(',', '').toUpperCase() + ' UTC';
 }
 
-function weatherTempLabel(value?: string | number | null, unit?: string | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '--';
-  return `${Math.round(numeric)}°${unit || ''}`;
-}
-
 function WeatherInlineMap({
   payload,
   loading,
@@ -224,13 +219,19 @@ function WeatherInlineMap({
   onSelectCity: (cityId: string) => void;
   onRefresh: () => void;
 }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const items = payload?.items || [];
   const selected = items.find((item) => item.cityId === selectedCityId) || items[0] || null;
   const mappedCount = payload?.summary?.mappedCount ?? items.length;
   const cityCount = payload?.summary?.cityCount ?? items.length;
   const cacheMode = payload?.cacheMode || (loading ? 'loading' : 'seed');
+  const selectCity = (cityId: string) => {
+    onSelectCity(cityId);
+    setDetailOpen(true);
+  };
   return (
     <div className="wm-inline-weather-map">
+      <div className="wm-inline-weather-map-hint">Use the mouse wheel to zoom and drag to pan the map.</div>
       <button type="button" className="wm-inline-weather-map-cache" onClick={onRefresh}>
         {cacheMode}
       </button>
@@ -239,15 +240,9 @@ function WeatherInlineMap({
       </div>
       {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
       <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
-        <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={onSelectCity} height={620} />
+        <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} />
       </Suspense>
-      {selected ? (
-        <div className="wm-inline-weather-map-selected" aria-live="polite">
-          <span>{selected.city}</span>
-          <strong>{weatherTempLabel(selected.currentTemp, selected.unit)}</strong>
-          <em>{selected.condition || 'Condition pending'} / high {weatherTempLabel(selected.forecastHigh ?? selected.todayHigh, selected.unit)}</em>
-        </div>
-      ) : null}
+      {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
   );
 }
