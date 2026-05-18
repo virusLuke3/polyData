@@ -301,6 +301,14 @@ export function fetchMarketLob(marketId: number, timeoutMs = 4000) {
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs);
 }
 
+export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '', timeoutMs = 4000) {
+  const params = new URLSearchParams();
+  if (title.trim()) params.set('title', title.trim());
+  if (noTokenId.trim()) params.set('noTokenId', noTokenId.trim());
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
+}
+
 export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
   const marketPromise = fetchMarketSummary(marketId);
   const pricePromise = fetchMarketPrice(marketId);

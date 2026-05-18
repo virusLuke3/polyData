@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 
 def create_lob_blueprint(helpers: dict) -> Blueprint:
@@ -9,6 +9,16 @@ def create_lob_blueprint(helpers: dict) -> Blueprint:
     @bp.route("/runtime/lob/<int:market_id>", methods=["GET"])
     def api_runtime_lob_by_market_id(market_id: int):
         payload = helpers["get_runtime_lob_payload"](market_id)
+        status_code = int(payload.pop("_status", 200))
+        return jsonify(payload), status_code
+
+    @bp.route("/runtime/lob/token/<token_id>", methods=["GET"])
+    def api_runtime_lob_by_token(token_id: str):
+        payload = helpers["get_runtime_lob_by_token_payload"](
+            token_id,
+            no_token_id=request.args.get("noTokenId") or "",
+            market_title=request.args.get("title") or "",
+        )
         status_code = int(payload.pop("_status", 200))
         return jsonify(payload), status_code
 

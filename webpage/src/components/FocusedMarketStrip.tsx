@@ -1,11 +1,13 @@
 import { type ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { emptyState, orderfilledList } from '@/panels/shared/renderers';
 import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative, formatSignedPercent, signedClass } from '@/panels/shared/formatters';
+import { fetchMarketLobByToken } from '@/services/api';
 import type {
   ChartPayload,
   L2Level,
+  LobPayload,
   MarketGroupChartPayload,
   MarketGroupChartRange,
   MarketGroupDetail,
@@ -279,18 +281,51 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
   const ticks = buildHorizontalTicks(min, max, 4);
   const selectedSeries = series.find((entry) => entry.outcomeKey === selectedOutcomeKey) || series[0];
   const selectedLast = selectedSeries?.points?.length ? Number(selectedSeries.points[selectedSeries.points.length - 1]?.price) : null;
+  const cleanSeries = series
+    .map((entry) => ({
+      entry,
+      points: (entry.points || [])
+        .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
+        .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
+    }))
+    .filter((entry) => entry.points.length > 1);
+  const selectedClean = cleanSeries.find((entry) => entry.entry.outcomeKey === selectedSeries?.outcomeKey) || cleanSeries[0] || null;
+  const selectedPath = selectedClean
+    ? buildTimedLinePath(selectedClean.points, { width, height, left, right, top, bottom, min, max })
+    : '';
+  const selectedAreaPath = selectedPath ? buildAreaPath(selectedPath, { width, height, left, right, bottom }) : '';
+  const selectedColor = selectedSeries?.color || '#ffbc6c';
+  const selectedLabel = selectedSeries?.label || 'Selected';
+  const compactLabel = selectedLabel.length > 28 ? `${selectedLabel.slice(0, 25)}...` : selectedLabel;
+  const lastPoint = selectedClean?.points?.[selectedClean.points.length - 1] || null;
+  const lastPointX = lastPoint && selectedClean
+    ? (() => {
+        const stamped = selectedClean.points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
+        const minTs = stamped[0] ?? 0;
+        const maxTs = stamped[stamped.length - 1] ?? minTs;
+        return left + ((new Date(lastPoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * (width - left - right);
+      })()
+    : null;
 
   return (
     <div className="wm-focus-chart-shell">
       {selectedSeries && selectedLast != null && Number.isFinite(selectedLast) ? (
         <div
           className="wm-focus-chart-overlay-label current"
-          style={{ top: `${projectY(selectedLast)}px`, color: selectedSeries.color || '#ffbc6c' }}
+          style={{ top: `${projectY(selectedLast)}px`, color: selectedColor }}
         >
-          {selectedSeries.label} {formatPercent(selectedLast)}
+          <span>{compactLabel}</span>
+          <strong>{formatPercent(selectedLast)}</strong>
         </div>
       ) : null}
       <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="wm-event-selected-area" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={selectedColor} stopOpacity="0.24" />
+            <stop offset="72%" stopColor={selectedColor} stopOpacity="0.03" />
+            <stop offset="100%" stopColor={selectedColor} stopOpacity="0" />
+          </linearGradient>
+        </defs>
         {ticks.map((tick) => {
           const y = projectY(tick);
           return (
@@ -304,23 +339,29 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           const x = left + ((width - left - right) / 3) * index;
           return <line key={index} x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />;
         })}
-        {series.map((entry) => {
-          const clean = (entry.points || [])
-            .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
-            .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp));
-          if (clean.length < 2) return null;
-          const path = buildTimedLinePath(clean, { width, height, left, right, top, bottom, min, max });
+        {selectedAreaPath ? <path d={selectedAreaPath} className="wm-focus-chart-area event-selected" /> : null}
+        {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points }) => {
+          const path = buildTimedLinePath(points, { width, height, left, right, top, bottom, min, max });
           if (!path) return null;
-          const isSelected = entry.outcomeKey === selectedOutcomeKey;
           return (
             <path
               key={entry.outcomeKey || entry.label || path}
               d={path}
-              className={`wm-focus-chart-line event-series${isSelected ? ' selected' : ''}`}
-              style={{ stroke: entry.color || '#7cb6ff', opacity: isSelected ? 1 : 0.75 }}
+              className="wm-focus-chart-line event-series muted"
+              style={{ stroke: entry.color || '#7cb6ff' }}
             />
           );
         })}
+        {selectedPath ? (
+          <path
+            d={selectedPath}
+            className="wm-focus-chart-line event-series selected"
+            style={{ stroke: selectedColor }}
+          />
+        ) : null}
+        {lastPoint && lastPointX != null ? (
+          <circle cx={lastPointX} cy={projectY(lastPoint.price)} r="4" className="wm-focus-chart-endpoint" style={{ fill: selectedColor }} />
+        ) : null}
       </svg>
     </div>
   );
@@ -482,11 +523,21 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
-  const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(ctx.selectedMarketId && !detail);
+  const selectedTokenId = String(selectedOutcome?.yesTokenId || '').trim();
+  const selectedNoTokenId = String(selectedOutcome?.noTokenId || '').trim();
+  const selectedTokenKey = selectedTokenId ? `${selectedTokenId}:${selectedNoTokenId}` : '';
+  const [tokenLobState, setTokenLobState] = useState<{ key: string; lob: LobPayload | null; loading: boolean }>({
+    key: '',
+    lob: null,
+    loading: false,
+  });
+  const tokenLob = tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
+  const tokenLobLoading = tokenLobState.key === selectedTokenKey && tokenLobState.loading;
+  const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const chartPoints = chart?.points || [];
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
-  const lob = executionAvailable && bundleMatchesSelected ? ctx.bundle?.lob : null;
+  const lob = executionAvailable ? ((bundleMatchesSelected ? ctx.bundle?.lob : null) || tokenLob) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
   const [bookSide, setBookSide] = useState<BookSide>('yes');
@@ -510,6 +561,26 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
+
+  useEffect(() => {
+    if (!selectedTokenId || bundleMatchesSelected) {
+      setTokenLobState((current) => (current.loading || current.lob ? { key: '', lob: null, loading: false } : current));
+      return;
+    }
+    let cancelled = false;
+    const key = selectedTokenKey;
+    setTokenLobState({ key, lob: null, loading: true });
+    fetchMarketLobByToken(selectedTokenId, selectedOutcome?.label || detail?.title || '', selectedNoTokenId, 3500)
+      .then((lobPayload) => {
+        if (!cancelled) setTokenLobState({ key, lob: lobPayload, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setTokenLobState({ key, lob: null, loading: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bundleMatchesSelected, detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
   return (
     <section className="wm-focus-strip">
@@ -633,7 +704,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
         >
           {!executionAvailable && detail ? (
-            emptyState('Select an outcome with local sync to load the order book.')
+            emptyState('Select an outcome with CLOB token data to load the order book.')
+          ) : tokenLobLoading ? (
+            emptyState('Loading live CLOB order book.')
           ) : !lob || !activeBook ? (
             emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
           ) : (

@@ -228,9 +228,13 @@ def _label_for_market(event_title: str, market: Dict[str, Any]) -> str:
 def _market_identity(market: Dict[str, Any]) -> Tuple[str, str, str]:
     condition_id = str(market.get("conditionId") or market.get("condition_id") or "").strip().lower()
     slug = str(market.get("slug") or market.get("market_slug") or "").strip().lower()
-    token_ids = [str(item).strip() for item in _as_list(market.get("clobTokenIds") or market.get("clob_token_ids")) if str(item).strip()]
+    token_ids = _market_token_ids(market)
     yes_token_id = token_ids[0] if token_ids else ""
     return condition_id, slug, yes_token_id
+
+
+def _market_token_ids(market: Dict[str, Any]) -> List[str]:
+    return [str(item).strip() for item in _as_list(market.get("clobTokenIds") or market.get("clob_token_ids")) if str(item).strip()]
 
 
 def _chunk(values: Iterable[str], size: int = 450) -> Iterable[List[str]]:
@@ -412,6 +416,8 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
     outcomes: List[Dict[str, Any]] = []
     for market in markets:
         condition_id, slug, yes_token_id = _market_identity(market)
+        token_ids = _market_token_ids(market)
+        no_token_id = token_ids[1] if len(token_ids) > 1 else ""
         local = by_condition.get(condition_id) or by_slug.get(slug) or by_yes_token.get(yes_token_id) or {}
         gamma_yes, gamma_no = _market_prices(market)
         local_yes = _float_value(local.get("latest_yes_price"))
@@ -445,6 +451,7 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
                 "conditionId": condition_id or None,
                 "slug": slug or market.get("slug") or local.get("slug"),
                 "yesTokenId": yes_token_id or None,
+                "noTokenId": no_token_id or None,
             }
         )
 

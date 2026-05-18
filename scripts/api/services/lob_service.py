@@ -4,9 +4,13 @@ from typing import Any, Dict
 from datetime import datetime, timezone
 
 
+def _empty_book_side() -> Dict[str, Any]:
+    return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
+
+
 def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
     if not token_id:
-        return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
+        return _empty_book_side()
     session = ctx["get_clob_session"]()
     response = session.get(
         f"{ctx['CLOB_API_BASE'].rstrip('/')}/book",
@@ -14,7 +18,7 @@ def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
         timeout=min(float(ctx.get("CLOB_TIMEOUT_SECONDS") or 3), 3.0),
     )
     if response.status_code == 404:
-        return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
+        return _empty_book_side()
     response.raise_for_status()
     data = response.json() or {}
 
@@ -50,6 +54,38 @@ def _clob_book_fallback(ctx: dict, market: Dict[str, Any], yes_token_id: str, no
         "yes": _book_side_from_clob(ctx, yes_token_id),
         "no": _book_side_from_clob(ctx, no_token_id),
     }
+
+
+def get_runtime_lob_by_token_payload(
+    ctx: dict,
+    token_id: str,
+    *,
+    no_token_id: str = "",
+    market_title: str = "",
+) -> Dict[str, Any]:
+    yes_token_id = str(token_id or "").strip()
+    no_token_id = str(no_token_id or "").strip()
+    if not yes_token_id:
+        return {"error": "Missing token id", "marketId": 0, "localMarketId": None, "_status": 400}
+    try:
+        return {
+            "marketId": 0,
+            "localMarketId": None,
+            "marketTitle": str(market_title or ""),
+            "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tokenMode": True,
+            "yes": _book_side_from_clob(ctx, yes_token_id),
+            "no": _book_side_from_clob(ctx, no_token_id) if no_token_id else _empty_book_side(),
+        }
+    except Exception as exc:
+        ctx["app"].logger.exception("lob-runtime token fallback failed token_id=%s", yes_token_id)
+        return {
+            "error": "LOB token snapshot unavailable",
+            "marketId": 0,
+            "localMarketId": None,
+            "detail": str(exc),
+            "_status": 502,
+        }
 
 
 def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:

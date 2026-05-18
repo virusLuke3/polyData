@@ -1394,8 +1394,8 @@ body {
 }
 
 .wm-focus-chart-card {
-  border: 1px solid #232323;
-  background: #111111;
+  border: 1px solid #252a2d;
+  background: #0f1111;
 }
 
 .wm-focus-chart-tabs {
@@ -1447,8 +1447,8 @@ body {
   gap: 8px;
   min-width: 0;
   padding: 5px 8px;
-  border: 1px solid #252525;
-  background: #141414;
+  border: 1px solid #273037;
+  background: rgba(18, 22, 23, 0.9);
   color: #d7d7d7;
   cursor: pointer;
   font-family: var(--font-mono);
@@ -1456,8 +1456,8 @@ body {
 }
 
 .wm-focus-event-legend-item.active {
-  border-color: #315f45;
-  background: #151a16;
+  border-color: rgba(41, 214, 118, 0.45);
+  background: rgba(22, 40, 29, 0.82);
   color: #f3f3f3;
 }
 
@@ -1493,12 +1493,12 @@ body {
   width: 100%;
   height: 220px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0)),
-    #101010;
+    linear-gradient(180deg, rgba(51, 71, 78, 0.18), rgba(13, 14, 14, 0.04) 48%, rgba(13, 14, 14, 0)),
+    #0d0f0f;
 }
 
 .wm-focus-chart-grid {
-  stroke: rgba(255, 255, 255, 0.06);
+  stroke: rgba(255, 255, 255, 0.055);
   stroke-width: 1;
 }
 
@@ -1507,15 +1507,21 @@ body {
 }
 
 .wm-focus-chart-axis-text {
-  fill: #8d8d8d;
+  fill: #7e888c;
   font-family: var(--font-mono);
   font-size: 9px;
+}
+
+.wm-focus-chart-area {
+  fill: url("#wm-event-selected-area");
+  pointer-events: none;
 }
 
 .wm-focus-chart-line {
   fill: none;
   stroke-width: 2.4;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .wm-focus-chart-line.yes {
@@ -1531,19 +1537,48 @@ body {
 }
 
 .wm-focus-chart-line.event-series.selected {
-  stroke-width: 3;
+  stroke-width: 3.1;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.12));
+}
+
+.wm-focus-chart-line.event-series.muted {
+  opacity: 0.28;
+  stroke-width: 1.7;
+}
+
+.wm-focus-chart-endpoint {
+  stroke: #0b0c0c;
+  stroke-width: 2;
 }
 
 .wm-focus-chart-overlay-label {
   position: absolute;
   right: 8px;
   transform: translateY(-50%);
-  padding: 3px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(62%, 330px);
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 14, 14, 0.86);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.2;
   pointer-events: none;
   z-index: 2;
+}
+
+.wm-focus-chart-overlay-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-focus-chart-overlay-label strong {
+  flex: 0 0 auto;
+  color: #f5f5f5;
 }
 
 .wm-focus-chart-overlay-label.yes {
@@ -1557,7 +1592,6 @@ body {
 }
 
 .wm-focus-chart-overlay-label.current {
-  background: rgba(255, 154, 31, 0.18);
   color: #ffbc6c;
 }
 

@@ -1065,6 +1065,28 @@ export function App() {
   useEffect(() => {
     if (!selectedMarketGroupId) {
       setSelectedMarketGroupDetail(null);
+      return;
+    }
+    let cancelled = false;
+    const eventId = selectedMarketGroupId;
+
+    fetchMarketGroupDetail(eventId, 5500)
+      .then((detailPayload) => {
+        if (cancelled) return;
+        setSelectedMarketGroupDetail(detailPayload);
+        setSelectedMarketGroupOutcomeKey((current) => current || detailPayload.defaultOutcomeKey || null);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedMarketGroupDetail(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMarketGroupId]);
+
+  useEffect(() => {
+    if (!selectedMarketGroupId) {
       setSelectedMarketGroupChart(null);
       return;
     }
@@ -1072,33 +1094,14 @@ export function App() {
     const eventId = selectedMarketGroupId;
     const chartRange = selectedMarketGroupChartRange;
 
-    async function loadGroupContext() {
-      try {
-        const [detailResult, chartResult] = await Promise.allSettled([
-          fetchMarketGroupDetail(eventId, 9000),
-          fetchMarketGroupChart(eventId, chartRange, 9000),
-        ]);
-        if (cancelled) return;
-        if (detailResult.status === 'fulfilled') {
-          setSelectedMarketGroupDetail(detailResult.value);
-          if (!selectedMarketGroupOutcomeKey) {
-            setSelectedMarketGroupOutcomeKey(detailResult.value.defaultOutcomeKey || null);
-          }
-        }
-        if (chartResult.status === 'fulfilled') {
-          setSelectedMarketGroupChart(chartResult.value);
-        } else if (!cancelled) {
-          setSelectedMarketGroupChart(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setSelectedMarketGroupDetail(null);
-          setSelectedMarketGroupChart(null);
-        }
-      }
-    }
+    fetchMarketGroupChart(eventId, chartRange, 6500)
+      .then((chartPayload) => {
+        if (!cancelled) setSelectedMarketGroupChart(chartPayload);
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedMarketGroupChart(null);
+      });
 
-    void loadGroupContext();
     return () => {
       cancelled = true;
     };

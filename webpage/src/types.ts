@@ -65,6 +65,7 @@ export type MarketGroupOutcome = {
   conditionId?: string | null;
   slug?: string | null;
   yesTokenId?: string | null;
+  noTokenId?: string | null;
 };
 
 export type MarketGroupItem = {
@@ -281,8 +282,10 @@ export type LobSide = {
 
 export type LobPayload = {
   marketId: number;
+  localMarketId?: number | null;
   marketTitle?: string;
   fetchedAt?: string;
+  tokenMode?: boolean;
   yes?: LobSide;
   no?: LobSide;
 };
