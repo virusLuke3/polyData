@@ -1128,6 +1128,7 @@ export type PanelRenderContext = {
   setSelectedMarketId: (marketId: number | null) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
   selectedMarketGroupId: string | null;
+  selectedMarketGroup: MarketGroupItem | null;
   selectedMarketGroupOutcomeKey: string | null;
   setSelectedMarketGroupOutcomeKey: (outcomeKey: string | null) => void;
   selectedMarketGroupDetail: MarketGroupDetail | null;

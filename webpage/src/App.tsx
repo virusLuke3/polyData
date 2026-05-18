@@ -1383,6 +1383,11 @@ export function App() {
     return null;
   }, [availableMarkets, bootstrap?.featuredMarket, bundle?.market, selectedMarketGroupId, selectedMarketId]);
 
+  const selectedMarketGroup = useMemo<MarketGroupItem | null>(() => {
+    if (!selectedMarketGroupId) return null;
+    return marketGroups.find((group) => String(group.eventId ?? '') === selectedMarketGroupId) || null;
+  }, [marketGroups, selectedMarketGroupId]);
+
   const currentGlobalTrades = globalTrades.length ? globalTrades : (bootstrap?.globalTradesPreview || []);
   const currentGlobalOracle = globalOracle.length ? globalOracle : (bootstrap?.globalOraclePreview || []);
   const currentLatestContent = latestContent.length ? latestContent : (bootstrap?.latestContentPreview || []);
@@ -1422,6 +1427,7 @@ export function App() {
     setSelectedMarketId,
     focusMarketGroup,
     selectedMarketGroupId,
+    selectedMarketGroup,
     selectedMarketGroupOutcomeKey,
     setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail,

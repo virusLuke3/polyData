@@ -565,9 +565,14 @@ function renderDetailChart(chart: ChartPayload | null) {
 export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const { renderPanelSlot, ...ctx } = props;
   const focusedMarket = ctx.selectedMarket;
+  const selectedGroup = ctx.selectedMarketGroup;
   const detail = ctx.selectedMarketGroupDetail;
   const eventChart = ctx.selectedMarketGroupChart;
-  const selectedOutcome = (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey) || null;
+  const selectedOutcome = (
+    (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    || (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    || null
+  );
   const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
@@ -600,7 +605,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bidDepthTotal = bookDepthTotal(bidLevels);
   const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
   const legacyOutcomes = detail ? [] : (outcomeCards(price) as LegacyOutcomeCard[]);
-  const shouldShowOutcomeRail = detail ? (detail.outcomes || []).length > 1 : Number(marketStats?.outcomeCount || 2) > 2;
+  const shouldShowOutcomeRail = detail
+    ? (detail.outcomes || []).length > 1
+    : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
   const displayedYesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? price?.latestPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
   const displayedChange = selectedOutcome?.change24h ?? price?.change24h;
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
@@ -610,8 +617,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
   const noTradesYet = executionAvailable && trades.length === 0 && Number(displayedTrades || 0) === 0;
-  const eventCategory = detail?.category || focusedMarket?.category || marketStats?.category || 'market';
-  const outcomeCount = detail?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
+  const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
+  const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -654,9 +661,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <div className="wm-focus-kicker">
                   <span>{eventCategory}</span>
                   <i>{outcomeCount ? `${outcomeCount} outcomes` : 'event'}</i>
-                  <i>{marketTimeSubtitle(detail?.endDate || focusedMarket?.endDate || null, detail?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null)}</i>
+                  <i>{marketTimeSubtitle(
+                    detail?.endDate || selectedGroup?.endDate || focusedMarket?.endDate || null,
+                    detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
+                  )}</i>
                 </div>
-                <strong className="wm-focus-title">{detail?.title || focusedMarket?.title || 'No market selected.'}</strong>
+                <strong className="wm-focus-title">{detail?.title || selectedGroup?.title || focusedMarket?.title || 'No market selected.'}</strong>
               </div>
               <div className="wm-focus-price-hero">
                 <strong>{formatPercent(displayedYesPrice)}</strong>
