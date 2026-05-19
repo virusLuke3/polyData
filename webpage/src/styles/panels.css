@@ -900,19 +900,73 @@ body.panel-resize-active iframe {
   white-space: nowrap;
 }
 
-.commodity-head b,
-.commodity-meta span {
+.commodity-class-tag,
+.commodity-signal-tag {
   flex: 0 0 auto;
   padding: 2px 5px;
-  border: 1px solid rgba(126, 220, 255, 0.18);
-  background: rgba(126, 220, 255, 0.07);
-  color: #7edcff;
+  border: 1px solid rgba(142, 151, 146, 0.26);
+  background: rgba(142, 151, 146, 0.08);
+  color: #a5aaa6;
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 900;
   letter-spacing: 0.6px;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.commodity-class-tag.risk {
+  border-color: rgba(197, 132, 255, 0.36);
+  background: rgba(197, 132, 255, 0.1);
+  color: #caa2ff;
+}
+
+.commodity-class-tag.metals {
+  border-color: rgba(220, 184, 86, 0.4);
+  background: rgba(220, 184, 86, 0.09);
+  color: #d8be71;
+}
+
+.commodity-class-tag.energy {
+  border-color: rgba(255, 155, 79, 0.4);
+  background: rgba(255, 155, 79, 0.1);
+  color: #ffad68;
+}
+
+.commodity-class-tag.fx {
+  border-color: rgba(126, 220, 255, 0.3);
+  background: rgba(126, 220, 255, 0.08);
+  color: #7edcff;
+}
+
+.commodity-class-tag.agri {
+  border-color: rgba(57, 255, 115, 0.24);
+  background: rgba(57, 255, 115, 0.07);
+  color: #81df97;
+}
+
+.commodity-signal-tag.alert {
+  border-color: rgba(255, 72, 72, 0.55);
+  background: rgba(255, 72, 72, 0.16);
+  color: #ff5d5d;
+}
+
+.commodity-signal-tag.move {
+  border-color: rgba(255, 176, 45, 0.44);
+  background: rgba(255, 176, 45, 0.12);
+  color: #ffba4a;
+}
+
+.commodity-signal-tag.watch {
+  border-color: rgba(142, 151, 146, 0.28);
+  background: rgba(142, 151, 146, 0.08);
+  color: #aeb5b1;
+}
+
+.commodity-signal-tag.quote {
+  border-color: rgba(126, 220, 255, 0.2);
+  background: rgba(126, 220, 255, 0.06);
+  color: #8ccde3;
 }
 
 .commodity-price {

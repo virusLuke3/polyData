@@ -81,6 +81,10 @@ function tickerMoveTag(item: RuntimeMarketTicker, mode: 'crypto' | 'macro') {
   return mode === 'crypto' ? 'SPOT' : 'WATCH';
 }
 
+function tagKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
 function averageChange(items: RuntimeMarketTicker[]) {
   const changes = items.map((item) => Number(item.changePercent)).filter((value) => Number.isFinite(value));
   if (!changes.length) return null;
@@ -103,6 +107,14 @@ function commodityClass(item: RuntimeMarketTicker) {
   if (['CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT'].includes(symbol)) return 'ENERGY';
   if (symbol === '^VIX') return 'RISK';
   return 'AGRI';
+}
+
+function commodityAuxMeta(item: RuntimeMarketTicker) {
+  const volume = Number(item.volume24h);
+  if (Number.isFinite(volume) && volume > 0) return `VOL ${formatCompact(volume)}`;
+  const marketCap = Number(item.marketCap);
+  if (Number.isFinite(marketCap) && marketCap > 0) return `MCAP ${formatCompact(marketCap)}`;
+  return null;
 }
 
 function isFxTicker(item: RuntimeMarketTicker) {
@@ -288,11 +300,14 @@ function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
       {items.map((item) => {
         const tone = tickerTone(item);
         const sparkColor = tone === 'down' ? '#ff6464' : '#39ff73';
+        const assetClass = commodityClass(item);
+        const signalTag = tickerMoveTag(item, 'macro');
+        const auxMeta = commodityAuxMeta(item);
         return (
           <div className={`commodity-item ${tone}`} key={item.symbol}>
             <div className="commodity-head">
               <span className="commodity-name">{item.label}</span>
-              <b>{commodityClass(item)}</b>
+              <b className={`commodity-class-tag ${tagKey(assetClass)}`}>{assetClass}</b>
             </div>
             <div className="commodity-spark">{commoditySparkline(item.points, sparkColor)}</div>
             <div className="commodity-foot">
@@ -300,8 +315,8 @@ function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
               <span className={`commodity-change ${tone}`}>{formatCommodityChange(item.changePercent)}</span>
             </div>
             <div className="commodity-meta">
-              <span>{tickerMoveTag(item, 'macro')}</span>
-              <em>{item.volume24h ? `vol ${formatCompact(item.volume24h)}` : item.currency || 'USD'}</em>
+              <span className={`commodity-signal-tag ${tagKey(signalTag)}`}>{signalTag}</span>
+              {auxMeta ? <em>{auxMeta}</em> : null}
             </div>
           </div>
         );
