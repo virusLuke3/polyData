@@ -937,8 +937,12 @@ export type RuntimeWeatherQuoteBin = {
   bestBidYes?: number | string | null;
   bestAskYes?: number | string | null;
   midPriceYes?: number | string | null;
+  marketId?: number | string | null;
   marketSlug?: string | null;
   marketStatus?: string | null;
+  priceSource?: string | null;
+  bookStatus?: string | null;
+  yesTokenId?: string | null;
 };
 
 export type RuntimeGlobalWeatherCity = {

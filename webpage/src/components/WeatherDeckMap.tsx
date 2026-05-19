@@ -24,6 +24,10 @@ type WeatherMapPoint = {
   quoteCoverage: string;
   topBinLabel: string | null;
   topBinPrice: number | null;
+  topBinBid: number | null;
+  topBinAsk: number | null;
+  priceSource: string | null;
+  bookStatus: string | null;
   marketUrl: string | null;
   temperatureTone: WeatherTone;
   marketTone: MarketTone;
@@ -83,6 +87,33 @@ function temperatureLabel(value: number | null, unit: string) {
 function probabilityLabel(value: number | null) {
   if (value == null) return '--';
   return `${Math.round(value * 100)}%`;
+}
+
+function compactPriceSource(value: string | null) {
+  if (value === 'clob-book') return 'CLOB';
+  if (value === 'db-latest') return 'LAST';
+  if (value === 'gamma-outcome') return 'GAMMA';
+  return 'MISS';
+}
+
+function compactBookStatus(value: string | null) {
+  if (!value) return '--';
+  if (value === 'no-book') return 'NO BOOK';
+  if (value === 'missing-token') return 'NO TOKEN';
+  return value.toUpperCase();
+}
+
+function binTemperatureLabel(bin: RuntimeGlobalWeatherCity['topBin'], fallbackUnit: string) {
+  if (!bin) return null;
+  const unit = String(bin.unit || fallbackUnit || '').toUpperCase();
+  const min = numberValue(bin.minTemp);
+  const max = numberValue(bin.maxTemp);
+  if (bin.bucketType === 'below' && max != null) return `${Math.round(max)}°${unit}-`;
+  if (bin.bucketType === 'above' && min != null) return `${Math.round(min)}°${unit}+`;
+  if (min != null && max != null && min !== max) return `${Math.round(min)}-${Math.round(max)}°${unit}`;
+  if (min != null) return `${Math.round(min)}°${unit}`;
+  if (max != null) return `${Math.round(max)}°${unit}`;
+  return null;
 }
 
 function temperatureTone(city: RuntimeGlobalWeatherCity): WeatherTone {
@@ -159,8 +190,13 @@ function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
     const currentTemp = numberValue(city.currentTemp);
     const forecastHigh = numberValue(city.forecastHigh ?? city.todayHigh);
     const topBinPrice = numberValue(city.topBin?.midPriceYes);
+    const topBinBid = numberValue(city.topBin?.bestBidYes);
+    const topBinAsk = numberValue(city.topBin?.bestAskYes);
     const topBinLabel = city.topBin?.label ? String(city.topBin.label) : null;
-    const sublabel = topBinLabel || temperatureLabel(forecastHigh ?? currentTemp, unit);
+    const topBinTemperature = binTemperatureLabel(city.topBin, unit);
+    const weatherTemperature = temperatureLabel(forecastHigh ?? currentTemp, unit);
+    const priceSuffix = topBinPrice != null ? ` · ${probabilityLabel(topBinPrice)}` : '';
+    const sublabel = `${topBinTemperature || weatherTemperature}${priceSuffix}`;
     return [{
       id,
       city: String(city.city || id),
@@ -173,6 +209,10 @@ function normalizePoints(items: RuntimeGlobalWeatherCity[]): WeatherMapPoint[] {
       quoteCoverage: String(city.quoteCoverage || '0/0'),
       topBinLabel,
       topBinPrice,
+      topBinBid,
+      topBinAsk,
+      priceSource: city.topBin?.priceSource ? String(city.topBin.priceSource) : null,
+      bookStatus: city.topBin?.bookStatus ? String(city.topBin.bookStatus) : null,
       marketUrl: city.marketUrl ? String(city.marketUrl) : null,
       temperatureTone: temperatureTone(city),
       marketTone: marketTone(city),
@@ -224,11 +264,15 @@ function buildLayers(points: WeatherMapPoint[], selectedCityId?: string | null) 
 function tooltipFor(point: WeatherMapPoint) {
   const temp = temperatureLabel(point.forecastHigh ?? point.currentTemp, point.unit);
   const price = probabilityLabel(point.topBinPrice);
+  const bidAsk = point.topBinBid != null || point.topBinAsk != null
+    ? ` · bid ${probabilityLabel(point.topBinBid)} / ask ${probabilityLabel(point.topBinAsk)}`
+    : '';
   return `
     <div class="wm-weather-deck-tooltip">
       <strong>${escapeHtml(point.city)}</strong>
       <br>${escapeHtml(point.condition)} · ${escapeHtml(temp)}
-      <br>PMKT ${escapeHtml(point.topBinLabel || 'No event')} · ${escapeHtml(point.quoteCoverage)} · ${escapeHtml(price)}
+      <br>PMKT ${escapeHtml(point.topBinLabel || 'No event')} · ${escapeHtml(point.quoteCoverage)} · ${escapeHtml(price)}${escapeHtml(bidAsk)}
+      <br>${escapeHtml(compactPriceSource(point.priceSource))} · ${escapeHtml(compactBookStatus(point.bookStatus))}
     </div>
   `;
 }
@@ -316,7 +360,7 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
               <circle className="dot" cx={point.x} cy={point.y} r={selected ? 5 : 4} onClick={() => onSelectCity?.(point.id)} />
               {showLabel ? (
                 <g transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}>
-                  <rect x="-4" y="-13" width={Math.max(58, point.city.length * 8)} height="27" rx="3" />
+                  <rect x="-4" y="-13" width={Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8)} height="27" rx="3" />
                   <text x="0" y="-2">{point.city}</text>
                   <text x="0" y="10" className="sub">{point.sublabel}</text>
                 </g>

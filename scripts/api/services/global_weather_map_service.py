@@ -22,9 +22,13 @@ WEATHER_MARKET_TERMS = ("temperature", "highest temperature", "high temperature"
 GAMMA_QUERY_TIMEOUT_SECONDS = 6
 GAMMA_QUERIES_PER_CITY = 2
 GAMMA_QUERY_PAUSE_SECONDS = 0.03
+WEATHER_CLOB_BOOK_CACHE_NAMESPACE = "weather-clob-book"
+WEATHER_CLOB_BOOK_TTL_SECONDS = 10
 
 _LIVE_REFRESH_LOCK = threading.Lock()
 _LIVE_REFRESHING: set[str] = set()
+_WEATHER_CLOB_BOOK_CACHE_LOCK = threading.Lock()
+_WEATHER_CLOB_BOOK_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _utc_now_iso(ctx: dict) -> str:
@@ -346,32 +350,165 @@ def _token_ids(market: Dict[str, Any]) -> List[str]:
     return []
 
 
-def _clob_yes_quote(ctx: dict, market: Dict[str, Any]) -> Dict[str, Optional[float]]:
+def _weather_clob_stats(ctx: dict) -> Dict[str, int]:
+    return ctx.setdefault(
+        "_weather_clob_stats",
+        {"attempts": 0, "errors": 0, "quoted": 0, "noBook": 0, "cacheHits": 0, "missingToken": 0},
+    )
+
+
+def _cached_clob_book(ctx: dict, token_id: str) -> Optional[Dict[str, Any]]:
+    cache_key = str(token_id)
+    getter = ctx.get("get_cached_runtime_payload")
+    if callable(getter):
+        try:
+            cached = getter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key)
+            if isinstance(cached, dict):
+                return cached
+        except Exception:
+            pass
+    now = time.monotonic()
+    with _WEATHER_CLOB_BOOK_CACHE_LOCK:
+        cached = _WEATHER_CLOB_BOOK_CACHE.get(cache_key)
+        if not cached:
+            return None
+        if float(cached.get("expires_at") or 0) <= now:
+            _WEATHER_CLOB_BOOK_CACHE.pop(cache_key, None)
+            return None
+        payload = cached.get("payload")
+        return payload if isinstance(payload, dict) else None
+
+
+def _set_cached_clob_book(ctx: dict, token_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    cache_key = str(token_id)
+    setter = ctx.get("set_cached_runtime_payload")
+    if callable(setter):
+        try:
+            setter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key, payload, ttl_seconds=WEATHER_CLOB_BOOK_TTL_SECONDS)
+        except TypeError:
+            try:
+                setter(WEATHER_CLOB_BOOK_CACHE_NAMESPACE, cache_key, payload, WEATHER_CLOB_BOOK_TTL_SECONDS)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    with _WEATHER_CLOB_BOOK_CACHE_LOCK:
+        _WEATHER_CLOB_BOOK_CACHE[cache_key] = {
+            "payload": payload,
+            "expires_at": time.monotonic() + WEATHER_CLOB_BOOK_TTL_SECONDS,
+        }
+    return payload
+
+
+def _empty_clob_quote(status: str, token_id: Optional[str] = None) -> Dict[str, Optional[float] | Optional[str]]:
+    return {
+        "bestBidYes": None,
+        "bestAskYes": None,
+        "bookStatus": status,
+        "priceSource": "clob-book",
+        "yesTokenId": token_id,
+    }
+
+
+def _clob_book_payload(ctx: dict, base_url: str, token_id: str) -> Dict[str, Any]:
+    session_factory = ctx.get("get_clob_session")
+    if callable(session_factory):
+        session = session_factory()
+        if session is not None:
+            response = session.get(
+                f"{base_url}/book",
+                params={"token_id": token_id},
+                timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
+                headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+            )
+            if getattr(response, "status_code", None) == 404:
+                return {"bookStatus": "no-book", "bids": [], "asks": []}
+            response.raise_for_status()
+            data = response.json() if getattr(response, "content", True) else {}
+            return data if isinstance(data, dict) else {}
+    getter = ctx.get("http_json_get")
+    if not callable(getter):
+        return {"bookStatus": "disabled", "bids": [], "asks": []}
+    data = getter(
+        f"{base_url}/book",
+        params={"token_id": token_id},
+        timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
+        headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
+    )
+    return data if isinstance(data, dict) else {}
+
+
+def _clob_yes_quote(ctx: dict, market: Dict[str, Any]) -> Dict[str, Optional[float] | Optional[str]]:
     token_ids = _token_ids(market)
     if not token_ids:
-        return {"bestBidYes": None, "bestAskYes": None}
+        stats = _weather_clob_stats(ctx)
+        stats["missingToken"] = int(stats.get("missingToken") or 0) + 1
+        return _empty_clob_quote("missing-token")
     base_url = str(getattr(ctx["SETTINGS"], "clob_api_base", "") or "").rstrip("/")
     if not base_url:
-        return {"bestBidYes": None, "bestAskYes": None}
-    stats = ctx.setdefault("_weather_clob_stats", {"attempts": 0, "errors": 0, "quoted": 0})
+        return _empty_clob_quote("disabled", token_ids[0])
+    stats = _weather_clob_stats(ctx)
+    cached = _cached_clob_book(ctx, token_ids[0])
+    if cached is not None:
+        stats["cacheHits"] = int(stats.get("cacheHits") or 0) + 1
+        bid = _float(cached.get("bestBidYes"))
+        ask = _float(cached.get("bestAskYes"))
+        if bid is not None or ask is not None:
+            stats["quoted"] = int(stats.get("quoted") or 0) + 1
+        elif cached.get("bookStatus") == "no-book":
+            stats["noBook"] = int(stats.get("noBook") or 0) + 1
+        return {
+            "bestBidYes": bid,
+            "bestAskYes": ask,
+            "bookStatus": str(cached.get("bookStatus") or "cached"),
+            "priceSource": "clob-book",
+            "yesTokenId": token_ids[0],
+        }
     stats["attempts"] = int(stats.get("attempts") or 0) + 1
     try:
-        book = ctx["http_json_get"](
-            f"{base_url}/book",
-            params={"token_id": token_ids[0]},
-            timeout=min(4, int(getattr(ctx["SETTINGS"], "clob_timeout_seconds", 8) or 8)),
-            headers={"Accept": "application/json", "User-Agent": "polydata-weather-map/1.0"},
-        )
+        book = _clob_book_payload(ctx, base_url, token_ids[0])
     except Exception:
         stats["errors"] = int(stats.get("errors") or 0) + 1
-        return {"bestBidYes": None, "bestAskYes": None}
+        payload = _empty_clob_quote("error", token_ids[0])
+        return _set_cached_clob_book(ctx, token_ids[0], payload)
     bids = book.get("bids") if isinstance(book, dict) and isinstance(book.get("bids"), list) else []
     asks = book.get("asks") if isinstance(book, dict) and isinstance(book.get("asks"), list) else []
     best_bid = max((_float(row.get("price") if isinstance(row, dict) else None) for row in bids), default=None)
     best_ask = min((_float(row.get("price") if isinstance(row, dict) else None) for row in asks), default=None)
+    status = "ok" if best_bid is not None or best_ask is not None else str(book.get("bookStatus") or "no-book")
     if best_bid is not None or best_ask is not None:
         stats["quoted"] = int(stats.get("quoted") or 0) + 1
-    return {"bestBidYes": best_bid, "bestAskYes": best_ask}
+    elif status == "no-book":
+        stats["noBook"] = int(stats.get("noBook") or 0) + 1
+    payload = {
+        "bestBidYes": best_bid,
+        "bestAskYes": best_ask,
+        "bookStatus": status,
+        "priceSource": "clob-book",
+        "yesTokenId": token_ids[0],
+    }
+    return _set_cached_clob_book(ctx, token_ids[0], payload)
+
+
+def _apply_clob_quote_to_bin(ctx: dict, row: Dict[str, Any]) -> None:
+    market = row.get("_clobMarket")
+    if not isinstance(market, dict):
+        return
+    clob = _clob_yes_quote(ctx, market)
+    bid = _float(clob.get("bestBidYes"))
+    ask = _float(clob.get("bestAskYes"))
+    row["bestBidYes"] = bid
+    row["bestAskYes"] = ask
+    row["bookStatus"] = clob.get("bookStatus")
+    row["yesTokenId"] = clob.get("yesTokenId")
+    if bid is not None and ask is not None:
+        row["midPriceYes"] = round((bid + ask) / 2, 4)
+        row["priceSource"] = "clob-book"
+
+
+def _strip_internal_market(rows: List[Dict[str, Any]]) -> None:
+    for row in rows:
+        row.pop("_clobMarket", None)
 
 
 def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -384,25 +521,30 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
         if not parsed:
             continue
         fallback = _market_yes_price(market)
-        clob = _clob_yes_quote(ctx, market)
-        bid = clob.get("bestBidYes")
-        ask = clob.get("bestAskYes")
-        mid = round((bid + ask) / 2, 4) if bid is not None and ask is not None else fallback
+        token_ids = _token_ids(market)
         bins.append(
             {
                 **parsed,
-                "bestBidYes": bid,
-                "bestAskYes": ask,
-                "midPriceYes": round(float(mid), 4) if mid is not None else None,
+                "bestBidYes": None,
+                "bestAskYes": None,
+                "midPriceYes": round(float(fallback), 4) if fallback is not None else None,
                 "marketSlug": market.get("slug") or market.get("market_slug"),
                 "marketStatus": "live" if market.get("active") is not False else "inactive",
+                "priceSource": "gamma-outcome" if fallback is not None else "missing",
+                "bookStatus": "not-queried",
+                "yesTokenId": token_ids[0] if token_ids else None,
+                "_clobMarket": market,
             }
         )
     if not bins:
         return None
     bins.sort(key=lambda row: float(row.get("sortKey") or 0))
+    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
+    if top is not None:
+        _apply_clob_quote_to_bin(ctx, top)
     quoted = len([row for row in bins if row.get("midPriceYes") is not None])
     top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
+    _strip_internal_market(bins)
     slug = event.get("slug")
     return {
         "eventSlug": slug,
@@ -573,34 +715,45 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
         if not parsed:
             continue
         fallback = _db_price_fallback(row)
+        fallback_source = "db-latest" if fallback is not None else "missing"
         gamma_market = None
         if fallback is None:
             fallback, gamma_market = _gamma_price_fallback(ctx, row)
+            fallback_source = "gamma-outcome" if fallback is not None else "missing"
         if gamma_market:
             market = {**market, **gamma_market}
-        clob = {"bestBidYes": None, "bestAskYes": None} if fallback is not None else _clob_yes_quote(ctx, market)
-        bid = clob.get("bestBidYes")
-        ask = clob.get("bestAskYes")
-        mid = round((bid + ask) / 2, 4) if bid is not None and ask is not None else fallback
+        token_ids = _token_ids(market)
         bins.append(
             {
                 **parsed,
-                "bestBidYes": bid,
-                "bestAskYes": ask,
-                "midPriceYes": round(float(mid), 4) if mid is not None else None,
+                "bestBidYes": None,
+                "bestAskYes": None,
+                "midPriceYes": round(float(fallback), 4) if fallback is not None else None,
+                "marketId": row.get("market_id"),
                 "marketSlug": row.get("slug"),
                 "marketStatus": "live" if market.get("active") else "inactive",
+                "priceSource": fallback_source,
+                "bookStatus": "not-queried",
+                "yesTokenId": token_ids[0] if token_ids else None,
+                "_clobMarket": market,
             }
         )
     if not bins:
         return None
     bins.sort(key=lambda item: float(item.get("sortKey") or 0))
-    quoted = len([row for row in bins if row.get("midPriceYes") is not None])
     top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=None)
     if top is None:
         forecast_high = _float(city.get("forecastHigh"))
         if forecast_high is not None:
             top = min(bins, key=lambda row: abs(float(row.get("sortKey") or 0) - forecast_high))
+        elif bins:
+            top = bins[0]
+    targets = bins if str(ctx.get("_weather_clob_scope") or "top").lower() == "all" else ([top] if top is not None else [])
+    for target in targets:
+        _apply_clob_quote_to_bin(ctx, target)
+    quoted = len([row for row in bins if row.get("midPriceYes") is not None])
+    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=top)
+    _strip_internal_market(bins)
     city_slug = _slugify(city.get("city"))
     date_slug = ""
     try:
@@ -794,12 +947,18 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         clob_attempts = int(clob_stats.get("attempts") or 0)
         clob_errors = int(clob_stats.get("errors") or 0)
         clob_quoted = int(clob_stats.get("quoted") or 0)
-        if clob_attempts == 0:
+        clob_no_book = int(clob_stats.get("noBook") or 0)
+        clob_cache_hits = int(clob_stats.get("cacheHits") or 0)
+        if clob_attempts == 0 and clob_cache_hits == 0:
             sources["clob"] = "empty"
         elif clob_quoted > 0 and clob_errors == 0:
             sources["clob"] = "ok"
         elif clob_quoted > 0:
             sources["clob"] = "partial"
+        elif clob_no_book > 0 and clob_errors == 0:
+            sources["clob"] = "no-book"
+        elif clob_errors > 0:
+            sources["clob"] = "error"
         else:
             sources["clob"] = "empty"
     except Exception as exc:

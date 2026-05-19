@@ -14,16 +14,37 @@ import {
   tempLabel,
 } from '../weather-detail-utils';
 
+function sourceLabel(value?: string | null) {
+  if (value === 'clob-book') return 'CLOB';
+  if (value === 'db-latest') return 'LAST';
+  if (value === 'gamma-outcome') return 'GAMMA';
+  return '--';
+}
+
+function bookLabel(value?: string | null) {
+  if (!value) return '--';
+  if (value === 'not-queried') return '--';
+  if (value === 'no-book') return 'NO BOOK';
+  if (value === 'missing-token') return 'NO TOKEN';
+  return String(value).toUpperCase();
+}
+
+function quoteState(bin: RuntimeWeatherQuoteBin) {
+  if (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null) return 'CLOB';
+  if (num(bin.midPriceYes) !== null) return sourceLabel(bin.priceSource) === '--' ? 'QUOTED' : sourceLabel(bin.priceSource);
+  return 'MISSING';
+}
+
 function QuoteRow({ bin, active }: { bin: RuntimeWeatherQuoteBin; active: boolean }) {
-  const quoteState = num(bin.midPriceYes) === null ? 'Missing Quote' : 'Quoted';
+  const state = quoteState(bin);
   return (
     <tr className={active ? 'active' : ''}>
       <td>{bin.label || tempLabel(bin.minTemp, bin.unit)}</td>
       <td>{priceLabel(bin.bestBidYes)}</td>
       <td>{priceLabel(bin.bestAskYes)}</td>
       <td>{priceLabel(bin.midPriceYes)}</td>
-      <td><span className={`wm-weather-quote-state ${quoteState === 'Quoted' ? 'quoted' : 'missing'}`}>{quoteState}</span></td>
-      <td>{bin.marketStatus || 'Closed'}</td>
+      <td><span className={`wm-weather-quote-state ${state.toLowerCase().replace(/\s+/g, '-')}`}>{state}</span></td>
+      <td>{bookLabel(bin.bookStatus)}</td>
     </tr>
   );
 }
@@ -60,6 +81,7 @@ function WeatherQuoteTablePanel({
             <span><i>Coverage</i><strong>{quoteCoverage(city)}</strong></span>
             <span><i>Bid</i><strong>{priceLabel(topBin?.bestBidYes)}</strong></span>
             <span><i>Ask</i><strong>{priceLabel(topBin?.bestAskYes)}</strong></span>
+            <span><i>Source</i><strong>{sourceLabel(topBin?.priceSource)}</strong></span>
           </div>
           <div className="wm-weather-quote-table-wrap">
             <table className="wm-weather-quote-table">
@@ -69,8 +91,8 @@ function WeatherQuoteTablePanel({
                   <th>Bid</th>
                   <th>Ask</th>
                   <th>Mid</th>
-                  <th>Quote</th>
-                  <th>Market</th>
+                  <th>Source</th>
+                  <th>Book</th>
                 </tr>
               </thead>
               <tbody>

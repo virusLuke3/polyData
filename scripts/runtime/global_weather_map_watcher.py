@@ -108,6 +108,7 @@ class GlobalWeatherMapWatcher:
             "SETTINGS": self.settings,
             "app": _App(),
             "http_json_get": self._http_json_get,
+            "get_clob_session": lambda: self.requests,
             "SNAPSHOT_STORE": self.snapshot_store,
             "get_cached_json": self._get_cached_json,
             "set_cached_json": self._set_cached_json,

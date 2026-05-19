@@ -6983,11 +6983,19 @@ body.panel-resize-active iframe {
   width: 100%;
 }
 
-.wm-weather-quote-state.quoted {
+.wm-weather-quote-state.clob {
+  color: #7edcff;
+}
+
+.wm-weather-quote-state.quoted,
+.wm-weather-quote-state.last,
+.wm-weather-quote-state.gamma {
   color: #96ff66;
 }
 
-.wm-weather-quote-state.missing {
+.wm-weather-quote-state.missing,
+.wm-weather-quote-state.no-book,
+.wm-weather-quote-state.no-token {
   color: #ff6262;
 }
 
