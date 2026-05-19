@@ -3787,6 +3787,60 @@ body.panel-resize-active iframe {
   gap: 0;
 }
 
+.wm-related-intel-panel .wm-panel-body {
+  gap: 8px;
+}
+
+.wm-intel-filter-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0 0 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wm-intel-filter-tabs button {
+  min-width: 0;
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 1px solid rgba(126, 220, 255, 0.13);
+  border-radius: 4px;
+  background: rgba(16, 20, 23, 0.78);
+  color: var(--wm-text-dim);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.wm-intel-filter-tabs button.active {
+  border-color: rgba(126, 220, 255, 0.46);
+  background: rgba(12, 44, 58, 0.72);
+  box-shadow: inset 0 -2px 0 rgba(126, 220, 255, 0.56);
+  color: #7edcff;
+}
+
+.wm-intel-filter-tabs span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-intel-filter-tabs b {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 900;
+  opacity: 0.78;
+}
+
 .wm-content-feed-panel .wm-intel-card {
   position: relative;
   min-width: 0;

@@ -60,7 +60,7 @@ type LayerToggle = {
 };
 
 type RegionKey = 'global' | 'america' | 'mena' | 'eu' | 'asia' | 'latam' | 'africa' | 'oceania';
-const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v3';
+const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v1';
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
@@ -106,9 +106,6 @@ const MARKET_WORKSPACE_PANEL_IDS = new Set([
   'lob-depth',
   'oracle-timeline',
   'related-news',
-  'related-video',
-  'report-feed',
-  'research-feed',
 ]);
 const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 const PANEL_ROW_RESIZE_STEP = 170;

@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(contentPanelRenderers, {
   title: 'Research Feed',
   eyebrow: 'content',
   description: 'Research and analysis artifacts.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });

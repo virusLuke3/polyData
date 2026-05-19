@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(contentPanelRenderers, {
   title: 'Video Feed',
   eyebrow: 'content',
   description: 'Video content linked to market.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });

@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(contentPanelRenderers, {
   title: 'Report Feed',
   eyebrow: 'content',
   description: 'Long-form reports and writeups.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });
