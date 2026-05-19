@@ -269,6 +269,6 @@ class RuntimeContentProvider:
         for value in base:
             for piece in str(value or "").lower().replace("?", " ").replace(",", " ").split():
                 cleaned = piece.strip()
-                if len(cleaned) >= 4 and cleaned not in stopwords and cleaned not in keywords:
+                if len(cleaned) >= 3 and cleaned not in stopwords and cleaned not in keywords:
                     keywords.append(cleaned)
         return keywords[:16]

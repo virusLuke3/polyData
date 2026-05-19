@@ -214,6 +214,11 @@ RSS_FEEDS: List[Dict[str, str]] = [
         "category": "Sports",
     },
     {
+        "source": "Esports Markets",
+        "url": env_str("POLYDATA_RSS_ESPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(esports+OR+Valorant+OR+%22Counter-Strike%22+OR+%22League+of+Legends%22+OR+Dota+OR+KR%C3%9C+OR+KRU)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        "category": "Sports",
+    },
+    {
         "source": "Sports Markets",
         "url": env_str("POLYDATA_RSS_SPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(NBA+NFL+MLB+NHL+UFC+esports+injury+odds)+when:2d&hl=en-US&gl=US&ceid=US:en"),
         "category": "Sports",
