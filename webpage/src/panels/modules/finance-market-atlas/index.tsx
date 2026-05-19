@@ -4,7 +4,7 @@ import { fetchRuntimeFinanceMarketAtlas } from '@/services/api';
 import type { RuntimeFinanceLinkedMarket, RuntimeFinanceMarketAtlasCategory, RuntimeFinanceMarketAtlasPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, CoverageBadges, dateLabel, FinanceMetricStrip, FinanceRail, FinanceSummaryStrip, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, CoverageBadges, dateLabel, FinanceSignalRow, financeTone, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
 
 type AtlasSort = 'VOLUME' | 'DEADLINE' | 'GAP' | 'COVERAGE';
 const SORTS: AtlasSort[] = ['VOLUME', 'DEADLINE', 'GAP', 'COVERAGE'];
@@ -20,7 +20,7 @@ function sortItems(items: RuntimeFinanceLinkedMarket[], sort: AtlasSort) {
 
 function CategoryRow({ item }: { item: RuntimeFinanceMarketAtlasCategory }) {
   return (
-    <div className="wm-finance-category-row wm-finance-category-row-v2">
+    <div className="wm-finance-section-row">
       <div>
         <strong>{item.label || item.id || 'Finance'}</strong>
         <span>{Number(item.activeCount) || 0} mkts</span>
@@ -34,24 +34,23 @@ function CategoryRow({ item }: { item: RuntimeFinanceMarketAtlasCategory }) {
 function MarketRow({ item }: { item: RuntimeFinanceLinkedMarket }) {
   const category = String(item.category || 'fin').toUpperCase();
   return (
-    <div className="wm-finance-registry-row">
-      <FinanceRail label={category.slice(0, 4)} tone={item.change24h && Number(item.change24h) > 0 ? 'ok' : 'neutral'} />
-      <div className="wm-finance-registry-main">
-        <div className="wm-finance-registry-meta">
+    <FinanceSignalRow
+      tone={financeTone(item.change24h)}
+      code={category.slice(0, 4)}
+      meta={(
+        <>
           <span>{item.categoryLabel || item.category || 'finance'}</span>
           <span>{dateLabel(item.endDate)}</span>
           <CoverageBadges items={item.coverage} max={3} />
-        </div>
-        <strong>{item.title || 'Finance market'}</strong>
-        <FinanceMetricStrip
-          items={[
-            { label: 'PMKT', value: percentLabel(item.probability), tone: 'ok' },
-            { label: '24H', value: signedPercentLabel(item.change24h), tone: Number(item.change24h) > 0 ? 'ok' : Number(item.change24h) < 0 ? 'bad' : 'neutral' },
-            { label: 'VOL', value: moneyLabel(item.volume24h) },
-          ]}
-        />
-      </div>
-    </div>
+        </>
+      )}
+      title={item.title || 'Finance market'}
+      stats={[
+        { label: 'PMKT', value: percentLabel(item.probability), tone: 'ok' },
+        { label: 'VOL', value: moneyLabel(item.volume24h) },
+        { label: '24H', value: signedPercentLabel(item.change24h), tone: financeTone(item.change24h) },
+      ]}
+    />
   );
 }
 
@@ -79,35 +78,33 @@ function FinanceMarketAtlasPanel({ payload }: { payload?: RuntimeFinanceMarketAt
       className="wm-market-panel wm-finance-panel"
       dataPanelId="finance-market-atlas"
     >
-      <FinanceSummaryStrip
-        items={[
-          { label: 'active', value: payload?.summary?.activeCount || items.length, tone: 'ok' },
-          { label: 'categories', value: payload?.summary?.categoryCount || (payload?.categories || []).length },
-          { label: 'top', value: payload?.summary?.topCategory || '--' },
-          { label: 'sources', value: payload?.summary?.coverageCount || 0, tone: 'watch' },
-        ]}
-      />
+      <div className="wm-finance-brief-line">
+        <span><strong>{payload?.summary?.activeCount || items.length}</strong> active</span>
+        <span><strong>{payload?.summary?.categoryCount || (payload?.categories || []).length}</strong> categories</span>
+        <span><strong>{payload?.summary?.topCategory || '--'}</strong> top</span>
+        <span><strong>{payload?.summary?.coverageCount || 0}</strong> sources</span>
+      </div>
       {top ? (
-        <div className="wm-finance-lead-row">
-          <FinanceRail label={String(top.category || 'FIN').slice(0, 4).toUpperCase()} tone="ok" />
-          <div className="wm-finance-registry-main">
-            <div className="wm-finance-registry-meta">
+        <FinanceSignalRow
+          className="is-lead"
+          tone={financeTone(top.change24h) === 'neutral' ? 'ok' : financeTone(top.change24h)}
+          code={String(top.category || 'FIN').slice(0, 4).toUpperCase()}
+          meta={(
+            <>
               <span>Top finance market</span>
               <span>{dateLabel(top.endDate)}</span>
               <CoverageBadges items={top.coverage} max={4} />
-            </div>
-            <strong>{top.title || 'Finance market'}</strong>
-            <FinanceMetricStrip
-              items={[
-                { label: 'PMKT', value: percentLabel(top.probability), tone: 'ok' },
-                { label: 'VOL', value: moneyLabel(top.volume24h) },
-                { label: '24H', value: signedPercentLabel(top.change24h), tone: Number(top.change24h) > 0 ? 'ok' : Number(top.change24h) < 0 ? 'bad' : 'neutral' },
-              ]}
-            />
-          </div>
-        </div>
+            </>
+          )}
+          title={top.title || 'Finance market'}
+          stats={[
+            { label: 'PMKT', value: percentLabel(top.probability), tone: 'ok' },
+            { label: 'VOL', value: moneyLabel(top.volume24h) },
+            { label: '24H', value: signedPercentLabel(top.change24h), tone: financeTone(top.change24h) },
+          ]}
+        />
       ) : null}
-      <div className="wm-finance-category-grid wm-finance-category-grid-v2">
+      <div className="wm-finance-section-list">
         {(payload?.categories || []).slice(0, 5).map((category) => <CategoryRow key={category.id || category.label} item={category} />)}
       </div>
       <div className="wm-finance-list">

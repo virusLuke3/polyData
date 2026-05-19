@@ -4,7 +4,7 @@ import { fetchRuntimeEquityEventCommand } from '@/services/api';
 import type { RuntimeEquityEventCommandPayload, RuntimeEquityEventRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, CoverageBadges, dateLabel, FinanceMetricStrip, FinanceRail, FinanceSummaryStrip, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, CoverageBadges, dateLabel, FinanceSignalRow, financeTone, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
 
 type EquitySort = 'PMKT GAP' | 'NEXT EVENT' | 'STOCK MOVE' | 'VOLUME';
 const SORTS: EquitySort[] = ['PMKT GAP', 'NEXT EVENT', 'STOCK MOVE', 'VOLUME'];
@@ -20,28 +20,28 @@ function sortItems(items: RuntimeEquityEventRow[], sort: EquitySort) {
 
 function EventRow({ item }: { item: RuntimeEquityEventRow }) {
   const linked = (item.linkedMarkets || [])[0];
+  const tone = financeTone(item.change1d);
   return (
-    <div className="wm-finance-registry-row">
-      <FinanceRail label={item.symbol || 'EQ'} tone={Number(item.change1d) > 0 ? 'ok' : Number(item.change1d) < 0 ? 'bad' : 'neutral'} />
-      <div className="wm-finance-registry-main">
-        <div className="wm-finance-registry-meta">
+    <FinanceSignalRow
+      tone={tone}
+      code={item.symbol || 'EQ'}
+      meta={(
+        <>
           <span>{item.eventType || 'LINKED'}</span>
           <span>{dateLabel(item.nextEventAt)}</span>
           <div className="wm-finance-chip-row">
             {(item.badges || []).slice(0, 3).map((badge) => <span key={badge} className="wm-finance-chip watch">{badge}</span>)}
           </div>
-        </div>
-        <strong>{item.company || item.symbol || 'Equity'} / {item.nextEvent || 'market watch'}</strong>
-        <FinanceMetricStrip
-          items={[
-            { label: 'QUOTE', value: moneyLabel(item.price), tone: Number(item.change1d) > 0 ? 'ok' : Number(item.change1d) < 0 ? 'bad' : 'neutral' },
-            { label: 'MOVE', value: signedPercentLabel(item.change1d), tone: Number(item.change1d) > 0 ? 'ok' : Number(item.change1d) < 0 ? 'bad' : 'neutral' },
-            { label: 'PMKT', value: percentLabel(linked?.probability), tone: 'ok' },
-            { label: 'VOL', value: moneyLabel(linked?.volume24h || item.volume24h) },
-          ]}
-        />
-      </div>
-    </div>
+        </>
+      )}
+      title={<>{item.company || item.symbol || 'Equity'} / {item.nextEvent || 'market watch'}</>}
+      stats={[
+        { label: 'QUOTE', value: moneyLabel(item.price), tone },
+        { label: 'MOVE', value: signedPercentLabel(item.change1d), tone },
+        { label: 'PMKT', value: percentLabel(linked?.probability), tone: linked ? 'ok' : 'neutral' },
+        { label: 'VOL', value: moneyLabel(linked?.volume24h || item.volume24h) },
+      ]}
+    />
   );
 }
 
@@ -67,33 +67,31 @@ function EquityEventCommandPanel({ payload }: { payload?: RuntimeEquityEventComm
       className="wm-market-panel wm-finance-panel"
       dataPanelId="equity-event-command"
     >
-      <FinanceSummaryStrip
-        items={[
-          { label: 'tracked', value: payload?.summary?.trackedCount || items.length, tone: 'ok' },
-          { label: 'linked', value: payload?.summary?.catalystCount || 0, tone: 'watch' },
-          { label: 'top', value: payload?.summary?.topSymbol || '--' },
-          { label: 'mode', value: 'quote' },
-        ]}
-      />
+      <div className="wm-finance-brief-line">
+        <span><strong>{payload?.summary?.trackedCount || items.length}</strong> tracked</span>
+        <span><strong>{payload?.summary?.catalystCount || 0}</strong> linked</span>
+        <span><strong>{payload?.summary?.topSymbol || '--'}</strong> top</span>
+        <span><strong>quote</strong> mode</span>
+      </div>
       {top ? (
-        <div className="wm-finance-lead-row">
-          <FinanceRail label={top.symbol || 'EQ'} tone={Number(top.change1d) > 0 ? 'ok' : Number(top.change1d) < 0 ? 'bad' : 'neutral'} />
-          <div className="wm-finance-registry-main">
-            <div className="wm-finance-registry-meta">
+        <FinanceSignalRow
+          className="is-lead"
+          tone={financeTone(top.change1d)}
+          code={top.symbol || 'EQ'}
+          meta={(
+            <>
               <span>Command row</span>
               <span>{dateLabel(top.nextEventAt)}</span>
               <CoverageBadges items={(top.linkedMarkets || [])[0]?.coverage || top.badges} max={4} />
-            </div>
-            <strong>{top.company || top.symbol} / {top.nextEvent || 'linked market'}</strong>
-            <FinanceMetricStrip
-              items={[
-                { label: 'QUOTE', value: moneyLabel(top.price), tone: Number(top.change1d) > 0 ? 'ok' : Number(top.change1d) < 0 ? 'bad' : 'neutral' },
-                { label: 'MOVE', value: signedPercentLabel(top.change1d), tone: Number(top.change1d) > 0 ? 'ok' : Number(top.change1d) < 0 ? 'bad' : 'neutral' },
-                { label: 'PMKT', value: percentLabel((top.linkedMarkets || [])[0]?.probability) },
-              ]}
-            />
-          </div>
-        </div>
+            </>
+          )}
+          title={<>{top.company || top.symbol} / {top.nextEvent || 'linked market'}</>}
+          stats={[
+            { label: 'QUOTE', value: moneyLabel(top.price), tone: financeTone(top.change1d) },
+            { label: 'MOVE', value: signedPercentLabel(top.change1d), tone: financeTone(top.change1d) },
+            { label: 'PMKT', value: percentLabel((top.linkedMarkets || [])[0]?.probability), tone: 'ok' },
+          ]}
+        />
       ) : null}
       <div className="wm-finance-list">
         {items.length ? items.map((item) => <EventRow key={item.symbol || item.company} item={item} />) : (

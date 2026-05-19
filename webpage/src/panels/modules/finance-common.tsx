@@ -150,3 +150,51 @@ export function FinanceSummaryStrip({
     </div>
   );
 }
+
+export function FinanceStatLine({
+  items,
+}: {
+  items: Array<{ label: string; value: ComponentChildren; tone?: string }>;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="wm-finance-stat-line">
+      {items.map((item) => (
+        <span key={item.label} className={item.tone || 'neutral'}>
+          <em>{item.label}</em>
+          <strong>{item.value}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function FinanceSignalRow({
+  tone = 'neutral',
+  code,
+  meta,
+  title,
+  stats,
+  children,
+  className = '',
+}: {
+  tone?: string;
+  code: string;
+  meta?: ComponentChildren;
+  title: ComponentChildren;
+  stats?: Array<{ label: string; value: ComponentChildren; tone?: string }>;
+  children?: ComponentChildren;
+  className?: string;
+}) {
+  return (
+    <article className={`wm-finance-signal-row ${tone} ${className}`.trim()}>
+      <div className="wm-finance-signal-rail"><span>{code}</span></div>
+      <div className="wm-finance-signal-main">
+        {meta ? <div className="wm-finance-signal-meta">{meta}</div> : null}
+        <strong className="wm-finance-signal-title">{title}</strong>
+        {stats?.length ? <FinanceStatLine items={stats} /> : null}
+        {children}
+      </div>
+    </article>
+  );
+}
