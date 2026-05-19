@@ -39,8 +39,8 @@ function inferBweTags(card: RuntimeF1PanelCard) {
     card.tertiaryMetric,
   ].filter(Boolean).join(' ');
   if (/binance|upbit|bithumb|coinbase|okx|bybit|kraken|exchange|交易所|币安/i.test(text)) addTag(tags, 'EXCHANGE');
-  if (/listing|上线|上新|list/i.test(text)) addTag(tags, 'LISTING');
   if (/delist|下架/i.test(text)) addTag(tags, 'DELIST');
+  if (/\blisting\b|\blist\b|上线|上新/i.test(text)) addTag(tags, 'LISTING');
   if (/futures|perpetual|合约|永续/i.test(text)) addTag(tags, 'FUTURES');
   if (/bitcoin|btc|比特币/i.test(text)) addTag(tags, 'BTC');
   if (/ethereum|eth|以太坊/i.test(text)) addTag(tags, 'ETH');
@@ -118,10 +118,11 @@ function f1CardList(cards: RuntimeF1PanelCard[]) {
             </div>
             <strong className="wm-f1-card-title">{flashText.title}</strong>
             {flashText.summary ? <div className="wm-f1-card-summary">{flashText.summary}</div> : null}
-            <div className="wm-f1-card-topics">
-              {hints.map((hint) => <span key={`${card.id || index}-${hint}`}>#{hint}</span>)}
-              {card.tertiaryMetric ? <span>{card.tertiaryMetric}</span> : null}
-            </div>
+            {hints.length ? (
+              <div className="wm-f1-card-topics">
+                {hints.map((hint) => <span key={`${card.id || index}-${hint}`}>#{hint}</span>)}
+              </div>
+            ) : null}
           </a>
         );
       })}
