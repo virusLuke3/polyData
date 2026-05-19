@@ -84,6 +84,29 @@ function bookDepthTotal(levels?: L2Level[]) {
   }, 0);
 }
 
+function hasBookLevels(lob?: LobPayload | null) {
+  return Boolean(
+    lob
+      && ((lob.yes?.asks || []).length
+        || (lob.yes?.bids || []).length
+        || (lob.no?.asks || []).length
+        || (lob.no?.bids || []).length),
+  );
+}
+
+function hasSideBookLevels(side?: { asks?: L2Level[]; bids?: L2Level[] } | null) {
+  return Boolean(side && ((side.asks || []).length || (side.bids || []).length));
+}
+
+function isTerminalProbability(value?: string | number | null) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && (numeric <= 0.001 || numeric >= 0.999);
+}
+
+function safeLiveProbability(value: string | number | null | undefined, isLive: boolean) {
+  return isLive ? value : null;
+}
+
 function accumulateNotional(levels: L2Level[]) {
   const working = levels.slice(0, 6).map((level) => ({
     price: Number(level.price) || 0,
@@ -602,6 +625,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bidLevels = activeBook?.bids || [];
   const askDepthTotal = bookDepthTotal(askLevels);
   const bidDepthTotal = bookDepthTotal(bidLevels);
+  const hasAnyBookLevels = hasBookLevels(lob);
+  const hasActiveBookLevels = hasSideBookLevels(activeBook);
   const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
   const legacyOutcomes = detail ? [] : (outcomeCards(price) as LegacyOutcomeCard[]);
   const shouldShowOutcomeRail = detail
@@ -623,9 +648,26 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const displayChart = chartRenderable ? chart : null;
   const chartPoints = displayChart?.points || [];
   const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
+  const hasSelectedEventHistory = Boolean((eventChart?.series || []).some((entry) => (
+    (!ctx.selectedMarketGroupOutcomeKey || entry.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+      && (entry.points || []).length > 1
+  )));
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
+  const liveQuoteAvailable = Boolean(
+    hasAnyBookLevels
+      || hasServingTradeActivity
+      || hasSelectedEventHistory
+      || hasFocusedMarketHistory,
+  );
+  const suppressTerminalSnapshot = Boolean(
+    isTerminalProbability(displayedYesPrice)
+      && !liveQuoteAvailable
+  );
+  const liveDisplayedYesPrice = safeLiveProbability(displayedYesPrice, !suppressTerminalSnapshot);
+  const liveDisplayedNoPrice = safeLiveProbability(displayedNoPrice, !suppressTerminalSnapshot);
+  const activePriceForBook = hasActiveBookLevels ? activePrice : null;
   const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
@@ -679,8 +721,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 <strong className="wm-focus-title">{detail?.title || selectedGroup?.title || focusedMarket?.title || 'No market selected.'}</strong>
               </div>
               <div className="wm-focus-price-hero">
-                <strong>{formatPercent(displayedYesPrice)}</strong>
-                <span className={signedClass(displayedChange)}>{selectedOutcome?.label || 'Selected'} {formatSignedPercent(displayedChange)}</span>
+                <strong>{formatPercent(liveDisplayedYesPrice)}</strong>
+                <span className={suppressTerminalSnapshot ? 'flat' : signedClass(displayedChange)}>
+                  {suppressTerminalSnapshot ? 'No live quote' : `${selectedOutcome?.label || 'Selected'} ${formatSignedPercent(displayedChange)}`}
+                </span>
               </div>
             </div>
 
@@ -774,8 +818,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
             <div className="wm-focus-inline-stats">
               <span><em>Vol</em> {formatCurrencyCompact(displayedVolume)}</span>
               <span><em>24h</em> {formatCompact(displayedTrades)} trades</span>
-              <span><em>Yes</em> {formatPercent(displayedYesPrice)}</span>
-              <span><em>No</em> {formatPercent(displayedNoPrice)}</span>
+              <span><em>Yes</em> {formatPercent(liveDisplayedYesPrice)}</span>
+              <span><em>No</em> {formatPercent(liveDisplayedNoPrice)}</span>
             </div>
           </div>
         </Panel>
@@ -795,6 +839,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
             emptyState('Loading live CLOB order book.')
           ) : !lob || !activeBook ? (
             emptyState('No CLOB order book snapshot is available for this market.')
+          ) : !hasAnyBookLevels ? (
+            emptyState('No live CLOB order book is available. This market may be newly listed, paused, closed, or not yet indexed locally.')
           ) : (
             <div className="wm-focus-book" key={`book-${bookSide}`}>
               <div className="wm-focus-book-topbar">
@@ -814,7 +860,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 </article>
                 <article className="wm-book-stat-last">
                   <span>Last</span>
-                  <strong>{formatBookPrice(activePrice)}</strong>
+                  <strong>{formatBookPrice(activePriceForBook)}</strong>
                 </article>
                 <article className="wm-book-stat-depth">
                   <span>Top Depth</span>
@@ -838,7 +884,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                 </div>
                 <div className="wm-focus-book-mid" aria-label="order book spread">
                   <span>Mid Market</span>
-                  <strong>{formatBookPrice(activePrice)}</strong>
+                  <strong>{formatBookPrice(activePriceForBook)}</strong>
                   <em>Spread {formatBookPrice(spreadValue)}</em>
                 </div>
                 <div className="wm-focus-book-side bid">

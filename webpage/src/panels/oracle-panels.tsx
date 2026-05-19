@@ -37,6 +37,18 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
   const marketTitle = ctx.selectedMarket?.title || ctx.bundle?.market?.title || ctx.selectedMarketGroupDetail?.title || ctx.selectedMarketGroup?.title || 'Selected market';
   const status = payload.completionStatus || (payload.isFinal ? 'SETTLED' : payload.isTradingClosed ? 'CLOSED' : 'OPEN');
   const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : 'Awaiting oracle';
+  const bookStatus = String(ctx.bundle?.lob?.bookStatus || '').toLowerCase();
+  const hasLiveBook = Boolean(
+    (ctx.bundle?.lob?.yes?.asks || []).length
+      || (ctx.bundle?.lob?.yes?.bids || []).length
+      || (ctx.bundle?.lob?.no?.asks || []).length
+      || (ctx.bundle?.lob?.no?.bids || []).length,
+  );
+  const tradingText = payload.isTradingClosed
+    ? 'Trading closed'
+    : bookStatus === 'no-book' || (!hasLiveBook && ctx.bundle?.lob)
+      ? 'No live CLOB book'
+      : 'Oracle open';
   return (
     <div className="wm-oracle-shell focused">
       <div className="wm-oracle-summary-strip">
@@ -59,7 +71,7 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
           <span>{payload.localMarketId || payload.marketId ? `MKT #${payload.localMarketId || payload.marketId}` : 'NO LOCAL ID'}</span>
         </div>
         <div className="wm-oracle-event-meta">
-          <span>{payload.isTradingClosed ? 'Trading closed' : 'Trading open'}</span>
+          <span>{tradingText}</span>
           <span>{formatRelative(ctx.selectedMarket?.endDate || ctx.bundle?.market?.endDate || null)}</span>
         </div>
         <div className="wm-oracle-proof-grid">

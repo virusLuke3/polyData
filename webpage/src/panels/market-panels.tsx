@@ -203,6 +203,22 @@ function uniqueGroupOutcomes(outcomes: MarketGroupOutcome[]) {
   });
 }
 
+function groupDisplayVolume(group: MarketGroupItem) {
+  return firstFiniteValue(
+    group.volume24h,
+    sumFiniteValues((group.outcomes || []).map((outcome) => outcome.volume24h)),
+    sumFiniteValues((group.topOutcomes || []).map((outcome) => outcome.volume24h)),
+  );
+}
+
+function groupDisplayTradeCount(group: MarketGroupItem) {
+  return firstFiniteValue(
+    group.tradeCount24h,
+    sumFiniteValues((group.outcomes || []).map((outcome) => outcome.tradeCount24h)),
+    sumFiniteValues((group.topOutcomes || []).map((outcome) => outcome.tradeCount24h)),
+  );
+}
+
 function statusTone(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
   if (/active|open|live|trading/.test(normalized)) return 'active';
@@ -261,8 +277,8 @@ function activeMarketGroupsList(
               </div>
               <strong className="wm-poly-market-title">{group.title}</strong>
               <div className="wm-poly-market-bottom">
-                {groupOutcomePills(group.topOutcomes || group.outcomes || [])}
-                <span className="wm-poly-market-volume">vol {formatCurrencyCompact(group.volume24h)} 24h</span>
+                {groupOutcomePills(group.outcomes?.length ? group.outcomes : (group.topOutcomes || []))}
+                <span className="wm-poly-market-volume">vol {formatCurrencyCompact(groupDisplayVolume(group))} 24h</span>
               </div>
             </div>
             <span className="wm-poly-market-star" aria-hidden="true">☆</span>
@@ -511,8 +527,8 @@ export const marketPanelRenderers: PanelRenderMap = {
       const groupOutcomes = selectedGroup ? uniqueGroupOutcomes([...(selectedGroup.outcomes || []), ...(selectedGroup.topOutcomes || [])]) : [];
       const groupOutcomeVolume24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.volume24h));
       const groupOutcomeTradeCount24h = sumFiniteValues(groupOutcomes.map((outcome) => outcome.tradeCount24h));
-      const volume24h = firstFiniteValue(selectedOutcome?.volume24h, selectedGroup?.volume24h, groupOutcomeVolume24h, listMarket?.volume24h, price?.volume24h);
-      const tradeCount24h = firstFiniteValue(selectedOutcome?.tradeCount24h, selectedGroup?.tradeCount24h, groupOutcomeTradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
+      const volume24h = firstFiniteValue(selectedOutcome?.volume24h, selectedGroup ? groupDisplayVolume(selectedGroup) : null, groupOutcomeVolume24h, listMarket?.volume24h, price?.volume24h);
+      const tradeCount24h = firstFiniteValue(selectedOutcome?.tradeCount24h, selectedGroup ? groupDisplayTradeCount(selectedGroup) : null, groupOutcomeTradeCount24h, listMarket?.tradeCount24h, price?.tradeCount24h);
       const status = selected?.status || listMarket?.status || 'market';
       const endDate = selectedGroup?.endDate || selected?.endDate || listMarket?.endDate || null;
       const oracleHint = marketSummaryOracleHint(ctx, endDate);

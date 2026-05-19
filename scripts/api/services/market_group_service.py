@@ -479,11 +479,43 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         if candidate_ts > last_activity_ts:
             last_activity_ts = candidate_ts
             last_activity_at = candidate
-    default_outcome = next((outcome for outcome in top_outcomes if outcome.get("marketId") is not None), None)
+    def _default_outcome_score(outcome: Dict[str, Any]) -> Tuple[float, float, float]:
+        price = _float_value(outcome.get("yesPrice"))
+        volume = _float_value(outcome.get("volume24h")) or 0.0
+        trades = _float_value(outcome.get("tradeCount24h")) or 0.0
+        label = str(outcome.get("label") or "").lower()
+        score = 0.0
+        if outcome.get("marketId") is not None:
+            score += 100.0
+        if volume > 0:
+            score += min(40.0, volume ** 0.25)
+        if trades > 0:
+            score += min(20.0, trades)
+        if price is not None:
+            if 0.02 < price < 0.98:
+                score += 15.0
+            if price <= 0.01 or price >= 0.99:
+                score -= 35.0
+        if "completed match" in label or label.strip() in {"completed", "match completed"}:
+            score -= 25.0
+        return (score, volume, trades)
+
+    default_candidates = [outcome for outcome in outcomes if outcome.get("marketId") is not None]
+    default_outcome = max(default_candidates, key=_default_outcome_score, default=None)
     if default_outcome is None and top_outcomes:
         default_outcome = top_outcomes[0]
     if default_outcome is None and outcomes:
         default_outcome = outcomes[0]
+    event_volume_24h = _float_value(event.get("volume24hr") or event.get("volume_24hr") or event.get("volume24h"))
+    if event_volume_24h is None:
+        outcome_volumes = [_float_value(outcome.get("volume24h")) for outcome in outcomes]
+        summed_volume = sum(value for value in outcome_volumes if value is not None)
+        event_volume_24h = summed_volume if summed_volume > 0 else None
+    event_trade_count_24h = sum(
+        int(float(value))
+        for value in (_float_value(outcome.get("tradeCount24h")) for outcome in outcomes)
+        if value is not None and value > 0
+    ) or None
 
     return {
         "groupId": f"event:{event.get('id') or event.get('slug')}",
@@ -494,7 +526,8 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         "tags": _event_tags(event),
         "createdAt": event.get("startDate") or event.get("createdAt") or event.get("created_at"),
         "endDate": event.get("endDate") or event.get("end_date"),
-        "volume24h": _float_value(event.get("volume24hr") or event.get("volume_24hr") or event.get("volume24h")),
+        "volume24h": event_volume_24h,
+        "tradeCount24h": event_trade_count_24h,
         "outcomeCount": len(outcomes),
         "lastActivityAt": last_activity_at,
         "defaultOutcomeKey": default_outcome.get("outcomeKey") if default_outcome else None,
@@ -505,7 +538,17 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
                 "outcomeKey": outcome.get("outcomeKey"),
                 "label": outcome.get("label"),
                 "yesPrice": outcome.get("yesPrice"),
+                "noPrice": outcome.get("noPrice"),
+                "change24h": outcome.get("change24h"),
+                "volume24h": outcome.get("volume24h"),
+                "tradeCount24h": outcome.get("tradeCount24h"),
                 "marketId": outcome.get("marketId"),
+                "localMarketId": outcome.get("localMarketId"),
+                "gammaMarketId": outcome.get("gammaMarketId"),
+                "conditionId": outcome.get("conditionId"),
+                "slug": outcome.get("slug"),
+                "yesTokenId": outcome.get("yesTokenId"),
+                "noTokenId": outcome.get("noTokenId"),
             }
             for outcome in top_outcomes[:5]
         ],
@@ -615,7 +658,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 4}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 5}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         fetch_target = max(100, min(1000, (page * page_size * 3)))
@@ -718,7 +761,7 @@ def get_market_group_detail_payload(ctx: dict, event_id: str) -> Optional[Dict[s
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 2}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 3}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         try:
@@ -761,7 +804,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 4}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 5}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = get_market_group_detail_payload(ctx, identifier)
