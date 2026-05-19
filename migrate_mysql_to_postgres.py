@@ -138,7 +138,7 @@ CREATE SCHEMA IF NOT EXISTS core;
 CREATE TABLE IF NOT EXISTS core.markets (
   id BIGINT PRIMARY KEY,
   gamma_market_id TEXT,
-  slug TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL,
   condition_id TEXT NOT NULL UNIQUE,
   question_id TEXT,
   oracle TEXT,
@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS core.markets (
   clob_token_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
   migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE core.markets DROP CONSTRAINT IF EXISTS markets_slug_key;
 
 COMMENT ON COLUMN core.markets.id IS
   'Local surrogate market id for internal joins. Do not use for Gamma API /markets/{id}.';
@@ -169,6 +170,7 @@ COMMENT ON COLUMN core.markets.no_token_id IS
   'NO outcome ERC1155/CLOB token id. Use token ids for orderbook, price history, and trade matching.';
 
 CREATE INDEX IF NOT EXISTS idx_markets_gamma_market_id ON core.markets (gamma_market_id);
+CREATE INDEX IF NOT EXISTS idx_markets_slug ON core.markets (slug);
 CREATE INDEX IF NOT EXISTS idx_markets_question_id ON core.markets (question_id);
 CREATE INDEX IF NOT EXISTS idx_markets_yes_token_id ON core.markets (yes_token_id);
 CREATE INDEX IF NOT EXISTS idx_markets_no_token_id ON core.markets (no_token_id);
@@ -892,7 +894,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mysql-host", default=DEFAULT_MYSQL_HOST)
     parser.add_argument("--mysql-port", type=int, default=DEFAULT_MYSQL_PORT)
     parser.add_argument("--mysql-user", default=DEFAULT_MYSQL_USER)
-    parser.add_argument("--mysql-password", default=DEFAULT_MYSQL_PASSWORD)
     parser.add_argument("--mysql-database", default=DEFAULT_MYSQL_DATABASE)
     parser.add_argument("--mysql-charset", default=DEFAULT_MYSQL_CHARSET)
     parser.add_argument("--mysql-read-timeout", type=int, default=3600)
@@ -901,7 +902,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--postgres-host", default=DEFAULT_PG_HOST)
     parser.add_argument("--postgres-port", type=int, default=DEFAULT_PG_PORT)
     parser.add_argument("--postgres-user", default=DEFAULT_PG_USER)
-    parser.add_argument("--postgres-password", default=DEFAULT_PG_PASSWORD)
     parser.add_argument("--postgres-database", default=DEFAULT_PG_DATABASE)
 
     parser.add_argument(
@@ -940,6 +940,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    args.mysql_password = DEFAULT_MYSQL_PASSWORD
+    args.postgres_password = DEFAULT_PG_PASSWORD
     selected_tables = expand_tables(args.tables)
     snapshot_mode = resolve_snapshot_mode(args.snapshot_mode, selected_tables)
 

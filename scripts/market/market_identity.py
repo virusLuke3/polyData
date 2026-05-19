@@ -211,6 +211,17 @@ def oracle_event_lookup_clause(identity: MarketIdentity, alias: str = "oe") -> t
     return " OR ".join(clauses), tuple(params)
 
 
+def oracle_event_lookup_terms(identity: MarketIdentity) -> List[tuple[str, Any]]:
+    terms: List[tuple[str, Any]] = [("market_id", identity.local_market_id)]
+    if identity.gamma_market_id:
+        terms.append(("external_market_id", identity.gamma_market_id))
+    if identity.condition_id:
+        terms.append(("condition_id", identity.condition_id))
+    if identity.question_id:
+        terms.append(("question_id", identity.question_id))
+    return terms
+
+
 def resolve_local_market_ids_by_gamma_id(conn: Any, gamma_market_id: Any) -> List[int]:
     gamma_id = normalize_gamma_market_id(gamma_market_id)
     if not gamma_id:

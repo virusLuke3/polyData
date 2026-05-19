@@ -42,6 +42,20 @@ Before copying these units into `~/.config/systemd/user/`, replace:
 
 ## Install flow
 
+For the current local development machine, prefer the repo helper:
+
+```bash
+make services-install
+make services-start
+make services-status
+```
+
+It installs a smaller `polydata-core.target` for PostgreSQL market/oracle/API
+runtime and intentionally excludes `polydata-trade-sync.service` until the
+OrderFilled ClickHouse migration is ready.
+
+The manual template flow is:
+
 1. Copy the example env file and fill in secrets:
 
 ```bash
@@ -105,7 +119,7 @@ journalctl --user-unit polydata-telegram-publisher -f
 
 ## Notes
 
-- MySQL, Redis, and Tailscale are treated as external dependencies and do not
+- PostgreSQL and Redis are treated as external dependencies and do not
   have repo-managed unit files in this first step.
 - Logs go to journald instead of repo-local pid or log files.
 - The user-level units avoid writing to `/etc/systemd/system/` on shared hosts.

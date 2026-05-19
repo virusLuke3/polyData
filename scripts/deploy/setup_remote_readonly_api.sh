@@ -16,12 +16,13 @@ REMOTE_WEB_ROOT="${REMOTE_WEB_ROOT:-/var/www/polydata}"
 LOCAL_DB_SSH_USER="${LOCAL_DB_SSH_USER:-}"
 LOCAL_DB_SSH_HOST="${LOCAL_DB_SSH_HOST:-}"
 LOCAL_DB_FORWARD_HOST="${LOCAL_DB_FORWARD_HOST:-127.0.0.1}"
-LOCAL_DB_FORWARD_PORT="${LOCAL_DB_FORWARD_PORT:-3306}"
-REMOTE_DB_TUNNEL_PORT="${REMOTE_DB_TUNNEL_PORT:-43306}"
+LOCAL_DB_FORWARD_PORT="${LOCAL_DB_FORWARD_PORT:-45432}"
+REMOTE_DB_TUNNEL_PORT="${REMOTE_DB_TUNNEL_PORT:-45432}"
 
-MYSQL_DATABASE="${MYSQL_DATABASE:-poly_data}"
-MYSQL_USER="${MYSQL_USER:-poly_readonly}"
-MYSQL_PASSWORD="${MYSQL_PASSWORD:-}"
+POSTGRES_DATABASE="${POSTGRES_DATABASE:-poly_data_core}"
+POSTGRES_USER="${POSTGRES_USER:-poly_user}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+POSTGRES_SEARCH_PATH="${POSTGRES_SEARCH_PATH:-core,oracle,ops,public}"
 API_PORT="${API_PORT:-18500}"
 SERVER_NAME="${SERVER_NAME:-${REMOTE_HOST}}"
 PYTHON_BIN="${PYTHON_BIN:-${REMOTE_REPO_ROOT}/.venv/bin/python}"
@@ -37,8 +38,8 @@ if [[ -z "${LOCAL_DB_SSH_USER}" || -z "${LOCAL_DB_SSH_HOST}" ]]; then
   exit 1
 fi
 
-if [[ -z "${MYSQL_PASSWORD}" ]]; then
-  echo "MYSQL_PASSWORD is required." >&2
+if [[ -z "${POSTGRES_PASSWORD}" ]]; then
+  echo "POSTGRES_PASSWORD is required." >&2
   exit 1
 fi
 
@@ -59,16 +60,13 @@ LOCAL_NGINX_CONF="$(mktemp)"
 trap 'rm -f "${LOCAL_ENV_FILE}" "${LOCAL_TUNNEL_SERVICE}" "${LOCAL_API_SERVICE}" "${LOCAL_NGINX_CONF}"' EXIT
 
 cat > "${LOCAL_ENV_FILE}" <<EOF
-POLYMARKET_DB_BACKEND=mysql
-POLYMARKET_MYSQL_HOST=127.0.0.1
-POLYMARKET_MYSQL_PORT=${REMOTE_DB_TUNNEL_PORT}
-POLYMARKET_MYSQL_USER=${MYSQL_USER}
-POLYMARKET_MYSQL_PASSWORD=${MYSQL_PASSWORD}
-POLYMARKET_MYSQL_DATABASE=${MYSQL_DATABASE}
-POLYMARKET_MYSQL_CHARSET=utf8mb4
-POLYMARKET_MYSQL_CONNECT_TIMEOUT=10
-POLYMARKET_MYSQL_READ_TIMEOUT=60
-POLYMARKET_MYSQL_WRITE_TIMEOUT=60
+POLYMARKET_DB_BACKEND=postgres
+POLYDATA_POSTGRES_HOST=127.0.0.1
+POLYDATA_POSTGRES_PORT=${REMOTE_DB_TUNNEL_PORT}
+POLYDATA_POSTGRES_USER=${POSTGRES_USER}
+POLYDATA_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POLYDATA_POSTGRES_DATABASE=${POSTGRES_DATABASE}
+POLYDATA_POSTGRES_SEARCH_PATH=${POSTGRES_SEARCH_PATH}
 
 POLYDATA_PYTHON_BIN=${PYTHON_BIN}
 POLYDATA_API_READONLY=1
@@ -202,9 +200,17 @@ loginctl enable-linger "${USER}" >/dev/null 2>&1 || true
 EOF
 
 echo "[4/7] Verifying DB tunnel and API health ..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "python3 - <<'PY'
-import pymysql
-conn = pymysql.connect(host='127.0.0.1', port=${REMOTE_DB_TUNNEL_PORT}, user='${MYSQL_USER}', password='${MYSQL_PASSWORD}', database='${MYSQL_DATABASE}', charset='utf8mb4', autocommit=True)
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "set -a; . ~/.config/polydata/polydata.env; set +a; python3 - <<'PY'
+import os
+import psycopg
+conn = psycopg.connect(
+    host=os.environ['POLYDATA_POSTGRES_HOST'],
+    port=int(os.environ['POLYDATA_POSTGRES_PORT']),
+    user=os.environ['POLYDATA_POSTGRES_USER'],
+    password=os.environ['POLYDATA_POSTGRES_PASSWORD'],
+    dbname=os.environ['POLYDATA_POSTGRES_DATABASE'],
+    options=f\"-c search_path={os.environ.get('POLYDATA_POSTGRES_SEARCH_PATH', 'core,oracle,ops,public')}\",
+)
 with conn.cursor() as cur:
     cur.execute('SELECT 1')
     print('db-ok', cur.fetchone())
@@ -221,4 +227,4 @@ ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-page
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
 echo "[7/7] Done."
-echo "Remote readonly API host is configured on ${REMOTE_HOST}."
+echo "Remote PostgreSQL API host is configured on ${REMOTE_HOST}."

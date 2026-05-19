@@ -1020,6 +1020,20 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
           )
         """
     )
+    _ensure_postgres_oracle_indexes(conn)
+
+
+def _ensure_postgres_oracle_indexes(conn: PostgresConnectionWrapper) -> None:
+    row = conn.execute("SELECT to_regclass('oracle.oracle_events')").fetchone()
+    if not row or not row[0]:
+        return
+    for table, index_name, cols in (
+        ("oracle.oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"]),
+        ("oracle.oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"]),
+        ("oracle.oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"]),
+        ("oracle.oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"]),
+    ):
+        create_index_if_not_exists(conn, table, index_name, cols)
 
 
 def init_schema(conn=None, db_path: str = DEFAULT_DB_PATH) -> None:
@@ -1410,6 +1424,10 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
+        ("oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),
         ("oracle_events", "idx_oracle_events_status", ["event_status"]),
         ("oracle_events", "idx_oracle_events_status_market_id", ["event_status", "market_id"]),
@@ -1753,6 +1771,10 @@ def _init_mysql_schema(conn) -> None:
         ("oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
+        ("oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"]),
+        ("oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),
         ("oracle_events", "idx_oracle_events_status", ["event_status"]),
         ("oracle_events", "idx_oracle_events_status_market_id", ["event_status", "market_id"]),

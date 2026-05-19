@@ -25,7 +25,7 @@ if str(_scripts_root) not in sys.path:
 
 from web3 import Web3
 
-from db import dict_from_row, get_connection, is_mysql_backend
+from db import dict_from_row, get_connection
 from oracle.fetch_uma_oracle_chain import (
     _OracleDbWriter,
     _block_at_timestamp,
@@ -95,7 +95,7 @@ def _get_earliest_updown_market_created_at(db_path: Optional[str]) -> Optional[s
             FROM markets
             WHERE slug LIKE ?
               AND created_at IS NOT NULL
-              AND TRIM(created_at) <> ''
+              AND TRIM(CAST(created_at AS TEXT)) <> ''
             """,
             ("%-updown-%",),
         )
@@ -423,6 +423,11 @@ def run_updown_oracle_backfill(
         )
         writer.write(record)
         stats["matched_events"] += 1
+        if stats["matched_events"] % 5000 == 0:
+            print(
+                f"[updown-oracle] written matched events: {stats['matched_events']}",
+                file=sys.stderr,
+            )
         if decoded["label"] == "request":
             stats["request_events"] += 1
         elif decoded["label"] == "settle":

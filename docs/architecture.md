@@ -20,7 +20,7 @@ The current runtime flow is:
 ```text
 Polymarket / chain / runtime sources
   -> Python sync jobs
-  -> MySQL / local caches
+  -> PostgreSQL / local caches
   -> Flask API
   -> Vite/Preact dashboard
 ```

@@ -422,7 +422,7 @@ function eventChartLegend(
   const visible = outcomes
     .slice()
     .sort((left, right) => Number(right.yesPrice || 0) - Number(left.yesPrice || 0))
-    .slice(0, 6);
+    .slice(0, 12);
   if (!visible.length) return null;
   return (
     <div className="wm-focus-event-legend" aria-label="event outcomes legend">
@@ -562,6 +562,25 @@ function renderDetailChart(chart: ChartPayload | null) {
   );
 }
 
+function fallbackChartFromPrice(marketId: number | null | undefined, price?: string | number | null): ChartPayload | null {
+  const numeric = Number(price);
+  if (!marketId || !Number.isFinite(numeric)) return null;
+  const now = Date.now();
+  const timestamp = (offsetMinutes: number) => new Date(now - offsetMinutes * 60_000).toISOString();
+  return {
+    marketId,
+    localMarketId: marketId,
+    range: 'snapshot',
+    interval: 'snapshot',
+    kind: 'probability',
+    points: [
+      { timestamp: timestamp(30), yesPrice: numeric, noPrice: 1 - numeric },
+      { timestamp: timestamp(15), yesPrice: numeric, noPrice: 1 - numeric },
+      { timestamp: timestamp(0), yesPrice: numeric, noPrice: 1 - numeric },
+    ],
+  };
+}
+
 export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const { renderPanelSlot, ...ctx } = props;
   const focusedMarket = ctx.selectedMarket;
@@ -588,9 +607,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const tokenLobLoading = tokenLobState.key === selectedTokenKey && tokenLobState.loading;
   const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
-  const chartPoints = chart?.points || [];
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
-  const lob = executionAvailable ? ((bundleMatchesSelected ? ctx.bundle?.lob : null) || tokenLob) : null;
+  const lob = executionAvailable ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
   const [bookSide, setBookSide] = useState<BookSide>('yes');
@@ -613,6 +631,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
   const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
   const displayedNoPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice;
+  const chartFallback = fallbackChartFromPrice(ctx.selectedMarketId, displayedYesPrice);
+  const displayChart = (chart?.points || []).length ? chart : chartFallback;
+  const chartPoints = displayChart?.points || [];
   const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
@@ -624,7 +645,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
 
   useEffect(() => {
-    if (!selectedTokenId || bundleMatchesSelected) {
+    if (!selectedTokenId) {
       setTokenLobState((current) => (current.loading || current.lob ? { key: '', lob: null, loading: false } : current));
       return;
     }
@@ -641,7 +662,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     return () => {
       cancelled = true;
     };
-  }, [bundleMatchesSelected, detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
+  }, [detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
   return (
     <section className="wm-focus-strip">
@@ -710,10 +731,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                         hasEventHistory
                           ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey)
                           : showFocusedOutcomeFallback
-                            ? renderDetailChart(chart)
-                            : emptyState('Fresh market: waiting for event price history to print.')
+                            ? renderDetailChart(displayChart)
+                            : emptyState('No event price history is available for this market yet.')
                       )
-                    : (chartPoints.length ? renderDetailChart(chart) : emptyState('No market history loaded yet.'))}
+                    : (chartPoints.length ? renderDetailChart(displayChart) : emptyState('No local price history is available for this market.'))}
                 </div>
                 {shouldShowOutcomeRail ? (
                   <aside className="wm-focus-outcome-rail" aria-label="outcomes">
@@ -780,11 +801,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           controls={(selectedOutcome || focusedMarket) ? <span className="wm-focus-header-note">{orderbookOutcomeLabel(ctx, bookSide, selectedOutcome)}</span> : undefined}
         >
           {!executionAvailable && detail ? (
-            emptyState('Select an outcome with CLOB token data to load the order book.')
+            emptyState('Select an outcome with CLOB token data to inspect the order book.')
           ) : tokenLobLoading ? (
             emptyState('Loading live CLOB order book.')
           ) : !lob || !activeBook ? (
-            emptyState('Order book snapshot unavailable right now. Panel will retry automatically.')
+            emptyState('No CLOB order book snapshot is available for this market.')
           ) : (
             <div className="wm-focus-book" key={`book-${bookSide}`}>
               <div className="wm-focus-book-topbar">
@@ -869,7 +890,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
               ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
-              : emptyState(noTradesYet ? 'No trade rows yet for this outcome.' : 'Waiting for trade rows.')}
+              : emptyState(noTradesYet ? 'No orderfilled rows exist for this outcome yet.' : 'No local orderfilled rows are available for this market.')}
           </div>
         </Panel>
       ))}

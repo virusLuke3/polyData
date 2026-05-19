@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
-from market.market_identity import MarketIdentity, oracle_event_lookup_clause
+from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v8"
 DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL = """
@@ -583,8 +583,51 @@ def get_recent_trades_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
 
 def get_oracle_events_by_market_id(ctx: dict, market_id: int, market: Optional[dict] = None) -> List[Dict[str, Any]]:
     market = market if market is not None else get_market_by_id(ctx, market_id)
+    identity = MarketIdentity.from_row(market) if market else None
+    backend_getter = ctx.get("get_backend")
+    backend = str(backend_getter() if callable(backend_getter) else "").strip().lower()
+    if backend in {"postgres", "postgresql"} and identity:
+        terms = oracle_event_lookup_terms(identity)
+        union_sql = "\nUNION ALL\n".join(
+            f"SELECT oe.* FROM oracle_events oe WHERE oe.{column_name} = ?"
+            for column_name, _value in terms
+        )
+        rows = ctx["query_all"](
+            f"""
+            WITH matched_events AS (
+                {union_sql}
+            ),
+            dedup_events AS (
+                SELECT DISTINCT ON (id) *
+                FROM matched_events
+                ORDER BY id
+            )
+            SELECT
+                oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+                COALESCE(oe.market_id, m.id) AS market_id, COALESCE(m.title, oe.market_title) AS market_title,
+                oe.matched_by, COALESCE(NULLIF(oe.question_id, ''), m.question_id) AS question_id,
+                COALESCE(NULLIF(oe.condition_id, ''), m.condition_id) AS condition_id,
+                oe.proposed_price, oe.settled_price, oe.payout, oe.requester, oe.proposer, oe.disputer,
+                oe.proposal_transaction, oe.settlement_transaction, oe.source_adapter, oe.source_oracle,
+                m.slug AS market_slug, m.category AS market_category,
+                COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+                COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+                COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+                COALESCE(mss.is_final, FALSE) AS is_final,
+                COALESCE(mss.settlement_code, 0) AS snapshot_settlement_code,
+                COALESCE(mss.settlement_outcome, 'UNKNOWN') AS snapshot_settlement_outcome,
+                mss.settlement_source AS snapshot_settlement_source
+            FROM dedup_events oe
+            LEFT JOIN markets m ON m.id = COALESCE(oe.market_id, ?)
+            LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+            ORDER BY oe.block_number ASC NULLS LAST, oe.id ASC
+            """,
+            (*[value for _column_name, value in terms], market_id),
+        )
+        return [ctx["normalize_oracle_event"](row) for row in rows]
+
     if market:
-        where_sql, where_params = oracle_event_lookup_clause(MarketIdentity.from_row(market), "oe")
+        where_sql, where_params = oracle_event_lookup_clause(identity or MarketIdentity.from_row(market), "oe")
     else:
         where_sql, where_params = "oe.market_id = ?", (market_id,)
     rows = ctx["query_all"](

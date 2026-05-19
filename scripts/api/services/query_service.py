@@ -257,12 +257,22 @@ def get_recent_oracle_events(ctx: dict, limit: int = 24) -> List[Dict[str, Any]]
     rows = ctx["query_all"](
         """
         SELECT
-            id, tx_hash, block_number, event_time, event_status, external_market_id,
-            market_id, market_title, matched_by, question_id, condition_id,
-            proposed_price, settled_price, payout, requester, proposer, disputer,
-            proposal_transaction, settlement_transaction, source_adapter, source_oracle
-        FROM oracle_events
-        ORDER BY block_number DESC, id DESC
+            oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
+            oe.market_id, COALESCE(m.title, oe.market_title) AS market_title, oe.matched_by,
+            oe.question_id, oe.condition_id, oe.proposed_price, oe.settled_price, oe.payout,
+            oe.requester, oe.proposer, oe.disputer, oe.proposal_transaction, oe.settlement_transaction,
+            oe.source_adapter, oe.source_oracle, m.slug AS market_slug, m.category AS market_category,
+            COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss.is_final, FALSE) AS is_final,
+            COALESCE(mss.settlement_code, 0) AS snapshot_settlement_code,
+            COALESCE(mss.settlement_outcome, 'UNKNOWN') AS snapshot_settlement_outcome,
+            mss.settlement_source AS snapshot_settlement_source
+        FROM oracle_events oe
+        LEFT JOIN markets m ON m.id = oe.market_id
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+        ORDER BY oe.block_number DESC, oe.id DESC
         LIMIT ?
         """,
         (limit,),

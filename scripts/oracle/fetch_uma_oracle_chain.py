@@ -18,7 +18,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from hexbytes import HexBytes
 
@@ -50,7 +50,7 @@ from db import (
     get_connection,
     get_table_columns,
     init_schema,
-    is_mysql_backend,
+    is_postgres_backend,
 )
 
 # 合约地址（Polygon）
@@ -95,12 +95,16 @@ RPC_RECOVERY_SLEEP_MAX_SECONDS = 300
 MAX_LOGS: Optional[int] = None
 PARQUET_WRITE_BATCH = 5000
 ORACLE_SYNC_STATE_KEY = "oracle_sync"
+ORACLE_LIVE_SYNC_STATE_KEY = "oracle_sync_live"
+ORACLE_UPDOWN_LIVE_SYNC_STATE_KEY = "oracle_updown_sync_live"
 ADAPTER_FULL_HISTORY_START_BLOCK = 0
 CONTINUE_SYNC_REWIND_BLOCKS = 500
+CONTINUE_SYNC_MAX_BLOCKS = 200_000
 WATCH_ERROR_BACKOFF_BASE_SECONDS = 30
 WATCH_ERROR_BACKOFF_MAX_SECONDS = 300
 
 POLYMARKET_DB = os.environ.get("POLYMARKET_DB", DEFAULT_DB_PATH)
+ProgressCallback = Optional[Callable[[Dict[str, Any]], None]]
 
 
 def _topic0(sig: str) -> str:
@@ -337,12 +341,12 @@ def _should_split_range(exc: Exception, from_block: int, to_block: int) -> bool:
     )
 
 
-def _connect_sqlite_readonly(db_path: str):
+def _connect_db_readonly(db_path: str):
     return get_connection(db_path, readonly=True)
 
 
 def _db_target_available(db_path: str) -> bool:
-    if is_mysql_backend():
+    if is_postgres_backend():
         return True
     return Path(db_path).exists()
 
@@ -352,10 +356,10 @@ def _table_has_column(conn, table: str, column: str) -> bool:
 
 
 def _get_earliest_market_created_at(db_path: str) -> Optional[str]:
-    conn = _connect_sqlite_readonly(db_path)
+    conn = _connect_db_readonly(db_path)
     try:
         cur = conn.execute(
-            "SELECT MIN(created_at) FROM markets WHERE created_at IS NOT NULL AND TRIM(created_at) != ''"
+            "SELECT MIN(created_at) FROM markets WHERE created_at IS NOT NULL AND TRIM(CAST(created_at AS TEXT)) != ''"
         )
         row = cur.fetchone()
         return row[0] if row and row[0] else None
@@ -367,7 +371,7 @@ def get_last_oracle_synced_block(
     db_path: str,
     sync_state_key: str = ORACLE_SYNC_STATE_KEY,
 ) -> Optional[int]:
-    conn = _connect_sqlite_readonly(db_path)
+    conn = _connect_db_readonly(db_path)
     try:
         cur = conn.execute(
             "SELECT last_block FROM sync_state WHERE key = ?",
@@ -401,6 +405,53 @@ def save_oracle_synced_block(
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def save_oracle_live_state(
+    db_path: str,
+    *,
+    status: str,
+    phase: str,
+    from_block: Optional[int] = None,
+    to_block: Optional[int] = None,
+    progress_block: Optional[int] = None,
+    logs_scanned: Optional[int] = None,
+    records_written: Optional[int] = None,
+    error: Optional[str] = None,
+) -> None:
+    payload = {
+        "status": status,
+        "phase": phase,
+        "fromBlock": from_block,
+        "toBlock": to_block,
+        "progressBlock": progress_block,
+        "logsScanned": logs_scanned,
+        "recordsWritten": records_written,
+        "error": error,
+        "updatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    live_block = progress_block if progress_block is not None else from_block
+    if live_block is None:
+        live_block = to_block or 0
+    conn = _connect_sqlite_write(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO sync_state (key, value, last_block, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                ORACLE_LIVE_SYNC_STATE_KEY,
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                int(live_block or 0),
+                payload["updatedAt"],
+            ),
+        )
+        conn.commit()
+    except Exception as exc:
+        print(f"[oracle] save live sync state failed: {_format_rpc_error(exc)}", file=sys.stderr)
     finally:
         conn.close()
 
@@ -443,7 +494,7 @@ def _load_market_bridge_indices(db_path: str) -> Dict[str, Any]:
     从 markets 表构建 Oracle -> DB 的桥接索引。
     优先使用标题 + 日期消歧，最后再尝试 question_id。
     """
-    conn = _connect_sqlite_readonly(db_path)
+    conn = _connect_db_readonly(db_path)
     try:
         has_gamma_market_id = _table_has_column(conn, "markets", "gamma_market_id")
         cur = conn.execute(
@@ -680,6 +731,8 @@ def fetch_logs_with_retry(
     batch_blocks: int = BATCH_BLOCKS_ORACLE,
     max_logs: Optional[int] = None,
     max_workers: int = 30,
+    progress_callback: ProgressCallback = None,
+    progress_label: str = "logs",
 ) -> List[Dict]:
     limit = max_logs if max_logs is not None else MAX_LOGS
 
@@ -750,19 +803,36 @@ def fetch_logs_with_retry(
 
     logs: List[Dict] = []
     completed_tasks = 0
+    completed_range_ends: List[int] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_range = {executor.submit(_fetch_single_range, r[0], r[1]): r for r in ranges}
         for future in as_completed(future_to_range):
+            _, range_end = future_to_range[future]
             res = future.result()
             if res:
                 logs.extend(res)
             completed_tasks += 1
+            completed_range_ends.append(int(range_end))
             if completed_tasks % max(1, total_tasks // 20) == 0 or completed_tasks == total_tasks:
                 progress = (completed_tasks / total_tasks) * 100
+                progress_block = max(completed_range_ends, default=from_block)
                 print(
                     f"  ---> 抓取进度: {completed_tasks}/{total_tasks} 批次 ({progress:.1f}%) | 累计日志: {len(logs)} 条",
                     file=sys.stderr,
                 )
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "label": progress_label,
+                            "address": address,
+                            "fromBlock": from_block,
+                            "toBlock": to_block,
+                            "progressBlock": min(progress_block, to_block),
+                            "completedTasks": completed_tasks,
+                            "totalTasks": total_tasks,
+                            "logsScanned": len(logs),
+                        }
+                    )
 
     logs.sort(key=lambda x: (x.get("blockNumber", 0), x.get("logIndex", 0)))
     return logs[:limit] if limit is not None else logs
@@ -778,6 +848,7 @@ def fetch_logs_many_addresses(
     max_logs: Optional[int] = None,
     max_workers: int = 30,
     label: str = "logs",
+    progress_callback: ProgressCallback = None,
 ) -> List[Dict]:
     all_logs: List[Dict] = []
     seen: set[Tuple[str, int, int, str]] = set()
@@ -799,6 +870,8 @@ def fetch_logs_many_addresses(
             batch_blocks=batch_blocks,
             max_logs=max_logs,
             max_workers=max_workers,
+            progress_callback=progress_callback,
+            progress_label=label,
         )
         for log in logs:
             tx_hash = _ensure_0x(log.get("transactionHash") or "")
@@ -826,6 +899,29 @@ def fetch_logs_many_addresses(
 # ===================== Step 1: 初始化 SQLite 映射表 =====================
 def init_uma_adapter_mapping(conn) -> None:
     init_schema(conn=conn)
+    if is_postgres_backend():
+        # The migrated PostgreSQL oracle.uma_adapter_mapping table uses an id
+        # primary key plus a generated ancillary_data_hash unique key. Runtime
+        # live sync appends new rows, so id needs a default sequence and the
+        # upsert must target the generated hash constraint rather than the
+        # unindexed TEXT column.
+        conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS oracle.uma_adapter_mapping_id_seq")
+        conn.execute(
+            """
+            ALTER TABLE oracle.uma_adapter_mapping
+            ALTER COLUMN id SET DEFAULT nextval('oracle.uma_adapter_mapping_id_seq')
+            """
+        )
+        conn.execute(
+            """
+            SELECT setval(
+                'oracle.uma_adapter_mapping_id_seq',
+                GREATEST(COALESCE((SELECT MAX(id) FROM oracle.uma_adapter_mapping), 0), 1),
+                true
+            )
+            """
+        )
     conn.commit()
 
 
@@ -934,11 +1030,12 @@ def save_adapter_mapping_entries(
         if not key or not question_id:
             continue
         rows.append((key.lower(), question_id, (mapping_source or {}).get(key, "")))
+    conflict_target = "ancillary_data_hash" if is_postgres_backend() else "ancillary_data"
     conn.executemany(
-        """
+        f"""
         INSERT INTO uma_adapter_mapping (ancillary_data, question_id, source_adapter)
         VALUES (?, ?, ?)
-        ON CONFLICT(ancillary_data) DO UPDATE SET
+        ON CONFLICT({conflict_target}) DO UPDATE SET
             question_id=excluded.question_id,
             source_adapter=COALESCE(NULLIF(TRIM(COALESCE(excluded.source_adapter,'')), ''), uma_adapter_mapping.source_adapter)
         """,
@@ -1044,6 +1141,7 @@ def build_neg_risk_request_mapping(
     operator_addresses: List[str],
     batch_blocks: int = BATCH_BLOCKS_ADAPTER,
     max_workers: int = 30,
+    progress_callback: ProgressCallback = None,
 ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
     """在内存中构建 request_id -> question_id/market_id/source_operator 映射。"""
     if not operator_addresses:
@@ -1059,6 +1157,7 @@ def build_neg_risk_request_mapping(
         max_logs=MAX_LOGS,
         max_workers=max_workers,
         label="NegRisk QuestionPrepared",
+        progress_callback=progress_callback,
     )
     request_question_map: Dict[str, str] = {}
     request_market_map: Dict[str, str] = {}
@@ -1090,9 +1189,31 @@ def _connect_sqlite_write(db_path: str):
 
 def ensure_oracle_events_table(conn) -> None:
     init_schema(conn=conn)
+    if is_postgres_backend():
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS oracle.oracle_events_id_seq")
+        conn.execute(
+            """
+            ALTER TABLE oracle.oracle_events
+            ALTER COLUMN id SET DEFAULT nextval('oracle.oracle_events_id_seq')
+            """
+        )
+        conn.execute(
+            """
+            SELECT setval(
+                'oracle.oracle_events_id_seq',
+                GREATEST(COALESCE((SELECT MAX(id) FROM oracle.oracle_events), 0), 1),
+                true
+            )
+            """
+        )
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_market_id", ["market_id"])
+    create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"])
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_question_id", ["question_id"])
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_condition_id", ["condition_id"])
+    create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"])
+    create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"])
+    create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"])
+    create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"])
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_block", ["block_number"])
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_status", ["event_status"])
     create_index_if_not_exists(conn, "oracle_events", "idx_oracle_events_matched_by", ["matched_by"])
@@ -1177,6 +1298,7 @@ def build_adapter_mapping(
     adapter_addresses: List[str],
     batch_blocks: int = BATCH_BLOCKS_ADAPTER,
     max_workers: int = 30,
+    progress_callback: ProgressCallback = None,
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """仅在内存中构建 ancillary_data (hex) -> question_id 映射，不写数据库。"""
     topic0 = _topic0(EVENT_SIGNATURES["question_initialized"])
@@ -1190,6 +1312,7 @@ def build_adapter_mapping(
         max_logs=MAX_LOGS,
         max_workers=max_workers,
         label="QuestionInitialized",
+        progress_callback=progress_callback,
     )
     mapping: Dict[str, str] = {}
     mapping_source: Dict[str, str] = {}
@@ -1529,6 +1652,9 @@ def run(
     max_workers: int = 30,
     sync_state_key: str = ORACLE_SYNC_STATE_KEY,
     continue_sync_rewind_blocks: int = CONTINUE_SYNC_REWIND_BLOCKS,
+    continue_sync_max_blocks: int = 0,
+    include_updown: bool = False,
+    updown_sync_state_key: str = ORACLE_UPDOWN_LIVE_SYNC_STATE_KEY,
 ) -> str:
     rpc_url = rpc_url or get_rpc_url()
     w3 = _build_web3(rpc_url)
@@ -1580,8 +1706,48 @@ def run(
             oracle_addresses,
             neg_risk_operator_addresses,
         )
+    if continue_sync and continue_sync_max_blocks and continue_sync_max_blocks > 0:
+        capped_end_block = min(int(end_block), int(oracle_start_block) + int(continue_sync_max_blocks) - 1)
+        if capped_end_block < int(end_block):
+            print(
+                f"[continue-sync] Capping this live run to block {capped_end_block} "
+                f"(target={end_block}, max_blocks={continue_sync_max_blocks})",
+                file=sys.stderr,
+            )
+            end_block = capped_end_block
     if adapter_start_block is None:
-        adapter_start_block = ADAPTER_FULL_HISTORY_START_BLOCK
+        if continue_sync:
+            # In live mode the historical adapter / neg-risk dictionaries are
+            # already persisted. Re-scanning from block 0 turns every restart
+            # into a full-history job and prevents fresh oracle events from
+            # being reached. A small rewind on the oracle checkpoint is enough
+            # to catch new QuestionInitialized / QuestionPrepared rows.
+            adapter_start_block = oracle_start_block
+        else:
+            adapter_start_block = ADAPTER_FULL_HISTORY_START_BLOCK
+
+    def _live(phase: str, **extra: Any) -> None:
+        save_oracle_live_state(
+            db_path,
+            status=str(extra.pop("status", "running")),
+            phase=phase,
+            from_block=oracle_start_block,
+            to_block=end_block,
+            **extra,
+        )
+
+    def _log_progress(payload: Dict[str, Any]) -> None:
+        save_oracle_live_state(
+            db_path,
+            status="running",
+            phase=f"fetch:{payload.get('label') or 'logs'}",
+            from_block=payload.get("fromBlock"),
+            to_block=payload.get("toBlock"),
+            progress_block=payload.get("progressBlock"),
+            logs_scanned=payload.get("logsScanned"),
+        )
+
+    _live("start", progress_block=oracle_start_block)
 
     # Step 1 & 2: 复用历史 SQLite 映射，并增量补充最近 QuestionInitialized
     adapter_map: Dict[str, str] = {}
@@ -1616,7 +1782,9 @@ def run(
         adapter_addresses=adapter_addresses,
         batch_blocks=batch_adapter,
         max_workers=max_workers,
+        progress_callback=_log_progress,
     )
+    _live("adapter_mapping", progress_block=end_block, logs_scanned=len(recent_adapter_map))
     adapter_map.update(recent_adapter_map)
     adapter_map_source.update(recent_adapter_source)
     if db_exists and recent_adapter_map:
@@ -1633,9 +1801,11 @@ def run(
         adapter_start_block,
         end_block,
         operator_addresses=neg_risk_operator_addresses,
+        progress_callback=_log_progress,
         batch_blocks=batch_adapter,
         max_workers=max_workers,
     )
+    _live("neg_risk_mapping", progress_block=end_block, logs_scanned=len(recent_neg_risk_request_map))
     neg_risk_request_map.update(recent_neg_risk_request_map)
     neg_risk_market_map.update(recent_neg_risk_market_map)
     neg_risk_operator_map.update(recent_neg_risk_operator_map)
@@ -1687,7 +1857,9 @@ def run(
         max_logs=MAX_LOGS,
         max_workers=max_workers,
         label="UMA Oracle events",
+        progress_callback=_log_progress,
     )
+    _live("oracle_logs_fetched", progress_block=end_block, logs_scanned=len(logs))
 
     # ================= 核心优化 1：高并发预取所有独立区块的时间戳 =================
     unique_blocks = list(set(log["blockNumber"] for log in logs if "blockNumber" in log))
@@ -1941,6 +2113,7 @@ def run(
             file_writer.write({**rec, "market_id": _to_text(rec["market_id"])})
         if db_writer.total % PARQUET_WRITE_BATCH == 0:
             print(f"  ---> 已写入数据库 {db_writer.total} 条 oracle 事件", file=sys.stderr)
+            _live("write_oracle_events", progress_block=int(r.get("block_number") or oracle_start_block), records_written=db_writer.total)
         if limit is not None and db_writer.total >= limit:
             break
 
@@ -1963,6 +2136,42 @@ def run(
         file=sys.stderr,
     )
     save_oracle_synced_block(db_path, end_block, sync_state_key=sync_state_key)
+    if include_updown:
+        try:
+            from oracle.fetch_updown_oracle_chain import run_updown_oracle_backfill
+
+            _live("updown_ctf", progress_block=oracle_start_block)
+            updown_last = get_last_oracle_synced_block(db_path, sync_state_key=updown_sync_state_key)
+            updown_start_block = oracle_start_block
+            if updown_last is not None:
+                rewind = max(0, int(continue_sync_rewind_blocks))
+                updown_start_block = max(oracle_start_block, int(updown_last) + 1 - rewind)
+            if updown_start_block <= end_block:
+                updown_stats = run_updown_oracle_backfill(
+                    rpc_url=rpc_url,
+                    from_block=updown_start_block,
+                    to_block=end_block,
+                    db_path=db_path,
+                    batch_blocks=batch_oracle,
+                    max_workers=max_workers,
+                    sync_state_key=updown_sync_state_key,
+                    include_legacy_ctf=True,
+                )
+                _live(
+                    "updown_ctf_complete",
+                    progress_block=end_block,
+                    logs_scanned=updown_stats.get("logs_scanned"),
+                    records_written=updown_stats.get("matched_events"),
+                )
+            else:
+                print(
+                    f"[updown-oracle] Nothing to do: start_block={updown_start_block} > end_block={end_block}",
+                    file=sys.stderr,
+                )
+        except Exception as exc:
+            _live("updown_ctf_error", status="error", progress_block=end_block, error=_format_rpc_error(exc))
+            raise
+    _live("complete", status="idle", progress_block=end_block, logs_scanned=len(logs), records_written=db_writer.total)
     print(f"Saved oracle sync checkpoint: last_block={end_block}", file=sys.stderr)
     print(
         f"Wrote {db_writer.total} oracle event records into {describe_db_target()} / oracle_events",
@@ -2020,6 +2229,22 @@ def main():
         default=CONTINUE_SYNC_REWIND_BLOCKS,
         help=f"--continue-sync 时自动回扫最近多少个块 (default: {CONTINUE_SYNC_REWIND_BLOCKS})",
     )
+    parser.add_argument(
+        "--continue-sync-max-blocks",
+        type=int,
+        default=0,
+        help="--continue-sync 单轮最多补多少个块；0 表示不限制",
+    )
+    parser.add_argument(
+        "--include-updown",
+        action="store_true",
+        help="同步 UMA 后追加扫描 CTF ConditionPreparation/ConditionResolution，补齐 crypto/updown 结算事件",
+    )
+    parser.add_argument(
+        "--updown-sync-state-key",
+        default=ORACLE_UPDOWN_LIVE_SYNC_STATE_KEY,
+        help=f"updown CTF 同步进度 key (default: {ORACLE_UPDOWN_LIVE_SYNC_STATE_KEY})",
+    )
     args = parser.parse_args()
     configure_db_from_args(args)
     db_path = args.sqlite_path
@@ -2051,6 +2276,9 @@ def main():
             max_workers=args.max_workers,
             sync_state_key=ORACLE_SYNC_STATE_KEY,
             continue_sync_rewind_blocks=args.continue_sync_rewind_blocks,
+            continue_sync_max_blocks=args.continue_sync_max_blocks,
+            include_updown=args.include_updown,
+            updown_sync_state_key=args.updown_sync_state_key,
         )
 
     if args.watch:
@@ -2073,6 +2301,12 @@ def main():
                 except Exception as exc:
                     consecutive_failures += 1
                     backoff_seconds = _compute_watch_error_backoff(args.interval, consecutive_failures)
+                    save_oracle_live_state(
+                        db_path,
+                        status="error",
+                        phase="watch_error",
+                        error=_format_rpc_error(exc),
+                    )
                     print(f"[oracle] Run #{run_index} failed: {exc}", file=sys.stderr)
                     print(
                         f"[oracle] Entering recovery sleep for {backoff_seconds}s "

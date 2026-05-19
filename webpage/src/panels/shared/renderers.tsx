@@ -308,20 +308,80 @@ function contentTone(type?: string | null) {
   return 'news';
 }
 
+type ContentTag = {
+  label: string;
+  tone: string;
+};
+
+function contentText(item: ContentItem) {
+  return `${item.source || ''} ${item.title || ''} ${item.summary || ''} ${item.contentType || ''}`.toLowerCase();
+}
+
+function firstMatchingTag(text: string): ContentTag | null {
+  const checks: Array<[RegExp, ContentTag]> = [
+    [/\b(election|vote|voting|poll|nominee|primary|ballot)\b/, { label: 'ELECTION', tone: 'election' }],
+    [/\b(president|senate|congress|parliament|mayor|minister|trump|biden|republican|democrat|party|cabinet)\b/, { label: 'POLITICS', tone: 'politics' }],
+    [/\b(nba|nfl|mlb|nhl|soccer|football|ufc|tennis|spurs|thunder|knicks|cavs|cavaliers|sabre|valorant|counter-strike|esports|premier league)\b/, { label: 'SPORTS', tone: 'sports' }],
+    [/\b(bitcoin|btc|ethereum|eth|solana|xrp|crypto|dogecoin|token|stablecoin|blockchain)\b/, { label: 'CRYPTO', tone: 'crypto' }],
+    [/\b(fed|inflation|cpi|rates?|tariff|gdp|jobs|unemployment|recession|economy|economic|bond|oil|gas|gold|silver|crude)\b/, { label: 'ECONOMIC', tone: 'economic' }],
+    [/\b(ai|chip|semiconductor|nvidia|openai|google|microsoft|tesla|robot|cyber|data center|tech)\b/, { label: 'TECH', tone: 'tech' }],
+    [/\b(ebola|virus|vaccine|health|hospital|disease|outbreak|infection|pandemic)\b/, { label: 'HEALTH', tone: 'health' }],
+    [/\b(war|strike|missile|military|attack|drone|genocide|conflict|invasion|hostage)\b/, { label: 'CONFLICT', tone: 'conflict' }],
+    [/\b(iran|israel|gaza|ukraine|russia|china|taiwan|sanction|ceasefire|talks|summit|diplomat|treaty)\b/, { label: 'DIPLOMATIC', tone: 'diplomatic' }],
+    [/\b(weather|storm|heat|rain|hurricane|temperature|wildfire|flood)\b/, { label: 'WEATHER', tone: 'weather' }],
+    [/\b(earnings|stock|shares|dow|nasdaq|s&p|finance|market|trading)\b/, { label: 'FINANCE', tone: 'finance' }],
+    [/\b(movie|music|culture|celebrity|award|streaming)\b/, { label: 'CULTURE', tone: 'culture' }],
+  ];
+  return checks.find(([pattern]) => pattern.test(text))?.[1] || null;
+}
+
+function contentAlertTags(text: string): ContentTag[] {
+  if (/\b(breaking|urgent|emergency|critical|killed|death toll|deadly|explosion|invasion|missile|strike|attack|outbreak|genocide|default|crash)\b/.test(text)) {
+    return [{ label: 'ALERT', tone: 'alert' }];
+  }
+  if (/\b(warns?|warning|risk|could|may|threat|probe|lawsuit|charged|ban|delay|volatility|re-escalation)\b/.test(text)) {
+    return [{ label: 'CAUTION', tone: 'caution' }];
+  }
+  if (/\b(ongoing|live|continues?|developing|talks|ceasefire|trial|campaign)\b/.test(text)) {
+    return [{ label: 'ONGOING', tone: 'ongoing' }];
+  }
+  return [];
+}
+
+function contentTags(item: ContentItem, tone: string): ContentTag[] {
+  const text = contentText(item);
+  const tags = contentAlertTags(text);
+  const theme = firstMatchingTag(text);
+  if (theme) tags.push(theme);
+  if (tone !== 'news') tags.push({ label: tone.toUpperCase(), tone });
+  if (!tags.length) tags.push({ label: 'NEWS', tone: 'news' });
+  return tags.slice(0, 3);
+}
+
+function contentPriority(tags: ContentTag[]) {
+  if (tags.some((tag) => tag.tone === 'alert')) return 'alert';
+  if (tags.some((tag) => tag.tone === 'caution')) return 'caution';
+  if (tags.some((tag) => tag.tone === 'ongoing')) return 'ongoing';
+  return tags[0]?.tone || 'news';
+}
+
 function contentList(items: ContentItem[], emptyMessage: string) {
   if (!items.length) return emptyState(emptyMessage);
   return (
     <div className="wm-intel-list">
       {items.slice(0, 8).map((item, index) => {
         const tone = contentTone(item.contentType);
-        const typeLabel = (item.contentType || tone).toUpperCase();
+        const tags = contentTags(item, tone);
+        const priority = contentPriority(tags);
         return (
-          <a className={`wm-intel-card ${tone}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
+          <a className={`wm-intel-card ${tone} priority-${priority}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
             <div className="wm-intel-topline">
               <div className="wm-intel-meta">
                 <span className="wm-intel-dot" aria-hidden="true" />
                 <span className="wm-news-source">{item.source || item.contentType || 'intel'}</span>
-                <span className={`wm-intel-type ${tone}`}>{typeLabel}</span>
+                {tags.map((tag) => (
+                  <span className={`wm-intel-tag ${tag.tone}`} key={`${item.url || item.title}-${tag.label}`}>{tag.label}</span>
+                ))}
               </div>
             </div>
             <div className="wm-news-title">{item.title || 'Untitled item'}</div>

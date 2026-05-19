@@ -721,6 +721,13 @@ def get_bootstrap_payload_cached(ctx: dict) -> Dict[str, Any]:
 
 
 def prewarm_snapshot_payloads(ctx: dict) -> None:
+    def _prewarm_active_market_group_charts() -> None:
+        payload = ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")
+        for group in (payload.get("items") or [])[:8]:
+            event_id = group.get("eventId")
+            if event_id is not None:
+                ctx["get_market_group_chart_payload"](str(event_id), "1d")
+
     tasks = [
         ("commodities", ctx["FINANCE_RUNTIME_TTL_SECONDS"], lambda: ctx["get_market_group_snapshot"](ctx["COMMODITY_SYMBOLS"], kind="commodities")),
         ("bootstrap:active-markets-preview", 15, lambda: ctx["get_bootstrap_component_cached"](
@@ -749,6 +756,7 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
             ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
         ("market-groups:active:80", 15, lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
+        ("market-groups:active-charts:1d", 300, _prewarm_active_market_group_charts),
         ("whales", 30, lambda: ctx["get_whale_trades_snapshot"](limit=14)),
         ("suspicious", 30, lambda: ctx["get_suspicious_trades_snapshot"](limit=12)),
         ("alpha", 45, lambda: ctx["get_alpha_signal_snapshot"](limit=8)),

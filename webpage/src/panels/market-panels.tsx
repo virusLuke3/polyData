@@ -153,7 +153,7 @@ function defaultGroupMarketId(group: MarketGroupItem) {
 }
 
 function groupOutcomePills(outcomes: MarketGroupOutcome[]) {
-  const visible = outcomes.slice(0, 2);
+  const visible = outcomes.slice(0, 4);
   const remaining = Math.max(0, outcomes.length - visible.length);
   if (!visible.length) return <span className="wm-poly-market-outcome">Pending outcomes</span>;
   return (

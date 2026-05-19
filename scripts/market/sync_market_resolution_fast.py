@@ -359,6 +359,15 @@ def _format_db_datetime(value: Any) -> Optional[str]:
     return dt.astimezone(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
 
 
+def _gamma_closed_time(raw: Dict[str, Any]) -> Optional[str]:
+    for key in ("closedTime", "closed_time", "endDate", "end_date", "updatedAt", "updated_at"):
+        value = raw.get(key)
+        formatted = _format_db_datetime(value)
+        if formatted:
+            return formatted
+    return None
+
+
 def _parse_outcome_prices(raw: Any) -> Optional[Tuple[float, float]]:
     if raw is None:
         return None
@@ -1065,7 +1074,16 @@ def _upsert_rows(conn, rows: List[Tuple[int, str, str, int, Optional[str], Optio
         """,
         rows,
     )
+    _refresh_market_status_snapshot(conn, [int(row[0]) for row in rows])
     return len(rows)
+
+
+def _refresh_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
+    if not market_ids or not table_exists(conn, "market_status_snapshot"):
+        return 0
+    from db.sync_trade_analytics import _upsert_market_status_snapshot
+
+    return _upsert_market_status_snapshot(conn, sorted({int(market_id) for market_id in market_ids if market_id}))
 
 
 def _fetch_market_by_slug_resolution(
@@ -1263,7 +1281,7 @@ def _targeted_fill_missing_markets(
                         _ensure_0x(raw.get("conditionId") or raw.get("condition_id") or condition_id),
                         str(raw.get("slug") or slug).strip().lower(),
                         0,
-                        _format_db_datetime(raw.get("closedTime") or raw.get("closed_time")),
+                        _gamma_closed_time(raw),
                         _format_db_datetime(raw.get("updatedAt") or raw.get("updated_at")),
                     )
                 )
@@ -1286,7 +1304,7 @@ def _targeted_fill_missing_markets(
                     _ensure_0x(raw.get("conditionId") or raw.get("condition_id") or condition_id),
                     str(raw.get("slug") or slug).strip().lower(),
                     settlement_code,
-                    _format_db_datetime(raw.get("closedTime") or raw.get("closed_time")),
+                    _gamma_closed_time(raw),
                     _format_db_datetime(raw.get("updatedAt") or raw.get("updated_at")),
                 )
             )
@@ -1335,7 +1353,7 @@ def _sync_page(
                 "condition_id": condition_id,
                 "slug": slug,
                 "settlement_code": settlement_code,
-                "closed_time": _format_db_datetime(item.get("closedTime") or item.get("closed_time")),
+                "closed_time": _gamma_closed_time(item),
                 "updated_at_str": _format_db_datetime(item.get("updatedAt") or item.get("updated_at")),
                 "updated_at": updated_at,
             }

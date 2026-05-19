@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 MARKET_GROUPS_LIST_NAMESPACE = "snapshot:market-groups:list"
 MARKET_GROUPS_DETAIL_NAMESPACE = "snapshot:market-groups:detail"
 MARKET_GROUPS_CHART_NAMESPACE = "snapshot:market-groups:chart"
-MARKET_GROUPS_LIST_TTL_SECONDS = 45
-MARKET_GROUPS_DETAIL_TTL_SECONDS = 45
+MARKET_GROUPS_LIST_TTL_SECONDS = 120
+MARKET_GROUPS_DETAIL_TTL_SECONDS = 180
 
 CHART_RANGE_INTERVALS: Dict[str, str] = {
     "1h": "5m",
@@ -21,12 +21,12 @@ CHART_RANGE_INTERVALS: Dict[str, str] = {
 }
 
 CHART_RANGE_TTLS: Dict[str, int] = {
-    "1h": 45,
-    "6h": 45,
-    "1d": 60,
-    "1w": 180,
-    "1m": 240,
-    "all": 300,
+    "1h": 180,
+    "6h": 240,
+    "1d": 600,
+    "1w": 900,
+    "1m": 1200,
+    "all": 1800,
 }
 
 SERIES_PALETTE = [
@@ -750,7 +750,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 3}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 4}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = get_market_group_detail_payload(ctx, identifier)
@@ -775,7 +775,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
         )
         interval = CHART_RANGE_INTERVALS.get(normalized_range, "15m")
         series = []
-        for index, outcome in enumerate(sorted_outcomes[:5]):
+        for index, outcome in enumerate(sorted_outcomes):
             yes_token_id = str(outcome.get("yesTokenId") or "").strip()
             if not yes_token_id:
                 continue

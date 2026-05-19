@@ -46,13 +46,22 @@ from oracle.settlement_parser import (
 )
 
 TRADE_ANALYTICS_SYNC_KEY = "trade_analytics_sync"
-MARKET_STATUS_SNAPSHOT_SYNC_KEY = "market_status_snapshot_sync_v2"
+MARKET_STATUS_SNAPSHOT_SYNC_KEY = "market_status_snapshot_sync_v3"
 MARKET_LIST_SERVING_DAY_SYNC_KEY = "market_list_serving_day_sync"
 DEFAULT_BATCH_SIZE = 50_000
 DEFAULT_WATCH_INTERVAL_SECONDS = 15
 DEFAULT_ORACLE_EVENT_BATCH_SIZE = 100_000
 FEE_DIVISOR = Decimal("1000000")
 ZERO = Decimal("0")
+COMPLETION_OPEN = "OPEN"
+COMPLETION_ENDED_AWAITING_ORACLE = "ENDED_AWAITING_ORACLE"
+COMPLETION_PROPOSED = "PROPOSED"
+COMPLETION_DISPUTED = "DISPUTED"
+COMPLETION_SETTLED = "SETTLED"
+COMPLETION_CANCELLED = "CANCELLED"
+COMPLETION_GAMMA_CLOSED_FALLBACK = "GAMMA_CLOSED_FALLBACK"
+COMPLETION_CLOSED_UNRESOLVED = "CLOSED_UNRESOLVED"
+COMPLETION_UNKNOWN = "UNKNOWN"
 EXCHANGE_ADDRESSES = {
     "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
     "0xc5d563a36ae78145c45a50134d48a1215220f80a",
@@ -321,9 +330,9 @@ def _refresh_market_list_price_24h_ago(conn, market_ids: Sequence[int], threshol
     return len(rows)
 
 
-def _fetch_oracle_status_flags(conn, market_ids: Optional[Sequence[int]] = None) -> Dict[int, Tuple[int, int]]:
+def _fetch_oracle_status_flags(conn, market_ids: Optional[Sequence[int]] = None) -> Dict[int, Tuple[int, int, int]]:
     normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
-    status_map: Dict[int, Tuple[int, int]] = {}
+    status_map: Dict[int, Tuple[int, int, int]] = {}
 
     def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
         filter_sql = ""
@@ -338,7 +347,8 @@ def _fetch_oracle_status_flags(conn, market_ids: Optional[Sequence[int]] = None)
             SELECT
                 market_id,
                 MAX(CASE WHEN event_status = 'settle' THEN 1 ELSE 0 END) AS has_settle,
-                MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose
+                MAX(CASE WHEN event_status = 'propose' THEN 1 ELSE 0 END) AS has_propose,
+                MAX(CASE WHEN event_status = 'dispute' THEN 1 ELSE 0 END) AS has_dispute
             FROM oracle_events
             WHERE market_id IS NOT NULL
               {filter_sql}
@@ -354,6 +364,7 @@ def _fetch_oracle_status_flags(conn, market_ids: Optional[Sequence[int]] = None)
             status_map[int(market_id)] = (
                 int(payload.get("has_settle") or 0),
                 int(payload.get("has_propose") or 0),
+                int(payload.get("has_dispute") or 0),
             )
 
     if market_ids is None:
@@ -463,15 +474,159 @@ def _fetch_fast_resolution_map(
     return settlement_map
 
 
+def _fetch_fast_closed_time_map(
+    conn,
+    market_ids: Optional[Sequence[int]] = None,
+) -> Dict[int, Any]:
+    if not table_exists(conn, "market_resolution_fast"):
+        return {}
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    closed_map: Dict[int, Any] = {}
+
+    def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
+        filter_sql = ""
+        params: Tuple[Any, ...] = ()
+        if chunk is not None:
+            placeholders = ", ".join("?" for _ in chunk)
+            filter_sql = f"WHERE market_id IN ({placeholders})"
+            params = tuple(chunk)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT market_id, closed_time, updated_at
+            FROM market_resolution_fast
+            {filter_sql}
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            payload = _row_to_dict(row)
+            market_id = payload.get("market_id")
+            if market_id is None:
+                continue
+            closed_map[int(market_id)] = payload.get("closed_time") or payload.get("updated_at")
+
+    if market_ids is None:
+        fetch_chunk(None)
+    else:
+        for chunk in _chunked_values(normalized_ids):
+            fetch_chunk(chunk)
+    return closed_map
+
+
+def _fetch_market_end_date_map(
+    conn,
+    market_ids: Optional[Sequence[int]] = None,
+) -> Dict[int, Any]:
+    normalized_ids = sorted({int(market_id) for market_id in market_ids or [] if market_id})
+    end_date_map: Dict[int, Any] = {}
+
+    def fetch_chunk(chunk: Optional[Sequence[int]]) -> None:
+        filter_sql = ""
+        params: Tuple[Any, ...] = ()
+        if chunk is not None:
+            placeholders = ", ".join("?" for _ in chunk)
+            filter_sql = f"WHERE id IN ({placeholders})"
+            params = tuple(chunk)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT id, end_date
+            FROM markets
+            {filter_sql}
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            payload = _row_to_dict(row)
+            market_id = payload.get("id")
+            if market_id is not None:
+                end_date_map[int(market_id)] = payload.get("end_date")
+
+    if market_ids is None:
+        fetch_chunk(None)
+    else:
+        for chunk in _chunked_values(normalized_ids):
+            fetch_chunk(chunk)
+    return end_date_map
+
+
+def _market_end_date_is_past(end_date: Any, now: datetime) -> bool:
+    parsed = _parse_trade_time(end_date)
+    return bool(parsed and parsed <= now)
+
+
+def _market_completion_tuple(
+    *,
+    flags: Tuple[int, int, int],
+    settlement: SettlementResult,
+    end_date: Any,
+    gamma_closed_time: Any,
+    now: datetime,
+) -> Tuple[Any, ...]:
+    has_settle, has_propose, has_dispute = flags
+    code = int(settlement.settlement_code or 0)
+    is_resolved = code in {1, 2, 3}
+    is_final = bool(has_settle)
+    gamma_closed = gamma_closed_time is not None
+    end_date_past = _market_end_date_is_past(end_date, now)
+    is_trading_closed = bool(is_final or gamma_closed or end_date_past or has_propose or has_dispute)
+
+    completion_status = COMPLETION_OPEN
+    completion_source = None
+    completion_time = None
+    if is_final:
+        completion_source = settlement.settlement_source or "oracle_settle"
+        completion_time = settlement.settlement_event_time
+        if code == 3:
+            completion_status = COMPLETION_CANCELLED
+        elif is_resolved:
+            completion_status = COMPLETION_SETTLED
+        else:
+            completion_status = COMPLETION_UNKNOWN
+    elif has_dispute:
+        completion_status = COMPLETION_DISPUTED
+        completion_source = "oracle_dispute"
+    elif has_propose:
+        completion_status = COMPLETION_PROPOSED
+        completion_source = "oracle_propose"
+    elif gamma_closed:
+        completion_source = settlement.settlement_source or "gamma_closed"
+        completion_time = gamma_closed_time or settlement.settlement_event_time
+        completion_status = COMPLETION_GAMMA_CLOSED_FALLBACK if is_resolved else COMPLETION_CLOSED_UNRESOLVED
+    elif end_date_past:
+        completion_status = COMPLETION_ENDED_AWAITING_ORACLE
+        completion_source = "end_date"
+        completion_time = end_date
+
+    if completion_time is None and is_final:
+        completion_time = settlement.settlement_event_time
+
+    return (
+        bool(is_trading_closed),
+        bool(is_resolved),
+        bool(is_final),
+        completion_status,
+        completion_source,
+        completion_time,
+        bool(gamma_closed),
+        gamma_closed_time,
+    )
+
+
 def _market_status_snapshot_tuple(
     market_id: int,
-    flags: Tuple[int, int],
+    flags: Tuple[int, int, int],
     settlement: SettlementResult,
+    end_date: Any,
+    gamma_closed_time: Any,
+    now: datetime,
 ) -> Tuple[Any, ...]:
     return (
         market_id,
         bool(flags[0]),
         bool(flags[1]),
+        bool(flags[2]),
         int(settlement.settlement_code or 0),
         settlement.settlement_outcome or OUTCOME_UNKNOWN,
         settlement.settlement_source,
@@ -479,6 +634,13 @@ def _market_status_snapshot_tuple(
         settlement.settlement_event_id,
         settlement.settlement_event_time,
         settlement.settlement_transaction,
+        *_market_completion_tuple(
+            flags=flags,
+            settlement=settlement,
+            end_date=end_date,
+            gamma_closed_time=gamma_closed_time,
+            now=now,
+        ),
     )
 
 
@@ -488,14 +650,26 @@ def _build_market_status_snapshot_rows(conn, market_ids: Optional[Sequence[int]]
     flags_map = _fetch_oracle_status_flags(conn, scoped_ids)
     oracle_map = _fetch_latest_oracle_settlement_map(conn, scoped_ids)
     fast_map = _fetch_fast_resolution_map(conn, scoped_ids)
+    fast_closed_time_map = _fetch_fast_closed_time_map(conn, scoped_ids)
+    market_end_date_map = _fetch_market_end_date_map(conn, scoped_ids)
     if market_ids is None:
-        output_ids = sorted(set(flags_map) | set(oracle_map) | set(fast_map))
+        output_ids = sorted(set(market_end_date_map) | set(flags_map) | set(oracle_map) | set(fast_map) | set(fast_closed_time_map))
     else:
         output_ids = normalized_ids
     rows: List[Tuple[Any, ...]] = []
+    now = datetime.now(timezone.utc)
     for market_id in output_ids:
         settlement = choose_best_settlement(oracle_map.get(market_id), fast_map.get(market_id))
-        rows.append(_market_status_snapshot_tuple(market_id, flags_map.get(market_id, (0, 0)), settlement))
+        rows.append(
+            _market_status_snapshot_tuple(
+                market_id,
+                flags_map.get(market_id, (0, 0, 0)),
+                settlement,
+                market_end_date_map.get(market_id),
+                fast_closed_time_map.get(market_id),
+                now,
+            )
+        )
     return rows
 
 
@@ -509,17 +683,27 @@ def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
             market_id,
             has_settle,
             has_propose,
+            has_dispute,
             settlement_code,
             settlement_outcome,
             settlement_source,
             settlement_raw,
             settlement_event_id,
             settlement_event_time,
-            settlement_transaction
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            settlement_transaction,
+            is_trading_closed,
+            is_resolved,
+            is_final,
+            completion_status,
+            completion_source,
+            completion_time,
+            gamma_closed,
+            gamma_closed_time
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(market_id) DO UPDATE SET
             has_settle = excluded.has_settle,
             has_propose = excluded.has_propose,
+            has_dispute = excluded.has_dispute,
             settlement_code = excluded.settlement_code,
             settlement_outcome = excluded.settlement_outcome,
             settlement_source = excluded.settlement_source,
@@ -527,6 +711,14 @@ def _upsert_market_status_snapshot(conn, market_ids: Sequence[int]) -> int:
             settlement_event_id = excluded.settlement_event_id,
             settlement_event_time = excluded.settlement_event_time,
             settlement_transaction = excluded.settlement_transaction,
+            is_trading_closed = excluded.is_trading_closed,
+            is_resolved = excluded.is_resolved,
+            is_final = excluded.is_final,
+            completion_status = excluded.completion_status,
+            completion_source = excluded.completion_source,
+            completion_time = excluded.completion_time,
+            gamma_closed = excluded.gamma_closed,
+            gamma_closed_time = excluded.gamma_closed_time,
             updated_at = CURRENT_TIMESTAMP
         """,
         rows,
@@ -544,14 +736,23 @@ def _full_refresh_market_status_snapshot(conn) -> int:
                 market_id,
                 has_settle,
                 has_propose,
+                has_dispute,
                 settlement_code,
                 settlement_outcome,
                 settlement_source,
                 settlement_raw,
                 settlement_event_id,
                 settlement_event_time,
-                settlement_transaction
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                settlement_transaction,
+                is_trading_closed,
+                is_resolved,
+                is_final,
+                completion_status,
+                completion_source,
+                completion_time,
+                gamma_closed,
+                gamma_closed_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -567,6 +768,30 @@ def _full_refresh_market_status_snapshot(conn) -> int:
         last_block=max_event_id,
     )
     return len(rows)
+
+
+def _fetch_markets_closed_by_end_date(conn, limit: int = 50_000) -> Set[int]:
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT m.id
+        FROM markets m
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
+        WHERE m.end_date IS NOT NULL
+          AND m.end_date <= ?
+          AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
+        ORDER BY m.end_date ASC
+        LIMIT ?
+        """,
+        (datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), limit),
+    )
+    output: Set[int] = set()
+    for row in cursor.fetchall():
+        payload = _row_to_dict(row)
+        market_id = payload.get("id")
+        if market_id is not None:
+            output.add(int(market_id))
+    return output
 
 
 def _sync_market_status_snapshot(conn, *, oracle_batch_size: int = DEFAULT_ORACLE_EVENT_BATCH_SIZE) -> Dict[str, int]:
@@ -602,6 +827,10 @@ def _sync_market_status_snapshot(conn, *, oracle_batch_size: int = DEFAULT_ORACL
             break
     if updated_market_ids:
         _upsert_market_status_snapshot(conn, sorted(updated_market_ids))
+    end_date_closed_ids = _fetch_markets_closed_by_end_date(conn)
+    if end_date_closed_ids:
+        _upsert_market_status_snapshot(conn, sorted(end_date_closed_ids))
+        updated_market_ids.update(end_date_closed_ids)
     if latest_seen_event_id != last_event_id:
         _set_sync_state(
             conn,

@@ -28,7 +28,7 @@ python scripts/lob/lob_service.py init-schema --backend sqlite --sqlite-path /tm
 从 `markets` 刷新订阅表：
 
 ```bash
-python scripts/lob/lob_service.py sync-markets --backend mysql --mysql-host 127.0.0.1 --mysql-port 43306 --mysql-user poly_user --mysql-password '***' --mysql-database poly_data
+python scripts/lob/lob_service.py sync-markets --backend postgres
 ```
 
 执行一次一致性检查：
@@ -41,12 +41,7 @@ python scripts/lob/lob_service.py reconcile --backend sqlite --sqlite-path /tmp/
 
 ```bash
 python scripts/lob/lob_live_writer.py run-live \
-  --backend mysql \
-  --mysql-host 127.0.0.1 \
-  --mysql-port 43306 \
-  --mysql-user poly_user \
-  --mysql-password '***' \
-  --mysql-database poly_data \
+  --backend postgres \
   --stream-name polymarket_lob_prod \
   --sync-interval-seconds 60 \
   --heartbeat-seconds 10 \

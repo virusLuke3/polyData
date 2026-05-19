@@ -46,9 +46,13 @@ data/*.sqlite3-shm
 data/*.lock
 data/*.marker
 data/telegram_state.json
+data/telegram_bot_state.json
 
 runtime_logs/
 artifacts/
+
+# PnL research scripts and outputs are still experimental.
+pnl/
 
 # 私有文档，禁止提交到 GitHub。公开文档请放 docs/。
 # 不要对 document/ 使用 git add -f。

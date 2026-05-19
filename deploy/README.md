@@ -13,7 +13,7 @@ Private deployment notes, machine-specific commands, and secrets should stay in
 ## Current recommendation
 
 For local production-style runtime on one machine, use the `deploy/systemd/`
-templates and keep MySQL, Redis, and Tailscale managed outside this repo.
+templates and keep PostgreSQL and Redis managed outside this repo.
 
 For remote frontend hosting, prefer CI-built `webpage/dist` deployment to a
 static directory such as `/var/www/polydata` instead of cloning the repo and

@@ -23,6 +23,9 @@ from typing import Any, Dict, Iterable, List, Optional
 _scripts_root = Path(__file__).resolve().parent
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
+_repo_root = _scripts_root.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 try:
     from flask import Flask, g, jsonify, request
@@ -1033,8 +1036,11 @@ def handle_unexpected_exception(error: Exception):
 def build_market_status_case(now_iso: str) -> str:
     return (
         "CASE "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND COALESCE(mss.is_final, FALSE) = TRUE) THEN 'Settled' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND COALESCE(mss.completion_status, '') = 'DISPUTED') THEN 'Disputed' "
         "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND (COALESCE(mss.has_settle, FALSE) = TRUE OR mss.settlement_code IN (1, 2, 3))) THEN 'Settled' "
         "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND COALESCE(mss.has_propose, FALSE) = TRUE) THEN 'Proposed' "
+        "WHEN EXISTS (SELECT 1 FROM market_status_snapshot mss WHERE mss.market_id = m.id AND COALESCE(mss.is_trading_closed, FALSE) = TRUE) THEN 'Closed' "
         "WHEN m.end_date IS NOT NULL AND m.end_date < ? THEN 'Closed' "
         "ELSE 'Active' END"
     )
@@ -1185,6 +1191,14 @@ def normalize_market(row: Dict[str, Any]) -> Dict[str, Any]:
         "settlementEventId": row.get("settlement_event_id"),
         "settlementEventTime": row.get("settlement_event_time"),
         "settlementTransaction": row.get("settlement_transaction"),
+        "completionStatus": row.get("completion_status") or "OPEN",
+        "completionSource": row.get("completion_source"),
+        "completionTime": row.get("completion_time"),
+        "isTradingClosed": bool(row.get("is_trading_closed")),
+        "isResolved": bool(row.get("is_resolved")),
+        "isFinal": bool(row.get("is_final")),
+        "gammaClosed": bool(row.get("gamma_closed")),
+        "gammaClosedTime": row.get("gamma_closed_time"),
     }
 
 
@@ -1227,6 +1241,17 @@ def normalize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
     settlement = parse_oracle_settlement_event(row)
+    snapshot_code = row.get("snapshot_settlement_code")
+    snapshot_outcome = row.get("snapshot_settlement_outcome")
+    snapshot_source = row.get("snapshot_settlement_source")
+    if settlement.settlement_code == 0 and snapshot_code not in (None, "", 0, "0"):
+        effective_code = snapshot_code
+        effective_outcome = snapshot_outcome
+        effective_source = snapshot_source
+    else:
+        effective_code = settlement.settlement_code
+        effective_outcome = settlement.settlement_outcome
+        effective_source = settlement.settlement_source
     return {
         "id": row.get("id"),
         "txHash": row.get("tx_hash"),
@@ -1238,6 +1263,9 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "localMarketId": row.get("market_id"),
         "gammaMarketId": row.get("external_market_id"),
         "marketTitle": row.get("market_title"),
+        "marketSlug": row.get("market_slug"),
+        "marketCategory": row.get("market_category"),
+        "isBound": row.get("market_id") is not None,
         "matchedBy": row.get("matched_by"),
         "questionId": row.get("question_id"),
         "conditionId": row.get("condition_id"),
@@ -1248,6 +1276,13 @@ def normalize_oracle_event(row: Dict[str, Any]) -> Dict[str, Any]:
         "settlementOutcome": settlement.settlement_outcome,
         "settlementSource": settlement.settlement_source,
         "settlementRaw": settlement.settlement_raw,
+        "effectiveSettlementCode": effective_code,
+        "effectiveSettlementOutcome": effective_outcome,
+        "effectiveSettlementSource": effective_source,
+        "completionStatus": row.get("completion_status") or "OPEN",
+        "isTradingClosed": bool(row.get("is_trading_closed")),
+        "isResolved": bool(row.get("is_resolved")),
+        "isFinal": bool(row.get("is_final")),
         "requester": row.get("requester"),
         "proposer": row.get("proposer"),
         "disputer": row.get("disputer"),
