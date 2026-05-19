@@ -191,6 +191,37 @@ def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
     }
 
 
+def build_etf_flow_proxy_from_perps(hyperliquid_payload: Dict[str, Any]) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    for item in hyperliquid_payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper()
+        if symbol not in {"BTC", "ETH"}:
+            continue
+        funding = _safe_float(item.get("funding")) or 0.0
+        day_notional = _safe_float(item.get("dayNotional")) or 0.0
+        rows.append(
+            {
+                "symbol": f"{symbol}-ETF",
+                "issuer": f"{symbol} ETF demand proxy",
+                "price": item.get("markPx"),
+                "changePercent": None,
+                "volume": day_notional,
+                "flowProxyUsd": funding * day_notional,
+                "source": "hyperliquid-etf-proxy",
+            }
+        )
+    net_flow_proxy = sum(_safe_float(row.get("flowProxyUsd")) or 0.0 for row in rows)
+    return {
+        "status": "proxy" if rows else "degraded",
+        "netFlowProxyUsd": net_flow_proxy,
+        "items": rows,
+        "sourceUrl": HYPERLIQUID_INFO_URL,
+        "note": "Yahoo ETF quotes unavailable; using BTC/ETH perp funding notional as an ETF demand proxy.",
+    }
+
+
 def fetch_cot_source(ctx: dict) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for symbol, query_term, asset_class in COT_MARKETS:
@@ -308,6 +339,9 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
 
     hyperliquid = capture("hyperliquid", fetch_hyperliquid_perp_source)
     etf_flow = capture("etfFlow", fetch_etf_flow_source)
+    if not (etf_flow.get("items") or []):
+        etf_flow = build_etf_flow_proxy_from_perps(hyperliquid)
+        sources["etfFlow"] = str(etf_flow.get("status") or "proxy")
     cot = capture("cot", fetch_cot_source)
     stablecoin = capture("stablecoin", fetch_stablecoin_source)
     # trade.xyz does not currently expose a documented public market-data endpoint

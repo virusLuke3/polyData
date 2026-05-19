@@ -74,6 +74,17 @@ def test_finance_external_sources_payload_has_seeded_sources():
     assert payload["summary"]["stablecoinCount"] == 1
 
 
+def test_finance_external_sources_uses_etf_proxy_when_yahoo_empty():
+    ctx = _ctx()
+    ctx["get_yahoo_market_snapshot"] = lambda *args, **kwargs: None
+
+    payload = finance_external_sources_service.build_finance_external_sources_payload(ctx)
+
+    assert payload["sources"]["etfFlow"] == "proxy"
+    assert payload["summary"]["etfCount"] == 2
+    assert payload["etfFlow"]["items"][0]["source"] == "hyperliquid-etf-proxy"
+
+
 def test_liquidity_regime_uses_external_seed_components():
     external = finance_external_sources_service.build_finance_external_sources_payload(_ctx())
 
