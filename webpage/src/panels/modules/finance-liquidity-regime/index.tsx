@@ -4,7 +4,7 @@ import { fetchRuntimeFinanceLiquidityRegime } from '@/services/api';
 import type { RuntimeFinanceLiquidityRegimePayload, RuntimeFinanceLiquidityRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, FinanceMark, LinkedMarketMini, moneyLabel, numberLabel, panelTone, sortCycle } from '../finance-common';
+import { badgeLabel, FinanceMetricStrip, FinanceRail, FinanceSummaryStrip, moneyLabel, numberLabel, panelTone, sortCycle } from '../finance-common';
 
 type LiquiditySort = 'PMKT' | 'COT' | 'FLOW' | 'RISK';
 const SORTS: LiquiditySort[] = ['PMKT', 'COT', 'FLOW', 'RISK'];
@@ -19,19 +19,31 @@ function sortItems(items: RuntimeFinanceLiquidityRow[], sort: LiquiditySort) {
 
 function LiquidityRow({ item }: { item: RuntimeFinanceLiquidityRow }) {
   return (
-    <div className="wm-finance-liquidity-row">
-      <FinanceMark label={item.source || 'PMKT'} tone={item.tone || 'neutral'} />
-      <div className="wm-finance-row-main">
-        <span>{item.signal || 'WATCH'} / {item.source || 'PMKT'}</span>
+    <div className="wm-finance-registry-row">
+      <FinanceRail label={item.source || 'PMKT'} tone={item.tone || 'neutral'} />
+      <div className="wm-finance-registry-main">
+        <div className="wm-finance-registry-meta">
+          <span>{item.source || 'PMKT'}</span>
+          <span>{item.signal || 'WATCH'}</span>
+          <div className="wm-finance-chip-row">
+            <span className={`wm-finance-chip ${item.tone || 'neutral'}`}>{String(item.tone || 'neutral').toUpperCase()}</span>
+          </div>
+        </div>
         <strong>{item.label || 'Liquidity row'}</strong>
+        <FinanceMetricStrip items={[
+          { label: 'FLOW', value: moneyLabel(item.value), tone: item.tone || 'neutral' },
+          { label: 'PMKT', value: item.linkedMarket ? `${numberLabel(item.linkedMarket.probability, 0)}%` : 'NO LINK', tone: item.linkedMarket ? 'ok' : 'neutral' },
+          { label: 'VOL', value: item.linkedMarket ? moneyLabel(item.linkedMarket.volume24h) : '--' },
+        ]} />
       </div>
-      <div className="wm-finance-row-values">
-        <strong>{moneyLabel(item.value)}</strong>
-        <em>{String(item.tone || 'neutral').toUpperCase()}</em>
-      </div>
-      <LinkedMarketMini market={item.linkedMarket} />
     </div>
   );
+}
+
+function componentWidth(value?: string | number | null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '8%';
+  return `${Math.max(6, Math.min(100, Math.abs(numeric)))}%`;
 }
 
 function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiquidityRegimePayload | null }) {
@@ -39,6 +51,7 @@ function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiqu
   const [sort, setSort] = useState<LiquiditySort>('FLOW');
   const items = sortItems(payload?.items || [], sort);
   const summary = payload?.summary;
+  const pmktVolume = items.reduce((total, item) => total + (Number(item.value) || 0), 0);
   return (
     <Panel
       title="LIQUIDITY REGIME"
@@ -56,20 +69,35 @@ function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiqu
       className="wm-market-panel wm-finance-panel"
       dataPanelId="finance-liquidity-regime"
     >
-      <div className="wm-finance-regime-hero">
-        <FinanceMark label="RISK" tone={Number(summary?.regimeScore) >= 70 ? 'ok' : Number(summary?.regimeScore) >= 52 ? 'watch' : 'bad'} />
-        <div>
-          <span>{summary?.signal || 'LIQUIDITY WARMING'}</span>
+      <FinanceSummaryStrip items={[
+        { label: 'Score', value: numberLabel(summary?.regimeScore, 0), tone: Number(summary?.regimeScore) >= 70 ? 'ok' : Number(summary?.regimeScore) >= 52 ? 'watch' : 'bad' },
+        { label: 'Regime', value: summary?.regimeLabel || 'FRAGILE' },
+        { label: 'Alerts', value: numberLabel(summary?.alertCount || 0, 0), tone: summary?.alertCount ? 'watch' : 'neutral' },
+        { label: 'Rows', value: numberLabel(items.length, 0) },
+      ]} />
+      <div className="wm-finance-lead-row">
+        <FinanceRail label="RISK" tone={Number(summary?.regimeScore) >= 70 ? 'ok' : Number(summary?.regimeScore) >= 52 ? 'watch' : 'bad'} />
+        <div className="wm-finance-registry-main">
+          <div className="wm-finance-registry-meta">
+            <span>{summary?.signal || 'LIQUIDITY WARMING'}</span>
+            <span>RISK BACKDROP</span>
+          </div>
           <strong>{summary?.regimeLabel || 'FRAGILE'}</strong>
+          <FinanceMetricStrip items={[
+            { label: 'SCORE', value: numberLabel(summary?.regimeScore, 0) },
+            { label: 'FLOW', value: moneyLabel(pmktVolume) },
+            { label: 'ALERTS', value: numberLabel(summary?.alertCount || 0, 0), tone: summary?.alertCount ? 'watch' : 'neutral' },
+            { label: 'MODE', value: sort },
+          ]} />
         </div>
-        <em>{numberLabel(summary?.regimeScore, 0)}</em>
       </div>
-      <div className="wm-finance-component-strip">
+      <div className="wm-finance-component-bars">
         {(payload?.components || []).slice(0, 5).map((component) => (
-          <span key={component.key || component.label} className={`wm-finance-component ${component.tone || 'neutral'}`}>
-            <strong>{component.label || component.key}</strong>
-            <em>{component.value === null || component.value === undefined ? component.detail || 'pending' : numberLabel(component.value)}</em>
-          </span>
+          <div key={component.key || component.label} className={`wm-finance-component-bar ${component.tone || 'neutral'}`} style={{ '--finance-fill': componentWidth(component.value) }}>
+            <span><strong>{component.label || component.key}</strong><em>{component.detail || component.key}</em></span>
+            <b>{component.value === null || component.value === undefined ? 'PENDING' : numberLabel(component.value)}</b>
+            <i><small /></i>
+          </div>
         ))}
       </div>
       <div className="wm-finance-list">

@@ -4,7 +4,7 @@ import { fetchRuntimeOnchainTradfiPerpRadar } from '@/services/api';
 import type { RuntimeOnchainTradfiPerpRadarPayload, RuntimeOnchainTradfiPerpRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, FinanceMark, LinkedMarketMini, moneyLabel, numberLabel, panelTone, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, FinanceMetricStrip, FinanceRail, FinanceSummaryStrip, moneyLabel, numberLabel, panelTone, signedPercentLabel, sortCycle } from '../finance-common';
 
 type PerpSort = 'BASIS' | 'OI' | 'FUNDING' | 'PMKT GAP';
 const SORTS: PerpSort[] = ['BASIS', 'OI', 'FUNDING', 'PMKT GAP'];
@@ -28,22 +28,25 @@ function PerpRow({ item }: { item: RuntimeOnchainTradfiPerpRow }) {
   const linked = (item.linkedMarkets || [])[0];
   const funding = item.funding === null || item.funding === undefined ? '--' : signedPercentLabel(item.funding, 3);
   return (
-    <div className="wm-finance-perp-row">
-      <FinanceMark label={item.symbol || 'PERP'} tone={(item.alerts || []).length ? 'watch' : 'neutral'} />
-      <div className="wm-finance-row-main">
-        <span>{String(item.assetClass || 'asset').toUpperCase()} / {(item.alerts || ['WATCH']).slice(0, 2).join(' / ')}</span>
-        <strong>{item.display || item.symbol || 'TradFi perp'}</strong>
-        <div className="wm-finance-micro-grid">
-          <span>MARK <strong>{moneyLabel(item.markPx)}</strong></span>
-          <span>BASIS <strong>{basisLabel(item.basisBps)}</strong></span>
-          <span>FUND <strong>{funding}</strong></span>
+    <div className="wm-finance-registry-row">
+      <FinanceRail label={item.symbol || 'PERP'} tone={(item.alerts || []).length ? 'watch' : 'neutral'} />
+      <div className="wm-finance-registry-main">
+        <div className="wm-finance-registry-meta">
+          <span>{String(item.assetClass || 'asset').toUpperCase()}</span>
+          <div className="wm-finance-chip-row">
+            {(item.alerts || ['WATCH']).slice(0, 2).map((alert) => <span key={alert} className="wm-finance-chip watch">{alert}</span>)}
+          </div>
         </div>
+        <strong>{item.display || item.symbol || 'TradFi perp'}</strong>
+        <FinanceMetricStrip items={[
+          { label: 'MARK', value: moneyLabel(item.markPx) },
+          { label: 'BASIS', value: basisLabel(item.basisBps), tone: Number(item.basisBps) ? 'watch' : 'neutral' },
+          { label: 'FUND', value: funding, tone: Number(item.funding) ? 'watch' : 'neutral' },
+          { label: 'OI', value: numberLabel(item.openInterest) },
+          { label: 'VOL', value: moneyLabel(item.dayNotional) },
+          { label: 'PMKT', value: linked ? `${numberLabel(linked.probability, 0)}%` : 'NO LINK', tone: linked ? 'ok' : 'neutral' },
+        ]} />
       </div>
-      <div className="wm-finance-row-values">
-        <strong>{numberLabel(item.openInterest)}</strong>
-        <em>{moneyLabel(item.dayNotional)}</em>
-      </div>
-      <LinkedMarketMini market={linked} />
     </div>
   );
 }
@@ -70,15 +73,30 @@ function OnchainTradfiPerpRadarPanel({ payload }: { payload?: RuntimeOnchainTrad
       className="wm-market-panel wm-finance-panel"
       dataPanelId="onchain-tradfi-perp-radar"
     >
+      <FinanceSummaryStrip items={[
+        { label: 'Assets', value: numberLabel(payload?.summary?.assetCount || items.length, 0) },
+        { label: 'Alerts', value: numberLabel(payload?.summary?.alertCount || 0, 0), tone: payload?.summary?.alertCount ? 'watch' : 'neutral' },
+        { label: 'Top', value: top?.symbol || '--' },
+        { label: 'Source', value: 'Hyper/XYZ', tone: 'ok' },
+      ]} />
       {top ? (
-        <div className="wm-finance-hero compact">
-          <FinanceMark label={top.symbol || 'PERP'} tone="watch" />
-          <div>
-            <span>Perp anomaly</span>
+        <div className="wm-finance-lead-row">
+          <FinanceRail label={top.symbol || 'PERP'} tone={(top.alerts || []).length ? 'watch' : 'neutral'} />
+          <div className="wm-finance-registry-main">
+            <div className="wm-finance-registry-meta">
+              <span>PERP ANOMALY</span>
+              <div className="wm-finance-chip-row">
+                {(top.alerts || ['PMKT LINK']).slice(0, 3).map((alert) => <span key={alert} className="wm-finance-chip watch">{alert}</span>)}
+              </div>
+            </div>
             <strong>{top.display || top.symbol} / {basisLabel(top.basisBps)}</strong>
-            <em>{(top.alerts || ['PMKT LINK']).join(' / ')}</em>
+            <FinanceMetricStrip items={[
+              { label: 'MARK', value: moneyLabel(top.markPx) },
+              { label: 'BASIS', value: basisLabel(top.basisBps), tone: 'watch' },
+              { label: 'FUND', value: top.funding === null || top.funding === undefined ? '--' : signedPercentLabel(top.funding, 3) },
+              { label: 'VOL', value: moneyLabel(top.dayNotional) },
+            ]} />
           </div>
-          <LinkedMarketMini market={(top.linkedMarkets || [])[0]} />
         </div>
       ) : null}
       <div className="wm-finance-list">

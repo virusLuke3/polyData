@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -13,9 +14,9 @@ FINANCE_PANEL_TTL_SECONDS = 60
 
 
 FINANCE_CATEGORY_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
-    ("stocks", "Stocks", ("stock", "stocks", "shares", "equity", "nasdaq", "nyse", "s&p", "sp500", "dow", "nvda", "nvidia", "tesla", "tsla", "apple", "aapl", "microsoft", "msft", "amazon", "amzn", "google", "googl", "meta", "coinbase", "coin", "robinhood", "hood", "mstr", "microstrategy")),
-    ("ipo", "IPO", ("ipo", "initial public offering", "go public", "direct listing", "s-1", "f-1", "kraken", "stripe", "databricks", "spac")),
     ("crypto", "Crypto", ("bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp", "doge", "crypto", "stablecoin", "usdt", "usdc", "etf")),
+    ("stocks", "Stocks", ("stock", "stocks", "shares", "equity", "nasdaq", "nyse", "s&p", "sp500", "dow", "nvda", "nvidia", "tesla", "tsla", "apple", "aapl", "microsoft", "msft", "amazon", "amzn", "google", "googl", "meta", "coinbase", "robinhood", "hood", "mstr", "microstrategy")),
+    ("ipo", "IPO", ("ipo", "initial public offering", "go public", "direct listing", "s-1", "f-1", "kraken", "stripe", "databricks", "spac")),
     ("rates", "Rates", ("fed", "fomc", "rate cut", "rate hike", "interest rate", "cpi", "inflation", "pce", "treasury", "yield")),
     ("commodity", "Commodity", ("oil", "gas", "gold", "silver", "copper", "wti", "brent", "natural gas", "commodity")),
     ("company-action", "Company Action", ("earnings", "revenue", "eps", "filing", "sec", "insider", "buyback", "split", "dividend", "merger", "acquisition")),
@@ -79,7 +80,17 @@ def _text_for_market(group: Dict[str, Any]) -> str:
 
 def _contains_any(text: str, terms: Iterable[str]) -> bool:
     lowered = text.lower()
-    return any(term.lower() in lowered for term in terms)
+    for term in terms:
+        normalized = term.lower().strip()
+        if not normalized:
+            continue
+        if re.fullmatch(r"[a-z0-9]{2,5}", normalized):
+            if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", lowered):
+                return True
+            continue
+        if normalized in lowered:
+            return True
+    return False
 
 
 def _finance_category(group: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -238,7 +249,7 @@ def get_finance_market_atlas_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_ATL
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:market-atlas", f"v1:{limit}", _builder)
+    return _cached(ctx, "runtime:finance:market-atlas", f"v2:{limit}", _builder)
 
 
 def _quote_snapshots(ctx: dict, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -331,7 +342,7 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:equity-event-command", f"v1:{limit}", _builder)
+    return _cached(ctx, "runtime:finance:equity-event-command", f"v2:{limit}", _builder)
 
 
 def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADFI_PERP_LIMIT) -> Dict[str, Any]:
@@ -413,7 +424,7 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
             "items": unique_rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:onchain-tradfi-perp-radar", f"v1:{limit}", _builder, ttl_seconds=45)
+    return _cached(ctx, "runtime:finance:onchain-tradfi-perp-radar", f"v2:{limit}", _builder, ttl_seconds=45)
 
 
 def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT) -> Dict[str, Any]:
@@ -470,4 +481,4 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:liquidity-regime", f"v1:{limit}", _builder, ttl_seconds=45)
+    return _cached(ctx, "runtime:finance:liquidity-regime", f"v2:{limit}", _builder, ttl_seconds=45)

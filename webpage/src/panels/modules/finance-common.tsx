@@ -1,3 +1,4 @@
+import { type ComponentChildren } from 'preact';
 import { formatRelative } from '../shared/formatters';
 import type { RuntimeFinanceCoverageKey, RuntimeFinanceLinkedMarket } from '@/types';
 
@@ -58,7 +59,7 @@ export function coverageTone(value?: string | null) {
   return 'neutral';
 }
 
-export function CoverageBadges({ items, max = 4 }: { items?: RuntimeFinanceCoverageKey[]; max?: number }) {
+export function CoverageBadges({ items, max = 4 }: { items?: Array<RuntimeFinanceCoverageKey | string>; max?: number }) {
   const values = (items || []).slice(0, max);
   if (!values.length) return <span className="wm-finance-chip neutral">NO SRC</span>;
   return (
@@ -66,6 +67,7 @@ export function CoverageBadges({ items, max = 4 }: { items?: RuntimeFinanceCover
       {values.map((item) => (
         <span key={item} className={`wm-finance-chip ${coverageTone(item)}`}>{String(item).toUpperCase()}</span>
       ))}
+      {(items || []).length > max ? <span className="wm-finance-chip neutral">+{(items || []).length - max}</span> : null}
     </div>
   );
 }
@@ -86,5 +88,65 @@ export function FinanceMark({ label, tone = 'neutral' }: { label: string; tone?:
       <i />
       <em>{label}</em>
     </span>
+  );
+}
+
+export function financeTone(value?: string | number | null) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    if (numeric > 0) return 'ok';
+    if (numeric < 0) return 'bad';
+  }
+  return 'neutral';
+}
+
+export function severityTone(value?: string | null) {
+  const text = String(value || '').toLowerCase();
+  if (/(alert|critical|stress|hot|surge|thin|bad|negative)/.test(text)) return 'bad';
+  if (/(watch|mixed|fragile|pending|warning)/.test(text)) return 'watch';
+  if (/(ok|live|risk-on|strong|improving|positive|flow)/.test(text)) return 'ok';
+  return 'neutral';
+}
+
+export function FinanceRail({ label, tone = 'neutral' }: { label: string; tone?: string }) {
+  return (
+    <div className={`wm-finance-rail ${tone}`}>
+      <i />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+export function FinanceMetricStrip({
+  items,
+}: {
+  items: Array<{ label: string; value: ComponentChildren; tone?: string }>;
+}) {
+  return (
+    <div className="wm-finance-metric-strip">
+      {items.map((item) => (
+        <span key={item.label} className={item.tone || 'neutral'}>
+          <em>{item.label}</em>
+          <strong>{item.value}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function FinanceSummaryStrip({
+  items,
+}: {
+  items: Array<{ label: string; value: ComponentChildren; tone?: string }>;
+}) {
+  return (
+    <div className="wm-finance-summary-strip">
+      {items.map((item) => (
+        <span key={item.label} className={item.tone || 'neutral'}>
+          <strong>{item.value}</strong>
+          <em>{item.label}</em>
+        </span>
+      ))}
+    </div>
   );
 }

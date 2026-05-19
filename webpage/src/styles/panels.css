@@ -522,6 +522,313 @@
   font-size: 8.5px;
 }
 
+.wm-finance-panel .wm-panel-body {
+  padding: 6px;
+}
+
+.wm-finance-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.wm-finance-summary-strip > span,
+.wm-finance-metric-strip > span {
+  min-width: 0;
+  border: 1px solid rgba(116, 149, 181, 0.16);
+  background: rgba(255, 255, 255, 0.026);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-finance-summary-strip > span {
+  min-height: 36px;
+  padding: 5px 6px;
+}
+
+.wm-finance-summary-strip strong {
+  display: block;
+  color: #e9efe9;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-summary-strip em {
+  display: block;
+  margin-top: 4px;
+  color: #8b948d;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-finance-summary-strip > span.ok,
+.wm-finance-metric-strip > span.ok {
+  border-color: rgba(45, 255, 132, 0.3);
+  background: rgba(45, 255, 132, 0.055);
+}
+
+.wm-finance-summary-strip > span.watch,
+.wm-finance-metric-strip > span.watch {
+  border-color: rgba(245, 179, 52, 0.34);
+  background: rgba(245, 179, 52, 0.065);
+}
+
+.wm-finance-summary-strip > span.bad,
+.wm-finance-metric-strip > span.bad {
+  border-color: rgba(255, 65, 77, 0.34);
+  background: rgba(255, 65, 77, 0.06);
+}
+
+.wm-finance-lead-row,
+.wm-finance-registry-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.wm-finance-lead-row {
+  margin-bottom: 6px;
+  padding: 8px 8px 7px;
+  border: 1px solid rgba(92, 124, 157, 0.26);
+  background:
+    linear-gradient(90deg, rgba(45, 255, 132, 0.08), rgba(45, 255, 132, 0) 56%),
+    rgba(10, 15, 17, 0.76);
+}
+
+.wm-finance-registry-row {
+  min-height: 62px;
+  padding: 7px 6px 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.016);
+}
+
+.wm-finance-registry-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wm-finance-rail {
+  position: relative;
+  min-width: 38px;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a9c7e8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.wm-finance-rail i {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: #86bdf4;
+}
+
+.wm-finance-rail span {
+  display: block;
+  max-width: 31px;
+  padding-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-rail.ok i {
+  background: #39ff82;
+}
+
+.wm-finance-rail.watch i {
+  background: #f5b334;
+}
+
+.wm-finance-rail.bad i {
+  background: #ff414d;
+}
+
+.wm-finance-registry-main {
+  min-width: 0;
+}
+
+.wm-finance-registry-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.wm-finance-registry-meta > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: #8b948d;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-finance-registry-main > strong {
+  display: -webkit-box;
+  color: #ecefeb;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.22;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+.wm-finance-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.wm-finance-metric-strip > span {
+  padding: 3px 4px;
+}
+
+.wm-finance-metric-strip em {
+  display: block;
+  color: #818b84;
+  font-size: 7.5px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-finance-metric-strip strong {
+  display: block;
+  margin-top: 2px;
+  color: #dde7df;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.05;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-category-grid-v2 {
+  margin-top: 6px;
+  gap: 3px;
+}
+
+.wm-finance-category-row-v2 {
+  min-height: 28px;
+  grid-template-columns: minmax(0, 1fr) 54px auto;
+  padding: 4px 6px 4px 8px;
+  border-left: 3px solid rgba(45, 255, 132, 0.6);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.wm-finance-component-bars {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.wm-finance-component-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.wm-finance-component-bar span,
+.wm-finance-component-bar b {
+  min-width: 0;
+}
+
+.wm-finance-component-bar strong,
+.wm-finance-component-bar em,
+.wm-finance-component-bar b {
+  display: block;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-finance-component-bar strong {
+  color: #d8ddd8;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.wm-finance-component-bar em {
+  margin-top: 3px;
+  color: #7d8780;
+  font-size: 7.5px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.wm-finance-component-bar b {
+  color: #e5eee7;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: right;
+}
+
+.wm-finance-component-bar > i {
+  grid-column: 1 / -1;
+  display: block;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.055);
+  overflow: hidden;
+}
+
+.wm-finance-component-bar > i small {
+  display: block;
+  width: var(--finance-fill, 8%);
+  height: 100%;
+  background: #86bdf4;
+}
+
+.wm-finance-component-bar.ok > i small {
+  background: #39ff82;
+}
+
+.wm-finance-component-bar.watch > i small {
+  background: #f5b334;
+}
+
+.wm-finance-component-bar.bad > i small {
+  background: #ff414d;
+}
+
 .wm-panel-body {
   padding: 8px;
   min-height: 0;
