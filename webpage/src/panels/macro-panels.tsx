@@ -3,6 +3,7 @@ import { Panel } from '@/components/Panel';
 import type { PanelRenderContext, RuntimeMarketGroup, RuntimeMarketTicker } from '@/types';
 import type { PanelRenderMap } from './types';
 import { emptyState } from './shared/renderers';
+import { formatCompact } from './shared/formatters';
 
 type CommoditiesTab = 'commodities' | 'fx';
 
@@ -66,6 +67,44 @@ const CRYPTO_SYMBOL_ORDER = [
 const CRYPTO_SORT_INDEX = new Map(CRYPTO_SYMBOL_ORDER.map((symbol, index) => [symbol, index]));
 type CryptoTickDirection = 'tick-up' | 'tick-down';
 
+function tickerTone(item: RuntimeMarketTicker) {
+  const changePercent = Number(item.changePercent);
+  if (!Number.isFinite(changePercent) || changePercent === 0) return 'flat';
+  return changePercent > 0 ? 'up' : 'down';
+}
+
+function tickerMoveTag(item: RuntimeMarketTicker, mode: 'crypto' | 'macro') {
+  const absChange = Math.abs(Number(item.changePercent));
+  if (!Number.isFinite(absChange)) return mode === 'crypto' ? 'SPOT' : 'QUOTE';
+  if (absChange >= (mode === 'crypto' ? 4 : 1.5)) return 'ALERT';
+  if (absChange >= (mode === 'crypto' ? 1.5 : 0.6)) return 'MOVE';
+  return mode === 'crypto' ? 'SPOT' : 'WATCH';
+}
+
+function averageChange(items: RuntimeMarketTicker[]) {
+  const changes = items.map((item) => Number(item.changePercent)).filter((value) => Number.isFinite(value));
+  if (!changes.length) return null;
+  return changes.reduce((sum, value) => sum + value, 0) / changes.length;
+}
+
+function topMover(items: RuntimeMarketTicker[]) {
+  return items.reduce<RuntimeMarketTicker | null>((top, item) => {
+    const move = Math.abs(Number(item.changePercent));
+    if (!Number.isFinite(move)) return top;
+    if (!top) return item;
+    return move > Math.abs(Number(top.changePercent)) ? item : top;
+  }, null);
+}
+
+function commodityClass(item: RuntimeMarketTicker) {
+  const symbol = item.symbol.toUpperCase();
+  if (isFxTicker(item)) return 'FX';
+  if (['GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F'].includes(symbol)) return 'METALS';
+  if (['CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT'].includes(symbol)) return 'ENERGY';
+  if (symbol === '^VIX') return 'RISK';
+  return 'AGRI';
+}
+
 function isFxTicker(item: RuntimeMarketTicker) {
   return item.symbol.endsWith('=X');
 }
@@ -95,22 +134,41 @@ function cryptoBoard(
   tickDirections: Record<string, CryptoTickDirection | undefined>,
 ) {
   if (!items.length) return emptyState(emptyMessage);
+  const leader = topMover(items);
+  const avg = averageChange(items);
+  const upCount = items.filter((item) => tickerTone(item) === 'up').length;
   return (
-    <div className="wm-crypto-market-grid">
+    <div className="wm-crypto-watch-shell">
+      <div className="wm-market-radar-strip">
+        <span><b>{leader?.label || '--'}</b><em>top move</em></span>
+        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>avg 24h</em></span>
+        <span><b>{upCount}/{items.length}</b><em>green</em></span>
+      </div>
+      <div className="wm-crypto-watch-list">
       {items.map((item) => {
-        const changePercent = Number(item.changePercent);
-        const tone = !Number.isFinite(changePercent) || changePercent === 0 ? 'flat' : changePercent > 0 ? 'up' : 'down';
-        const sparkColor = tone === 'down' ? '#cb8d92' : tone === 'up' ? '#55e18a' : '#8f8f8c';
+        const tone = tickerTone(item);
+        const sparkColor = tone === 'down' ? '#ff5d5d' : tone === 'up' ? '#39ff73' : '#8f8f8c';
         const tickDirection = tickDirections[item.symbol];
         return (
-          <article className={`wm-crypto-market-card ${tone}${tickDirection ? ` ${tickDirection}` : ''}`} key={item.symbol}>
-            <div className="wm-crypto-market-name">{item.label}</div>
+          <article className={`wm-crypto-market-row ${tone}${tickDirection ? ` ${tickDirection}` : ''}`} key={item.symbol}>
+            <div className="wm-crypto-market-asset">
+              <strong>{item.label}</strong>
+              <span>{item.symbol.replace('-USD', '')}</span>
+            </div>
             <div className="wm-crypto-market-spark">{commoditySparkline(item.points, sparkColor)}</div>
-            <div className="wm-crypto-market-price">{formatCryptoPrice(item)}</div>
-            <div className={`wm-crypto-market-change ${tone}`}>{formatCommodityChange(item.changePercent)}</div>
+            <div className="wm-crypto-market-value">
+              <strong>{formatCryptoPrice(item)}</strong>
+              <span className={tone}>{formatCommodityChange(item.changePercent)}</span>
+            </div>
+            <div className="wm-crypto-market-flow">
+              <b>{item.volume24h ? `$${formatCompact(item.volume24h)}` : item.marketCap ? `$${formatCompact(item.marketCap)}` : '--'}</b>
+              <em>{item.volume24h ? '24h vol' : item.marketCap ? 'mcap' : 'flow'}</em>
+            </div>
+            <span className={`wm-market-signal-chip ${tone}`}>{tickerMoveTag(item, 'crypto')}</span>
           </article>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -197,7 +255,7 @@ function formatCommodityPrice(item: RuntimeMarketTicker) {
     return numeric.toFixed(4);
   }
   if (Math.abs(numeric) >= 1000) {
-    return `$${Math.round(numeric).toLocaleString('en-US')}`;
+    return `$${formatCompact(numeric)}`;
   }
   return `$${numeric.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -216,21 +274,39 @@ function commodityBoard(items: RuntimeMarketTicker[], emptyMessage: string) {
       </div>
     );
   }
+  const leader = topMover(items);
+  const avg = averageChange(items);
+  const alertCount = items.filter((item) => tickerMoveTag(item, 'macro') === 'ALERT').length;
   return (
-    <div className="commodities-grid">
+    <div className="wm-commodity-board">
+      <div className="wm-market-radar-strip">
+        <span><b>{leader?.label || '--'}</b><em>top move</em></span>
+        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>avg move</em></span>
+        <span><b>{alertCount}</b><em>alerts</em></span>
+      </div>
+      <div className="commodities-grid">
       {items.map((item) => {
-        const changePercent = Number(item.changePercent);
-        const tone = !Number.isFinite(changePercent) || changePercent === 0 ? 'flat' : changePercent > 0 ? 'up' : 'down';
+        const tone = tickerTone(item);
         const sparkColor = tone === 'down' ? '#ff6464' : '#39ff73';
         return (
-          <div className="commodity-item" key={item.symbol}>
-            <div className="commodity-name">{item.label}</div>
-            {commoditySparkline(item.points, sparkColor)}
-            <div className="commodity-price">{formatCommodityPrice(item)}</div>
-            <div className={`commodity-change ${tone === 'flat' ? 'up' : tone}`}>{formatCommodityChange(item.changePercent)}</div>
+          <div className={`commodity-item ${tone}`} key={item.symbol}>
+            <div className="commodity-head">
+              <span className="commodity-name">{item.label}</span>
+              <b>{commodityClass(item)}</b>
+            </div>
+            <div className="commodity-spark">{commoditySparkline(item.points, sparkColor)}</div>
+            <div className="commodity-foot">
+              <strong className="commodity-price">{formatCommodityPrice(item)}</strong>
+              <span className={`commodity-change ${tone}`}>{formatCommodityChange(item.changePercent)}</span>
+            </div>
+            <div className="commodity-meta">
+              <span>{tickerMoveTag(item, 'macro')}</span>
+              <em>{item.volume24h ? `vol ${formatCompact(item.volume24h)}` : item.currency || 'USD'}</em>
+            </div>
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -266,7 +342,7 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
             role="tab"
             aria-selected={safeTab === 'commodities'}
           >
-            Commodities
+            Commodities <b>{tabItems.commodities.length}</b>
           </button>
           {hasFx ? (
             <button
@@ -276,7 +352,7 @@ function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGro
               role="tab"
               aria-selected={safeTab === 'fx'}
             >
-              EUR FX
+              FX <b>{tabItems.fx.length}</b>
             </button>
           ) : null}
         </div>

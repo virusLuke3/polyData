@@ -97,6 +97,7 @@ def get_yahoo_market_snapshot(
         "price": current,
         "changePercent": round(change_pct, 2) if change_pct is not None else None,
         "currency": meta.get("currency"),
+        "volume24h": ctx["_safe_float"](meta.get("regularMarketVolume")),
         "name": meta.get("symbol") or symbol,
         "points": points[-48:],
     }

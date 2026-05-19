@@ -57,6 +57,8 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
             "symbol": symbol,
             "price": snapshot.get("price"),
             "changePercent": snapshot.get("changePercent"),
+            "currency": snapshot.get("currency"),
+            "volume24h": snapshot.get("volume24h"),
             "points": snapshot.get("points") or [],
         }
 
@@ -110,6 +112,9 @@ def fetch_live_market_group_payload(ctx: dict, items: List[tuple[str, str, str]]
                         "symbol": symbol,
                         "price": ctx["_safe_float"](coin.get("current_price")),
                         "changePercent": ctx["_safe_float"](coin.get("price_change_percentage_24h")),
+                        "currency": "USD",
+                        "marketCap": ctx["_safe_float"](coin.get("market_cap")),
+                        "volume24h": ctx["_safe_float"](coin.get("total_volume")),
                         "points": points,
                     }
                 )

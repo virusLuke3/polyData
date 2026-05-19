@@ -423,6 +423,9 @@ export type RuntimeMarketTicker = {
   symbol: string;
   price?: number | null;
   changePercent?: number | null;
+  currency?: string | null;
+  marketCap?: number | null;
+  volume24h?: number | null;
   points: SparkPoint[];
 };
 
