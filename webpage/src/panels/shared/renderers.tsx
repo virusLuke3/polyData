@@ -365,6 +365,12 @@ function contentPriority(tags: ContentTag[]) {
   return tags[0]?.tone || 'news';
 }
 
+function cleanIntelSummary(value?: string | null) {
+  const text = String(value || '').trim();
+  if (!text || /^(null|undefined|none)$/i.test(text)) return '';
+  return text;
+}
+
 function contentList(items: ContentItem[], emptyMessage: string) {
   if (!items.length) return emptyState(emptyMessage);
   return (
@@ -373,6 +379,7 @@ function contentList(items: ContentItem[], emptyMessage: string) {
         const tone = contentTone(item.contentType);
         const tags = contentTags(item, tone);
         const priority = contentPriority(tags);
+        const summary = cleanIntelSummary(item.summary);
         return (
           <a className={`wm-intel-card ${tone} priority-${priority}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
             <div className="wm-intel-topline">
@@ -385,7 +392,7 @@ function contentList(items: ContentItem[], emptyMessage: string) {
               </div>
             </div>
             <div className="wm-news-title">{item.title || 'Untitled item'}</div>
-            {item.summary ? <p className="wm-intel-summary">{item.summary}</p> : null}
+            {summary ? <p className="wm-intel-summary">{summary}</p> : null}
             <div className="wm-news-meta">
               <span>{formatDate(item.publishedAt || null)}</span>
               <b>Read source</b>

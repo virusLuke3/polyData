@@ -1258,7 +1258,7 @@ export function App() {
     }
 
     function refreshContentSnapshot() {
-      fetchMarketContent(currentMarketId, 6, 2200)
+      fetchMarketContent(currentMarketId, 20, 5000)
         .then((content) => applyLoadedBundle({ ...emptyWorkspaceBundle(), content }))
         .catch(() => undefined);
     }

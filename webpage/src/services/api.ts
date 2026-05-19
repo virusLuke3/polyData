@@ -376,7 +376,7 @@ export function fetchMarketOracle(marketId: number, timeoutMs = 2200) {
   return apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, timeoutMs);
 }
 
-export function fetchMarketContent(marketId: number, limit = 6, timeoutMs = 2200) {
+export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000) {
   return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}`, timeoutMs);
 }
 
@@ -427,7 +427,7 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       ? (
           detailBundle.content?.items?.length
             ? Promise.resolve(detailBundle.content)
-            : fetchMarketContent(marketId, 6, 2200)
+            : fetchMarketContent(marketId, 20, 5000)
         )
       : Promise.resolve(null);
     const lobPromise = includeLob ? fetchMarketLob(marketId, 2600) : Promise.resolve(null);
