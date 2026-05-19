@@ -3626,61 +3626,161 @@ body.panel-resize-active iframe {
   color: var(--wm-green);
 }
 
-.wm-funding-summary-grid {
+.wm-funding-hero {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px 11px 9px;
+  border: 1px solid rgba(101, 122, 139, 0.28);
+  border-left: 4px solid #7d8791;
+  background:
+    linear-gradient(115deg, rgba(120, 135, 148, 0.14), rgba(18, 18, 18, 0.96) 58%),
+    #111314;
+  box-shadow: inset 0 0 22px rgba(134, 172, 214, 0.06);
 }
 
-.wm-funding-summary-tile {
+.wm-funding-hero.tone-shorts {
+  border-left-color: #66cfff;
+  background:
+    linear-gradient(115deg, rgba(41, 139, 194, 0.18), rgba(18, 18, 18, 0.96) 58%),
+    #111314;
+}
+
+.wm-funding-hero.tone-longs {
+  border-left-color: #ff755b;
+  background:
+    linear-gradient(115deg, rgba(194, 68, 41, 0.18), rgba(18, 18, 18, 0.96) 58%),
+    #111314;
+}
+
+.wm-funding-hero.tone-mixed {
+  border-left-color: #f0c75e;
+  background:
+    linear-gradient(115deg, rgba(190, 150, 42, 0.15), rgba(18, 18, 18, 0.96) 58%),
+    #111314;
+}
+
+.wm-funding-hero-main,
+.wm-funding-hero-side {
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid #24282c;
-  border-left: 2px solid #5c6670;
-  background: #141516;
 }
 
-.wm-funding-summary-tile.is-long {
-  border-color: #24282c;
-  border-left-color: #ff5b4c;
-  background: #141516;
+.wm-funding-hero-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
 }
 
-.wm-funding-summary-tile.is-short {
-  border-color: #24282c;
-  border-left-color: #68cfa5;
-  background: #141516;
-}
-
-.wm-funding-summary-tile.is-heat {
-  border-color: #24282c;
-  border-left-color: #f0b43d;
-  background: #141516;
-}
-
-.wm-funding-summary-tile.is-mixed {
-  border-color: #24282c;
-  border-left-color: #75808a;
-  background: #141516;
-}
-
-.wm-funding-summary-label {
-  display: block;
-  margin-bottom: 4px;
-  color: #858985;
+.wm-funding-hero-kicker,
+.wm-funding-hero-sub,
+.wm-funding-hero-side em,
+.wm-funding-stat-strip span {
+  color: #909790;
   font-family: var(--font-mono);
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.75px;
   text-transform: uppercase;
 }
 
-.wm-funding-summary-value {
-  display: block;
+.wm-funding-hero-title {
   overflow: hidden;
+  color: #f4f4f4;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.25px;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-funding-hero.tone-shorts .wm-funding-hero-kicker {
+  color: #8bdcff;
+}
+
+.wm-funding-hero.tone-longs .wm-funding-hero-kicker {
+  color: #ff9b81;
+}
+
+.wm-funding-hero.tone-mixed .wm-funding-hero-kicker {
+  color: #f2d276;
+}
+
+.wm-funding-hero-sub {
+  overflow: hidden;
+  color: #aeb4ae;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-funding-hero-side {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+
+.wm-funding-hero-side strong {
   color: #f3f3f3;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wm-funding-hero-badge {
+  padding: 2px 7px;
+  border: 1px solid rgba(125, 209, 255, 0.3);
+  border-radius: 999px;
+  background: rgba(73, 183, 255, 0.09);
+  color: #8bdcff;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-funding-hero.tone-longs .wm-funding-hero-badge {
+  border-color: rgba(255, 117, 91, 0.34);
+  background: rgba(255, 117, 91, 0.1);
+  color: #ff9b81;
+}
+
+.wm-funding-hero.tone-mixed .wm-funding-hero-badge {
+  border-color: rgba(240, 199, 94, 0.34);
+  background: rgba(240, 199, 94, 0.1);
+  color: #f2d276;
+}
+
+.wm-funding-stat-strip {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.wm-funding-stat-strip span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 6px;
+  border: 1px solid rgba(71, 86, 96, 0.38);
+  background: rgba(8, 11, 13, 0.58);
+}
+
+.wm-funding-stat-strip strong {
+  overflow: hidden;
+  color: #f1f1f1;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -3691,9 +3791,9 @@ body.panel-resize-active iframe {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
-  border: 1px solid #202020;
-  background: #0f0f0f;
+  overflow: visible;
+  border: 1px solid rgba(75, 92, 106, 0.34);
+  background: rgba(12, 13, 14, 0.72);
 }
 
 .wm-funding-section-head {
@@ -3741,19 +3841,21 @@ body.panel-resize-active iframe {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .wm-funding-asset-row {
   position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   gap: 0;
   min-width: 0;
-  padding: 8px 8px 8px 0;
-  border-left: 2px solid #5f6570;
-  border-bottom: 1px solid #1d1d1d;
-  background: transparent;
+  padding: 7px 8px 8px 0;
+  border-left: 3px solid #5f6570;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.005)),
+    #111213;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
@@ -3769,24 +3871,30 @@ body.panel-resize-active iframe {
 
 .wm-funding-asset-row.bias-longs-pay {
   border-left-color: #ff5b4c;
-  background: transparent;
+  background:
+    linear-gradient(90deg, rgba(255, 91, 76, 0.11), rgba(17, 18, 19, 0.92) 42%),
+    #111213;
 }
 
 .wm-funding-asset-row.bias-shorts-pay {
-  border-left-color: #68cfa5;
-  background: transparent;
+  border-left-color: #49b7ff;
+  background:
+    linear-gradient(90deg, rgba(73, 183, 255, 0.11), rgba(17, 18, 19, 0.92) 42%),
+    #111213;
 }
 
 .wm-funding-asset-row.bias-mixed {
   border-left-color: #f0b43d;
-  background: transparent;
+  background:
+    linear-gradient(90deg, rgba(240, 180, 61, 0.1), rgba(17, 18, 19, 0.92) 42%),
+    #111213;
 }
 
 .wm-funding-row-rank {
-  padding-top: 3px;
+  padding-top: 2px;
   color: #777c77;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   text-align: center;
 }
@@ -3795,7 +3903,7 @@ body.panel-resize-active iframe {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
 }
 
 .wm-funding-row-top {
@@ -3824,91 +3932,127 @@ body.panel-resize-active iframe {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 3px;
+  margin-top: 2px;
   color: #7f857f;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.45px;
   text-transform: uppercase;
 }
 
-.wm-funding-bias-badge {
+.wm-funding-row-signal {
   flex: 0 0 auto;
-  min-width: 68px;
-  padding: 2px 7px;
-  border: 1px solid rgba(95, 101, 112, 0.34);
-  border-radius: 999px;
-  background: rgba(95, 101, 112, 0.1);
-  color: #c3c7cb;
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+}
+
+.wm-funding-row-signal strong {
+  color: #f2f2f2;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wm-funding-row-signal span {
+  color: #858985;
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.7px;
-  line-height: 1.2;
-  text-align: center;
   text-transform: uppercase;
 }
 
-.wm-funding-bias-badge.bias-longs-pay {
-  border-color: rgba(255, 111, 76, 0.42);
-  background: rgba(255, 111, 76, 0.12);
-  color: #ff936e;
+.wm-funding-row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
-.wm-funding-bias-badge.bias-shorts-pay {
-  border-color: rgba(73, 183, 255, 0.4);
-  background: rgba(73, 183, 255, 0.12);
-  color: #81d1ff;
+.wm-funding-row-tag {
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid rgba(95, 101, 112, 0.38);
+  background: rgba(95, 101, 112, 0.12);
+  color: #c8ccd0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.55px;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
-.wm-funding-bias-badge.bias-mixed {
-  border-color: rgba(240, 204, 94, 0.42);
-  background: rgba(240, 204, 94, 0.12);
-  color: #f6d774;
+.wm-funding-row-tag.bias-longs-pay,
+.wm-funding-row-tag.severity-critical {
+  border-color: rgba(255, 82, 70, 0.48);
+  background: rgba(255, 82, 70, 0.16);
+  color: #ff7d68;
 }
 
-.wm-funding-venue-grid {
+.wm-funding-row-tag.bias-shorts-pay {
+  border-color: rgba(73, 183, 255, 0.45);
+  background: rgba(73, 183, 255, 0.14);
+  color: #83d5ff;
+}
+
+.wm-funding-row-tag.bias-mixed,
+.wm-funding-row-tag.severity-warning,
+.wm-funding-row-tag.severity-divergence,
+.wm-funding-row-tag.severity-reset {
+  border-color: rgba(240, 196, 76, 0.45);
+  background: rgba(240, 196, 76, 0.12);
+  color: #f2d276;
+}
+
+.wm-funding-venue-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
-.wm-funding-venue-card {
+.wm-funding-venue-pill {
   min-width: 0;
-  padding: 7px 8px;
-  border: 1px solid #212121;
-  background: linear-gradient(180deg, #171717 0%, #111111 100%);
+  padding: 5px 7px;
+  border: 1px solid rgba(38, 48, 55, 0.9);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
+    #0f1112;
 }
 
-.wm-funding-venue-card.dir-positive {
+.wm-funding-venue-pill.dir-positive {
   border-color: rgba(255, 132, 88, 0.26);
   background:
-    linear-gradient(180deg, rgba(255, 132, 88, 0.13), rgba(17, 17, 17, 0.97)),
+    linear-gradient(180deg, rgba(255, 132, 88, 0.11), rgba(17, 17, 17, 0.97)),
     #111111;
 }
 
-.wm-funding-venue-card.dir-negative {
+.wm-funding-venue-pill.dir-negative {
   border-color: rgba(73, 183, 255, 0.26);
   background:
-    linear-gradient(180deg, rgba(73, 183, 255, 0.13), rgba(17, 17, 17, 0.97)),
+    linear-gradient(180deg, rgba(73, 183, 255, 0.11), rgba(17, 17, 17, 0.97)),
     #111111;
 }
 
-.wm-funding-venue-card.heat-strong.dir-positive,
-.wm-funding-venue-card.heat-extreme.dir-positive {
+.wm-funding-venue-pill.heat-strong.dir-positive,
+.wm-funding-venue-pill.heat-extreme.dir-positive {
   border-color: rgba(255, 90, 68, 0.4);
   background:
-    linear-gradient(180deg, rgba(255, 90, 68, 0.2), rgba(17, 17, 17, 0.95)),
+    linear-gradient(180deg, rgba(255, 90, 68, 0.18), rgba(17, 17, 17, 0.95)),
     #111111;
 }
 
-.wm-funding-venue-card.heat-strong.dir-negative,
-.wm-funding-venue-card.heat-extreme.dir-negative {
+.wm-funding-venue-pill.heat-strong.dir-negative,
+.wm-funding-venue-pill.heat-extreme.dir-negative {
   border-color: rgba(57, 165, 255, 0.38);
   background:
-    linear-gradient(180deg, rgba(57, 165, 255, 0.2), rgba(17, 17, 17, 0.95)),
+    linear-gradient(180deg, rgba(57, 165, 255, 0.18), rgba(17, 17, 17, 0.95)),
     #111111;
 }
 
@@ -3917,7 +4061,7 @@ body.panel-resize-active iframe {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .wm-funding-venue-head span,
@@ -3940,28 +4084,28 @@ body.panel-resize-active iframe {
   overflow: hidden;
   color: #ececec;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wm-funding-venue-card.dir-positive .wm-funding-venue-rate {
+.wm-funding-venue-pill.dir-positive .wm-funding-venue-rate {
   color: #ff9d7a;
 }
 
-.wm-funding-venue-card.dir-negative .wm-funding-venue-rate {
+.wm-funding-venue-pill.dir-negative .wm-funding-venue-rate {
   color: #8bd5ff;
 }
 
-.wm-funding-venue-card.heat-strong.dir-positive .wm-funding-venue-rate,
-.wm-funding-venue-card.heat-extreme.dir-positive .wm-funding-venue-rate {
+.wm-funding-venue-pill.heat-strong.dir-positive .wm-funding-venue-rate,
+.wm-funding-venue-pill.heat-extreme.dir-positive .wm-funding-venue-rate {
   color: #ff6a4a;
 }
 
-.wm-funding-venue-card.heat-strong.dir-negative .wm-funding-venue-rate,
-.wm-funding-venue-card.heat-extreme.dir-negative .wm-funding-venue-rate {
+.wm-funding-venue-pill.heat-strong.dir-negative .wm-funding-venue-rate,
+.wm-funding-venue-pill.heat-extreme.dir-negative .wm-funding-venue-rate {
   color: #44b7ff;
 }
 
@@ -3970,7 +4114,7 @@ body.panel-resize-active iframe {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 @media (max-width: 720px) {
@@ -3995,7 +4139,9 @@ body.panel-resize-active iframe {
     flex-direction: column;
   }
 
-  .wm-funding-venue-grid {
+  .wm-funding-hero,
+  .wm-funding-stat-strip,
+  .wm-funding-venue-strip {
     grid-template-columns: 1fr;
   }
 

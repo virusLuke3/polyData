@@ -6,16 +6,18 @@ import { formatRelative } from '../../shared/formatters';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
 
-function percentLabel(value?: number | null, digits = 4) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '--';
-  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}%`;
-}
-
 function absolutePercentLabel(value?: number | null, digits = 4) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   return `${Math.abs(numeric).toFixed(digits)}%`;
+}
+
+function compactPercentLabel(value?: number | null, digits = 3) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  const abs = Math.abs(numeric);
+  const precision = abs >= 1 ? 1 : digits;
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(precision)}%`;
 }
 
 function sourceStatus(payload?: RuntimeCryptoFundingPayload | null) {
@@ -47,7 +49,7 @@ function countByBias(assets: RuntimeCryptoFundingAsset[], bias: string) {
   return assets.filter((asset) => asset.bias === bias).length;
 }
 
-function maxAbsFunding(assets: RuntimeCryptoFundingAsset[]) {
+function maxAbsFundingValue(assets: RuntimeCryptoFundingAsset[]) {
   const values = assets
     .map((asset) => Math.abs(Number(asset.maxAbsFundingPercent)))
     .filter((value) => Number.isFinite(value));
@@ -77,51 +79,144 @@ function orderQuotes(asset: RuntimeCryptoFundingAsset, payload?: RuntimeCryptoFu
   });
 }
 
+function isResetSoon(value?: string | null) {
+  if (!value) return false;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return false;
+  const diffMs = timestamp - Date.now();
+  return diffMs > 0 && diffMs <= 2 * 60 * 60 * 1000;
+}
+
+function nearestResetLabel(assets: RuntimeCryptoFundingAsset[]) {
+  const nearest = assets
+    .map((asset) => asset.nextFundingTime)
+    .filter(Boolean)
+    .map((value) => ({ value, timestamp: Date.parse(String(value)) }))
+    .filter((entry) => Number.isFinite(entry.timestamp) && entry.timestamp > Date.now())
+    .sort((left, right) => left.timestamp - right.timestamp)[0];
+  return nearest ? `${compactTimeLabel(nearest.value)} reset` : '--';
+}
+
+function fundingPressureStats(payload: RuntimeCryptoFundingPayload | null | undefined, assets: RuntimeCryptoFundingAsset[]) {
+  const longs = countByBias(assets, 'longs-pay');
+  const shorts = countByBias(assets, 'shorts-pay');
+  const mixed = countByBias(assets, 'mixed');
+  const alertCount = assets.filter((asset) => {
+    const maxAbs = Math.abs(Number(asset.maxAbsFundingPercent));
+    return asset.tone === 'critical' || asset.tone === 'warning' || maxAbs >= 0.008;
+  }).length;
+  const topAsset = [...assets]
+    .sort((left, right) => Math.abs(Number(right.maxAbsFundingPercent)) - Math.abs(Number(left.maxAbsFundingPercent)))[0];
+  const venueTotal = venueCount(payload, assets);
+
+  if (shorts > longs && shorts >= mixed) {
+    return {
+      label: 'SHORT CROWDING',
+      badge: 'SHORTS PAY',
+      tone: 'shorts',
+      subline: `${shorts} shorts pay / ${longs} longs pay / ${mixed} mixed`,
+      alertCount,
+      topAsset,
+      venueTotal,
+    };
+  }
+
+  if (longs > shorts && longs >= mixed) {
+    return {
+      label: 'LONG CROWDING',
+      badge: 'LONGS PAY',
+      tone: 'longs',
+      subline: `${longs} longs pay / ${shorts} shorts pay / ${mixed} mixed`,
+      alertCount,
+      topAsset,
+      venueTotal,
+    };
+  }
+
+  return {
+    label: 'MIXED FUNDING',
+    badge: 'MIXED',
+    tone: 'mixed',
+    subline: `${mixed} mixed / ${longs} longs pay / ${shorts} shorts pay`,
+    alertCount,
+    topAsset,
+    venueTotal,
+  };
+}
+
+function fundingAssetTags(asset: RuntimeCryptoFundingAsset) {
+  const tags = [{ label: biasLabel(asset).toUpperCase(), className: `bias-${asset.bias || 'flat'}` }];
+  const maxAbs = Math.abs(Number(asset.maxAbsFundingPercent));
+  const spread = Math.abs(Number(asset.spreadPercent));
+  if (maxAbs >= 0.015 || asset.tone === 'critical') {
+    tags.push({ label: 'EXTREME', className: 'severity-critical' });
+  } else if (maxAbs >= 0.008 || asset.tone === 'warning') {
+    tags.push({ label: 'WATCH', className: 'severity-warning' });
+  }
+  if (spread >= 0.01) {
+    tags.push({ label: 'DIVERGENCE', className: 'severity-divergence' });
+  }
+  if (isResetSoon(asset.nextFundingTime)) {
+    tags.push({ label: 'RESET SOON', className: 'severity-reset' });
+  }
+  return tags.slice(0, 4);
+}
+
 function FundingSummary({ payload, assets }: { payload?: RuntimeCryptoFundingPayload | null; assets: RuntimeCryptoFundingAsset[] }) {
+  const stats = fundingPressureStats(payload, assets);
+  const topAssetName = stats.topAsset?.asset || stats.topAsset?.symbol || 'watchlist';
   return (
-    <div className="wm-funding-summary-grid">
-      <div className="wm-funding-summary-tile">
-        <span className="wm-funding-summary-label">Assets</span>
-        <strong className="wm-funding-summary-value">{assets.length}</strong>
+    <section className={`wm-funding-hero tone-${stats.tone}`}>
+      <div className="wm-funding-hero-main">
+        <span className="wm-funding-hero-kicker">Market Pressure</span>
+        <strong className="wm-funding-hero-title">{stats.label}</strong>
+        <span className="wm-funding-hero-sub">{stats.subline}</span>
       </div>
-      <div className="wm-funding-summary-tile">
-        <span className="wm-funding-summary-label">Venues</span>
-        <strong className="wm-funding-summary-value">{venueCount(payload, assets)}</strong>
+      <div className="wm-funding-hero-side">
+        <span className="wm-funding-hero-badge">{stats.badge}</span>
+        <strong>{maxAbsFundingValue(assets)}</strong>
+        <em>max abs</em>
       </div>
-      <div className="wm-funding-summary-tile is-long">
-        <span className="wm-funding-summary-label">Longs Pay</span>
-        <strong className="wm-funding-summary-value">{countByBias(assets, 'longs-pay')}</strong>
+      <div className="wm-funding-stat-strip">
+        <span>
+          <strong>{assets.length}</strong>
+          assets
+        </span>
+        <span>
+          <strong>{stats.venueTotal}</strong>
+          venues
+        </span>
+        <span>
+          <strong>{stats.alertCount}</strong>
+          alerts
+        </span>
+        <span>
+          <strong>{nearestResetLabel(assets)}</strong>
+          next
+        </span>
+        <span>
+          <strong>{topAssetName}</strong>
+          top move
+        </span>
       </div>
-      <div className="wm-funding-summary-tile is-short">
-        <span className="wm-funding-summary-label">Shorts Pay</span>
-        <strong className="wm-funding-summary-value">{countByBias(assets, 'shorts-pay')}</strong>
-      </div>
-      <div className="wm-funding-summary-tile is-heat">
-        <span className="wm-funding-summary-label">Max Abs</span>
-        <strong className="wm-funding-summary-value">{maxAbsFunding(assets)}</strong>
-      </div>
-      <div className="wm-funding-summary-tile is-mixed">
-        <span className="wm-funding-summary-label">Mixed</span>
-        <strong className="wm-funding-summary-value">{countByBias(assets, 'mixed')}</strong>
-      </div>
-    </div>
+    </section>
   );
 }
 
-function FundingVenueCard({ quote }: { quote: RuntimeCryptoFundingItem }) {
+function FundingVenuePill({ quote }: { quote: RuntimeCryptoFundingItem }) {
   const direction = quote.direction || 'flat';
   const tone = quote.tone || 'normal';
   const heat = quote.heatBand || 'flat';
   return (
-    <article className={`wm-funding-venue-card dir-${direction} tone-${tone} heat-${heat}`}>
+    <article className={`wm-funding-venue-pill dir-${direction} tone-${tone} heat-${heat}`}>
       <div className="wm-funding-venue-head">
         <span>{quote.exchange || 'Exchange'}</span>
-        <em>{quoteDirectionLabel(quote)}</em>
+        <em>{compactTimeLabel(quote.nextFundingTime)}</em>
       </div>
-      <strong className="wm-funding-venue-rate">{percentLabel(quote.fundingRatePercent)}</strong>
+      <strong className="wm-funding-venue-rate">{compactPercentLabel(quote.fundingRatePercent)}</strong>
       <div className="wm-funding-venue-sub">
-        <span>{percentLabel(quote.annualizedPercent, 1)} ann.</span>
-        <span>{compactTimeLabel(quote.nextFundingTime)}</span>
+        <span>{quoteDirectionLabel(quote)}</span>
+        <span>{compactPercentLabel(quote.annualizedPercent, 1)} ann</span>
       </div>
     </article>
   );
@@ -130,6 +225,8 @@ function FundingVenueCard({ quote }: { quote: RuntimeCryptoFundingItem }) {
 function FundingRow({ asset, index, payload }: { asset: RuntimeCryptoFundingAsset; index: number; payload?: RuntimeCryptoFundingPayload | null }) {
   const bias = asset.bias || 'flat';
   const tone = asset.tone || 'normal';
+  const tags = fundingAssetTags(asset);
+  const quotes = orderQuotes(asset, payload);
   return (
     <article className={`wm-funding-asset-row bias-${bias} tone-${tone}`}>
       <div className="wm-funding-row-rank">{String(index + 1).padStart(2, '0')}</div>
@@ -138,17 +235,25 @@ function FundingRow({ asset, index, payload }: { asset: RuntimeCryptoFundingAsse
           <div className="wm-funding-row-identity">
             <div className="wm-funding-row-symbol">{asset.asset || asset.symbol || 'CRYPTO'}</div>
             <div className="wm-funding-row-meta">
-              <span>{asset.venues || asset.quotes.length} venues</span>
-              <span>{percentLabel(asset.consensusFundingPercent)} avg</span>
-              <span>{absolutePercentLabel(asset.spreadPercent)} spread</span>
+              <span>{asset.venues || quotes.length} venues</span>
+              <span>{compactPercentLabel(asset.consensusFundingPercent)} avg</span>
+              <span>{absolutePercentLabel(asset.spreadPercent, 3)} spread</span>
               <span>{compactTimeLabel(asset.nextFundingTime)} reset</span>
             </div>
           </div>
-          <span className={`wm-funding-bias-badge bias-${bias} tone-${tone}`}>{biasLabel(asset)}</span>
+          <div className="wm-funding-row-signal">
+            <strong>{compactPercentLabel(asset.maxAbsFundingPercent)}</strong>
+            <span>max</span>
+          </div>
         </div>
-        <div className="wm-funding-venue-grid">
-          {orderQuotes(asset, payload).map((quote) => (
-            <FundingVenueCard key={quote.id} quote={quote} />
+        <div className="wm-funding-row-tags">
+          {tags.map((tag) => (
+            <span key={`${asset.id}-${tag.label}`} className={`wm-funding-row-tag ${tag.className}`}>{tag.label}</span>
+          ))}
+        </div>
+        <div className="wm-funding-venue-strip">
+          {quotes.map((quote) => (
+            <FundingVenuePill key={quote.id} quote={quote} />
           ))}
         </div>
       </div>
@@ -183,6 +288,7 @@ function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload |
   const [showHelp, setShowHelp] = useState(false);
   const assets = payload?.assets || [];
   const degraded = sourceStatus(payload) !== 'ok' && sourceStatus(payload) !== 'live';
+  const stats = fundingPressureStats(payload, assets);
 
   return (
     <Panel
@@ -198,9 +304,9 @@ function FundingRatePanel({ payload }: { payload?: RuntimeCryptoFundingPayload |
           ?
         </button>
       )}
-      badge={degraded ? 'STALE' : 'LIVE'}
+      badge={degraded ? 'STALE' : assets.length ? stats.badge : 'LIVE'}
       status="live"
-      count={assets.length}
+      count={assets.length ? stats.alertCount || assets.length : 0}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>Funding Rate</strong>
