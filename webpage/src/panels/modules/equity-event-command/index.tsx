@@ -4,7 +4,7 @@ import { fetchRuntimeEquityEventCommand } from '@/services/api';
 import type { RuntimeEquityEventCommandPayload, RuntimeEquityEventRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, CoverageBadges, dateLabel, financeTone, MiniBar, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, CoverageBadges, dateLabel, financeTone, MiniBar, MiniSparkline, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
 
 type EquitySort = 'PMKT GAP' | 'NEXT EVENT' | 'STOCK MOVE' | 'VOLUME';
 const SORTS: EquitySort[] = ['PMKT GAP', 'NEXT EVENT', 'STOCK MOVE', 'VOLUME'];
@@ -23,21 +23,25 @@ function EventRow({ item }: { item: RuntimeEquityEventRow }) {
   const tone = financeTone(item.change1d);
   return (
     <div className={`wm-finance-equity-line ${tone}`}>
-      <div className="wm-finance-quote-main">
+      <span className="wm-finance-line-code">{item.symbol || '--'}</span>
+      <MiniSparkline seed={`${item.symbol}-${item.price}`} tone={tone} bias={Number(item.change1d) >= 0 ? 0.45 : -0.45} />
+      <div className="wm-finance-line-main">
+        <div className="wm-finance-line-meta">
+          <span>{item.eventType || 'LINKED'}</span>
+          <span>{dateLabel(item.nextEventAt)}</span>
+          <CoverageBadges items={linked?.coverage || item.badges} max={3} />
+        </div>
         <strong>{item.company || item.symbol || 'Equity'}</strong>
-        <span>{item.symbol || '--'}</span>
+        <span>{item.nextEvent || linked?.title || 'market watch'}</span>
       </div>
       <div className="wm-finance-equity-price">
         <strong>{moneyLabel(item.price)}</strong>
         <em className={tone}>{signedPercentLabel(item.change1d)}</em>
       </div>
       <div className="wm-finance-equity-event">
-        <span>{item.eventType || 'LINKED'} · {dateLabel(item.nextEventAt)}</span>
-        <b>{item.nextEvent || linked?.title || 'market watch'}</b>
-        <MiniBar value={Number(linked?.probability) * 100} tone={linked ? 'ok' : 'neutral'} />
+        <MiniBar value={Number(linked?.probability) * 100} tone={tone} />
       </div>
       <div className="wm-finance-equity-tags">
-        <CoverageBadges items={linked?.coverage || item.badges} max={4} />
         <span>PMKT {percentLabel(linked?.probability)}</span>
         <span>VOL {moneyLabel(linked?.volume24h || item.volume24h)}</span>
       </div>
@@ -67,7 +71,7 @@ function EquityEventCommandPanel({ payload }: { payload?: RuntimeEquityEventComm
       className="wm-market-panel wm-finance-panel"
       dataPanelId="equity-event-command"
     >
-      <div className="wm-finance-brief-line">
+      <div className="wm-finance-brief-line wm-finance-ticker-strip">
         <span><strong>{payload?.summary?.trackedCount || items.length}</strong> tracked</span>
         <span><strong>{payload?.summary?.catalystCount || 0}</strong> linked</span>
         <span><strong>{payload?.summary?.topSymbol || '--'}</strong> top</span>
@@ -79,6 +83,7 @@ function EquityEventCommandPanel({ payload }: { payload?: RuntimeEquityEventComm
             <strong>{top.company || top.symbol}</strong>
             <span>{top.symbol || '--'} · {top.nextEvent || 'linked market'}</span>
           </div>
+          <MiniSparkline seed={`${top.symbol}-lead`} tone={financeTone(top.change1d)} bias={Number(top.change1d) >= 0 ? 0.45 : -0.45} />
           <div>
             <strong>{moneyLabel(top.price)}</strong>
             <em className={financeTone(top.change1d)}>{signedPercentLabel(top.change1d)}</em>

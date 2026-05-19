@@ -4,7 +4,7 @@ import { fetchRuntimeFinanceLiquidityRegime } from '@/services/api';
 import type { RuntimeFinanceLiquidityComponent, RuntimeFinanceLiquidityRegimePayload, RuntimeFinanceLiquidityRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, MiniBar, MiniSparkline, moneyLabel, numberLabel, numericValue, panelTone, sortCycle } from '../finance-common';
+import { badgeLabel, financeTone, MiniBar, MiniSparkline, moneyLabel, numberLabel, numericValue, panelTone, signedNumberLabel, sortCycle } from '../finance-common';
 
 type LiquiditySort = 'PMKT' | 'COT' | 'FLOW' | 'RISK';
 const SORTS: LiquiditySort[] = ['PMKT', 'COT', 'FLOW', 'RISK'];
@@ -18,16 +18,17 @@ function sortItems(items: RuntimeFinanceLiquidityRow[], sort: LiquiditySort) {
 }
 
 function LiquidityRow({ item }: { item: RuntimeFinanceLiquidityRow }) {
+  const tone = financeTone(item.value);
   return (
-    <div className={`wm-finance-liquidity-line ${item.tone || 'neutral'}`}>
-      <MiniSparkline seed={item.id || item.label} tone={item.tone || 'neutral'} bias={numericValue(item.value) > 0 ? 0.8 : -0.3} />
+    <div className={`wm-finance-liquidity-line ${tone}`}>
+      <MiniSparkline seed={item.id || item.label} tone={tone} bias={numericValue(item.value) >= 0 ? 0.45 : -0.45} />
       <div className="wm-finance-line-main">
         <span>{item.source || 'PMKT'} · {item.signal || 'WATCH'}</span>
         <strong>{item.label || 'Liquidity row'}</strong>
-        <MiniBar value={item.linkedMarket?.probability ? Number(item.linkedMarket.probability) * 100 : item.value} max={100} tone={item.tone || 'neutral'} />
+        <MiniBar value={item.linkedMarket?.probability ? Number(item.linkedMarket.probability) * 100 : item.value} max={100} tone={tone} />
       </div>
       <div className="wm-finance-line-value">
-        <strong>{moneyLabel(item.value)}</strong>
+        <strong>{item.source === 'ETF' ? moneyLabel(item.value) : signedNumberLabel(item.value)}</strong>
         <span>{item.linkedMarket ? `PMKT ${numberLabel(item.linkedMarket.probability, 0)}%` : 'NO LINK'}</span>
       </div>
     </div>
@@ -35,7 +36,7 @@ function LiquidityRow({ item }: { item: RuntimeFinanceLiquidityRow }) {
 }
 
 function ComponentRow({ component }: { component: RuntimeFinanceLiquidityComponent }) {
-  const tone = component.tone || 'neutral';
+  const tone = financeTone(component.value);
   return (
     <div className={`wm-finance-cot-row ${tone}`}>
       <div>
@@ -74,7 +75,7 @@ function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiqu
       className="wm-market-panel wm-finance-panel"
       dataPanelId="finance-liquidity-regime"
     >
-      <div className="wm-finance-brief-line">
+      <div className="wm-finance-brief-line wm-finance-ticker-strip">
         <span><strong>{numberLabel(summary?.regimeScore, 0)}</strong> score</span>
         <span><strong>{summary?.regimeLabel || 'FRAGILE'}</strong> regime</span>
         <span><strong>{numberLabel(summary?.alertCount || 0, 0)}</strong> alerts</span>
@@ -85,7 +86,7 @@ function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiqu
           <span>{summary?.signal || 'LIQUIDITY WARMING'}</span>
           <strong>{summary?.regimeLabel || 'FRAGILE'}</strong>
         </div>
-        <MiniSparkline seed="liquidity-regime" tone={Number(summary?.regimeScore) >= 70 ? 'ok' : 'watch'} bias={Number(summary?.regimeScore) >= 70 ? 0.8 : 0.1} />
+        <MiniSparkline seed="liquidity-regime" tone={Number(summary?.regimeScore) >= 50 ? 'ok' : 'bad'} bias={Number(summary?.regimeScore) >= 50 ? 0.45 : -0.45} />
         <div>
           <b>{numberLabel(summary?.regimeScore, 0)}</b>
           <span>{moneyLabel(pmktVolume)}</span>

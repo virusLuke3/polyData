@@ -4,7 +4,7 @@ import { fetchRuntimeFinanceMarketAtlas } from '@/services/api';
 import type { RuntimeFinanceLinkedMarket, RuntimeFinanceMarketAtlasCategory, RuntimeFinanceMarketAtlasPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, CoverageBadges, dateLabel, financeTone, MiniBar, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, CoverageBadges, dateLabel, financeTone, MiniBar, moneyLabel, MiniSparkline, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
 
 type AtlasSort = 'VOLUME' | 'DEADLINE' | 'GAP' | 'COVERAGE';
 const SORTS: AtlasSort[] = ['VOLUME', 'DEADLINE', 'GAP', 'COVERAGE'];
@@ -20,7 +20,7 @@ function sortItems(items: RuntimeFinanceLinkedMarket[], sort: AtlasSort) {
 
 function CategoryRow({ item }: { item: RuntimeFinanceMarketAtlasCategory }) {
   return (
-    <div className="wm-finance-quote-row compact">
+    <div className="wm-finance-section-row compact">
       <div className="wm-finance-quote-main">
         <strong>{item.label || item.id || 'Finance'}</strong>
         <span>{Number(item.activeCount) || 0} MKTS</span>
@@ -39,6 +39,7 @@ function MarketRow({ item }: { item: RuntimeFinanceLinkedMarket }) {
   return (
     <div className={`wm-finance-market-line ${tone}`}>
       <span className="wm-finance-line-code">{category.slice(0, 4)}</span>
+      <MiniSparkline seed={`${item.marketId || item.title}-${item.change24h}`} tone={tone} bias={Number(item.change24h) >= 0 ? 0.35 : -0.35} />
       <div className="wm-finance-line-main">
         <div className="wm-finance-line-meta">
           <span>{item.categoryLabel || item.category || 'finance'}</span>
@@ -46,7 +47,7 @@ function MarketRow({ item }: { item: RuntimeFinanceLinkedMarket }) {
           <CoverageBadges items={item.coverage} max={3} />
         </div>
         <strong>{item.title || 'Finance market'}</strong>
-        <MiniBar value={Number(item.probability) * 100} tone="ok" />
+        <MiniBar value={Number(item.probability) * 100} tone={tone} />
       </div>
       <div className="wm-finance-line-value">
         <strong>{percentLabel(item.probability)}</strong>
@@ -81,7 +82,7 @@ function FinanceMarketAtlasPanel({ payload }: { payload?: RuntimeFinanceMarketAt
       className="wm-market-panel wm-finance-panel"
       dataPanelId="finance-market-atlas"
     >
-      <div className="wm-finance-brief-line">
+      <div className="wm-finance-brief-line wm-finance-ticker-strip">
         <span><strong>{payload?.summary?.activeCount || items.length}</strong> active</span>
         <span><strong>{payload?.summary?.categoryCount || (payload?.categories || []).length}</strong> categories</span>
         <span><strong>{payload?.summary?.topCategory || '--'}</strong> top</span>
@@ -96,10 +97,10 @@ function FinanceMarketAtlasPanel({ payload }: { payload?: RuntimeFinanceMarketAt
             <em>VOL <b>{moneyLabel(top.volume24h)}</b></em>
             <em>24H <b className={financeTone(top.change24h)}>{signedPercentLabel(top.change24h)}</b></em>
           </div>
-          <MiniBar value={Number(top.probability) * 100} tone="ok" />
+          <MiniBar value={Number(top.probability) * 100} tone={financeTone(top.change24h)} />
         </div>
       ) : null}
-      <div className="wm-finance-quote-list">
+      <div className="wm-finance-section-list">
         {(payload?.categories || []).slice(0, 5).map((category) => <CategoryRow key={category.id || category.label} item={category} />)}
       </div>
       <div className="wm-finance-list">

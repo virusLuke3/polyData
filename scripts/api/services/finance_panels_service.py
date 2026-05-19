@@ -30,6 +30,11 @@ WATCHLIST: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("MSTR", "MicroStrategy", ("mstr", "microstrategy", "strategy")),
     ("COIN", "Coinbase", ("coin", "coinbase")),
     ("HOOD", "Robinhood", ("hood", "robinhood")),
+    ("AVGO", "Broadcom", ("avgo", "broadcom")),
+    ("AMD", "AMD", ("amd", "advanced micro devices")),
+    ("PLTR", "Palantir", ("pltr", "palantir")),
+    ("NFLX", "Netflix", ("nflx", "netflix")),
+    ("GME", "GameStop", ("gme", "gamestop")),
     ("AAPL", "Apple", ("aapl", "apple")),
     ("MSFT", "Microsoft", ("msft", "microsoft")),
     ("AMZN", "Amazon", ("amzn", "amazon")),
@@ -39,7 +44,11 @@ WATCHLIST: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
     ("QQQ", "Nasdaq 100", ("qqq", "nasdaq")),
 )
 
-TRADFI_PERP_SYMBOLS: Tuple[str, ...] = ("NVDA", "TSLA", "MSTR", "COIN", "HOOD", "SPY", "QQQ", "GOLD", "OIL", "BTC", "ETH", "SOL")
+TRADFI_PERP_SYMBOLS: Tuple[str, ...] = (
+    "NVDA", "TSLA", "MSTR", "COIN", "HOOD", "AVGO", "AMD", "PLTR", "GME",
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "SPY", "QQQ", "GOLD", "OIL",
+    "BTC", "ETH", "SOL",
+)
 
 
 def _now(ctx: dict) -> str:
@@ -293,8 +302,8 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
                     links_by_symbol.setdefault(symbol, []).append(_linked_market_from_group(group, "stocks"))
 
         symbols = [symbol for symbol, links in links_by_symbol.items() if links][:limit]
-        if len(symbols) < min(limit, 8):
-            symbols.extend([symbol for symbol, _, _ in WATCHLIST if symbol not in symbols][: max(0, min(limit, 8) - len(symbols))])
+        if len(symbols) < limit:
+            symbols.extend([symbol for symbol, _, _ in WATCHLIST if symbol not in symbols][: max(0, limit - len(symbols))])
         quotes = _quote_snapshots(ctx, symbols[:limit])
         rows: List[Dict[str, Any]] = []
         for symbol, company, terms in WATCHLIST:
@@ -348,7 +357,7 @@ def get_equity_event_command_snapshot(ctx: dict, limit: int = DEFAULT_EQUITY_EVE
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:equity-event-command", f"v2:{limit}", _builder)
+    return _cached(ctx, "runtime:finance:equity-event-command", f"v3:{limit}", _builder)
 
 
 def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADFI_PERP_LIMIT) -> Dict[str, Any]:
@@ -465,7 +474,7 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
             "items": unique_rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:onchain-tradfi-perp-radar", f"v2:{limit}", _builder, ttl_seconds=45)
+    return _cached(ctx, "runtime:finance:onchain-tradfi-perp-radar", f"v3:{limit}", _builder, ttl_seconds=45)
 
 
 def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT) -> Dict[str, Any]:
@@ -583,4 +592,4 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
             "items": rows[:limit],
         }
 
-    return _cached(ctx, "runtime:finance:liquidity-regime", f"v2:{limit}", _builder, ttl_seconds=45)
+    return _cached(ctx, "runtime:finance:liquidity-regime", f"v3:{limit}", _builder, ttl_seconds=45)

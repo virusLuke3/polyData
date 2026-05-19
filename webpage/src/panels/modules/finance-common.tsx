@@ -28,6 +28,12 @@ export function signedPercentLabel(value?: string | number | null, digits = 1) {
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(digits)}%`;
 }
 
+export function signedNumberLabel(value?: string | number | null, digits = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '--';
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}`;
+}
+
 export function numericValue(value?: string | number | null, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -58,9 +64,8 @@ export function sortCycle<T extends string>(items: T[], current: T) {
 
 export function coverageTone(value?: string | null) {
   const key = String(value || '').toLowerCase();
-  if (key === 'clob' || key === 'quote' || key === 'flow') return 'ok';
-  if (key === 'earn' || key === 'sec' || key === 'perp' || key === 'etf') return 'watch';
-  if (key === 'oracle') return 'cool';
+  if (key === 'clob' || key === 'quote' || key === 'flow') return 'source';
+  if (key === 'earn' || key === 'sec' || key === 'perp' || key === 'etf' || key === 'oracle') return 'source';
   return 'neutral';
 }
 
@@ -103,6 +108,14 @@ export function financeTone(value?: string | number | null) {
     if (numeric < 0) return 'bad';
   }
   return 'neutral';
+}
+
+export function marketMoveTone(value?: string | number | null) {
+  return financeTone(value);
+}
+
+export function basisTone(value?: string | number | null) {
+  return financeTone(value);
 }
 
 export function severityTone(value?: string | null) {

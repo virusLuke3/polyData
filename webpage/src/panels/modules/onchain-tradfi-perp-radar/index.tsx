@@ -4,7 +4,7 @@ import { fetchRuntimeOnchainTradfiPerpRadar } from '@/services/api';
 import type { RuntimeOnchainTradfiPerpRadarPayload, RuntimeOnchainTradfiPerpRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, MiniBar, MiniSparkline, moneyLabel, numberLabel, numericValue, panelTone, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, basisTone, CoverageBadges, MiniBar, MiniSparkline, moneyLabel, numberLabel, numericValue, panelTone, signedPercentLabel, sortCycle } from '../finance-common';
 
 type PerpSort = 'BASIS' | 'OI' | 'FUNDING' | 'PMKT GAP';
 const SORTS: PerpSort[] = ['BASIS', 'OI', 'FUNDING', 'PMKT GAP'];
@@ -27,15 +27,15 @@ function basisLabel(value?: string | number | null) {
 function PerpRow({ item }: { item: RuntimeOnchainTradfiPerpRow }) {
   const linked = (item.linkedMarkets || [])[0];
   const funding = item.funding === null || item.funding === undefined ? '--' : signedPercentLabel(item.funding, 3);
-  const tone = (item.alerts || []).length ? 'watch' : 'neutral';
+  const tone = basisTone(item.basisBps ?? item.funding);
   return (
     <div className={`wm-finance-perp-line ${tone}`}>
       <span className="wm-finance-line-code">{item.symbol || 'PERP'}</span>
-      <MiniSparkline seed={`${item.symbol}-${item.markPx}`} tone={tone} bias={numericValue(item.compositeScore) / 120} />
+      <MiniSparkline seed={`${item.symbol}-${item.markPx}`} tone={tone} bias={numericValue(item.basisBps ?? item.funding) >= 0 ? 0.45 : -0.45} />
       <div className="wm-finance-line-main">
         <div className="wm-finance-line-meta">
           <span>{String(item.assetClass || 'asset').toUpperCase()}</span>
-          {(item.alerts || ['WATCH']).slice(0, 2).map((alert) => <span key={alert} className="wm-finance-chip watch">{alert}</span>)}
+          <CoverageBadges items={item.alerts || ['PERP']} max={2} />
         </div>
         <strong>{item.display || item.symbol || 'TradFi perp'}</strong>
         <MiniBar value={item.compositeScore} max={30} tone={tone} />
@@ -76,7 +76,7 @@ function OnchainTradfiPerpRadarPanel({ payload }: { payload?: RuntimeOnchainTrad
       className="wm-market-panel wm-finance-panel"
       dataPanelId="onchain-tradfi-perp-radar"
     >
-      <div className="wm-finance-brief-line">
+      <div className="wm-finance-brief-line wm-finance-ticker-strip">
         <span><strong>{numberLabel(payload?.summary?.assetCount || items.length, 0)}</strong> assets</span>
         <span><strong>{numberLabel(payload?.summary?.alertCount || 0, 0)}</strong> alerts</span>
         <span><strong>{top?.symbol || '--'}</strong> top</span>
@@ -88,7 +88,7 @@ function OnchainTradfiPerpRadarPanel({ payload }: { payload?: RuntimeOnchainTrad
             <strong>{top.display || top.symbol}</strong>
             <span>{(top.alerts || ['PERP ANOMALY']).join(' / ')}</span>
           </div>
-          <MiniSparkline seed={`${top.symbol}-lead`} tone={(top.alerts || []).length ? 'watch' : 'neutral'} bias={numericValue(top.compositeScore) / 120} />
+          <MiniSparkline seed={`${top.symbol}-lead`} tone={basisTone(top.basisBps ?? top.funding)} bias={numericValue(top.basisBps ?? top.funding) >= 0 ? 0.45 : -0.45} />
           <div>
             <strong>{moneyLabel(top.markPx)}</strong>
             <span>{basisLabel(top.basisBps)}</span>
