@@ -756,6 +756,10 @@ def prewarm_snapshot_payloads(ctx: dict) -> None:
             ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
         ("market-groups:active:80", 15, lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
+        ("finance:market-atlas", 60, lambda: ctx["get_finance_market_atlas_snapshot"](limit=16)),
+        ("finance:equity-event-command", 60, lambda: ctx["get_equity_event_command_snapshot"](limit=12)),
+        ("finance:onchain-tradfi-perp-radar", 45, lambda: ctx["get_onchain_tradfi_perp_radar_snapshot"](limit=12)),
+        ("finance:liquidity-regime", 45, lambda: ctx["get_finance_liquidity_regime_snapshot"](limit=12)),
         ("market-groups:active-charts:1d", 300, _prewarm_active_market_group_charts),
         ("whales", 30, lambda: ctx["get_whale_trades_snapshot"](limit=14)),
         ("suspicious", 30, lambda: ctx["get_suspicious_trades_snapshot"](limit=12)),
@@ -783,6 +787,10 @@ def prewarm_critical_payloads(ctx: dict) -> None:
             ttl_seconds=ctx["FINANCE_RUNTIME_TTL_SECONDS"],
         )),
         ("market-groups:active:80", lambda: ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")),
+        ("finance:market-atlas", lambda: ctx["get_finance_market_atlas_snapshot"](limit=16)),
+        ("finance:equity-event-command", lambda: ctx["get_equity_event_command_snapshot"](limit=12)),
+        ("finance:onchain-tradfi-perp-radar", lambda: ctx["get_onchain_tradfi_perp_radar_snapshot"](limit=12)),
+        ("finance:liquidity-regime", lambda: ctx["get_finance_liquidity_regime_snapshot"](limit=12)),
         ("bootstrap", ctx["get_bootstrap_payload_cached"]),
     ]
     for name, builder in tasks:
