@@ -1,4 +1,5 @@
 import { Panel } from '@/components/Panel';
+import type { ContentItem } from '@/types';
 import { useMemo, useState } from 'preact/hooks';
 import type { PanelRenderMap, PanelRuntimeContext } from './types';
 import { contentList } from './shared/renderers';
@@ -16,11 +17,40 @@ const INTEL_TABS: IntelTab[] = [
   { id: 'research', label: 'Research' },
 ];
 
+function itemText(item: ContentItem) {
+  return `${item.contentType || ''} ${item.source || ''} ${item.title || ''} ${item.summary || ''} ${item.url || ''}`.toLowerCase();
+}
+
+function uniqueItems(items: ContentItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = String(item.id || item.url || item.title || '');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
+  if (tab === 'news') return items;
+  const explicit = contentByType(items, tab);
+  const inferred = items.filter((item) => {
+    const text = itemText(item);
+    if (tab === 'video') return /youtube|youtu\.be|vimeo|video|watch|interview|highlights|live|espn|nba|nfl|ufc/.test(text);
+    if (tab === 'report') return /report|brief|dossier|outlook|filing|analysis|explainer|what we know|questions|stats|forecast/.test(text);
+    return /research|study|paper|model|data|forecast|prediction|poll|trend|why|how|analysis|questions/.test(text);
+  });
+  const merged = uniqueItems([...explicit, ...inferred]);
+  if (merged.length) return merged;
+  if (tab === 'video') return items.slice(0, Math.min(2, items.length));
+  return items.slice(0, Math.min(4, items.length));
+}
+
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   const [activeTab, setActiveTab] = useState<IntelTab['id']>('news');
   const items = focusedContent(ctx);
   const tabItems = useMemo(() => Object.fromEntries(
-    INTEL_TABS.map((tab) => [tab.id, contentByType(items, tab.id)]),
+    INTEL_TABS.map((tab) => [tab.id, smartContentByType(items, tab.id)]),
   ) as Record<IntelTab['id'], ReturnType<typeof contentByType>>, [items]);
   const visibleItems = tabItems[activeTab] || [];
   const activeLabel = INTEL_TABS.find((tab) => tab.id === activeTab)?.label || 'Intel';
