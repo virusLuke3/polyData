@@ -295,8 +295,69 @@ export function fetchRuntimeSuspicious(limit = 12) {
   return apiGet<RuntimeSignalPayload>(`/runtime/trades/suspicious?limit=${limit}`);
 }
 
+export type RuntimePanelsPayload = {
+  generatedAt?: string;
+  status?: string;
+  panels?: Record<string, unknown>;
+  errors?: Record<string, string>;
+};
+
+export function fetchRuntimePanels(panelIds: string[], limits: Record<string, number> = {}) {
+  const ids = [...new Set(panelIds.map((panelId) => panelId.trim()).filter(Boolean))];
+  const params = new URLSearchParams({ ids: ids.join(',') });
+  ids.forEach((panelId) => {
+    const limit = limits[panelId];
+    if (typeof limit === 'number' && Number.isFinite(limit)) params.set(`limit.${panelId}`, String(limit));
+  });
+  return apiGet<RuntimePanelsPayload>(`/runtime/panels?${params.toString()}`);
+}
+
 export function fetchMarketSummary(marketId: number, timeoutMs = 3500) {
   return apiGetWithTimeout<MarketSummary>(`/markets/${marketId}`, timeoutMs);
+}
+
+type MarketDetailBundlePayload = {
+  market?: MarketSummary | null;
+  price?: PriceSummary | null;
+  chart?: ChartPayload | null;
+  priceSeries?: ChartPayload['points'];
+  trades?: TradeRow[];
+  oracle?: OraclePayload | null;
+  oracleEvents?: OraclePayload['timeline'];
+  content?: ContentPayload | null;
+};
+
+export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs);
+  const chart = payload.chart || (
+    payload.priceSeries
+      ? {
+          marketId,
+          localMarketId: marketId,
+          range: '1d',
+          interval: '5m',
+          kind: 'probability',
+          points: payload.priceSeries,
+        }
+      : null
+  );
+  return {
+    market: payload.market || null,
+    price: payload.price || null,
+    chart,
+    trades: payload.trades || [],
+    oracle: payload.oracle || (
+      payload.oracleEvents
+        ? {
+            marketId,
+            localMarketId: marketId,
+            timeline: payload.oracleEvents,
+          }
+        : null
+    ),
+    content: payload.content || null,
+    lob: null,
+  };
 }
 
 export function fetchMarketPrice(marketId: number, timeoutMs = 5000) {
@@ -331,6 +392,20 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/token/${encodeURIComponent(tokenId)}${suffix}`, timeoutMs);
 }
 
+function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle): WorkspaceBundle {
+  return {
+    market: primary.market || secondary.market,
+    price: primary.price || secondary.price,
+    chart: primary.chart?.points?.length ? primary.chart : secondary.chart,
+    trades: primary.trades?.length ? primary.trades : secondary.trades,
+    oracle: primary.oracle?.timeline?.length ? primary.oracle : secondary.oracle,
+    content: primary.content?.items?.length ? primary.content : secondary.content,
+    lob: primary.lob || secondary.lob,
+  };
+}
+
+const workspaceBundleInflight = new Map<string, Promise<WorkspaceBundle>>();
+
 export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs = 20000) {
   return apiPostWithTimeout<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
 }
@@ -339,49 +414,37 @@ export function fetchMarketWideAiInsights(payload: MarketWideAiInsightPayload, t
   return apiPostWithTimeout<MarketWideAiInsightResponse>('/agent/market-wide-insights', payload, timeoutMs);
 }
 
-export async function fetchWorkspaceBundle(marketId: number): Promise<WorkspaceBundle> {
-  const marketPromise = fetchMarketSummary(marketId);
-  const pricePromise = fetchMarketPrice(marketId);
-  const chartPromise = fetchMarketChart(marketId);
-  const tradesPromise = fetchMarketTrades(marketId);
-  const oraclePromise = fetchMarketOracle(marketId);
-  const contentPromise = fetchMarketContent(marketId);
-  const lobPromise = fetchMarketLob(marketId);
+export async function fetchWorkspaceBundle(marketId: number, options: { includeContent?: boolean; includeLob?: boolean } = {}): Promise<WorkspaceBundle> {
+  const includeContent = Boolean(options.includeContent);
+  const includeLob = Boolean(options.includeLob);
+  const inflightKey = `${marketId}:${includeContent ? 'content' : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
+  const inflight = workspaceBundleInflight.get(inflightKey);
+  if (inflight) return inflight;
 
-  const [
-    marketResult,
-    priceResult,
-    chartResult,
-  ] = await Promise.allSettled([
-    marketPromise,
-    pricePromise,
-    chartPromise,
-  ]);
-  const [
-    tradesResult,
-    oracleResult,
-    contentResult,
-    lobResult,
-  ] = await Promise.allSettled([
-    tradesPromise,
-    oraclePromise,
-    contentPromise,
-    lobPromise,
-  ]);
+  const request = (async () => {
+    const detailBundle = await fetchMarketDetailBundle(marketId, 6500);
+    const contentPromise = includeContent
+      ? (
+          detailBundle.content?.items?.length
+            ? Promise.resolve(detailBundle.content)
+            : fetchMarketContent(marketId, 6, 2200)
+        )
+      : Promise.resolve(null);
+    const lobPromise = includeLob ? fetchMarketLob(marketId, 2600) : Promise.resolve(null);
+    const [contentResult, lobResult] = await Promise.allSettled([contentPromise, lobPromise]);
+    const secondary: WorkspaceBundle = {
+      market: null,
+      price: null,
+      chart: null,
+      trades: [],
+      oracle: null,
+      content: contentResult.status === 'fulfilled' ? contentResult.value : null,
+      lob: includeLob && lobResult.status === 'fulfilled' ? lobResult.value : null,
+    };
+    return preferLoadedBundle(detailBundle, secondary);
+  })();
 
-  if (marketResult.status !== 'fulfilled') {
-    throw marketResult.reason instanceof Error
-      ? marketResult.reason
-      : new Error(`Failed to load market ${marketId}`);
-  }
-
-  return {
-    market: marketResult.value,
-    trades: tradesResult.status === 'fulfilled' ? tradesResult.value : [],
-    oracle: oracleResult.status === 'fulfilled' ? oracleResult.value : null,
-    price: priceResult.status === 'fulfilled' ? priceResult.value : null,
-    chart: chartResult.status === 'fulfilled' ? chartResult.value : null,
-    content: contentResult.status === 'fulfilled' ? contentResult.value : null,
-    lob: lobResult.status === 'fulfilled' ? lobResult.value : null,
-  };
+  workspaceBundleInflight.set(inflightKey, request);
+  void request.finally(() => workspaceBundleInflight.delete(inflightKey));
+  return request;
 }

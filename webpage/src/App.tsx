@@ -11,20 +11,16 @@ import {
   fetchAllActiveMarkets,
   fetchBootstrap,
   fetchLatestContent,
-  fetchMarketChart,
   fetchMarketContent,
   fetchMarketGroupChart,
   fetchMarketGroupDetail,
   fetchMarketGroups,
   fetchMarketLob,
-  fetchMarketOracle,
-  fetchMarketPrice,
-  fetchMarketSummary,
-  fetchMarketTrades,
   fetchRecentOracle,
   fetchRecentTrades,
   fetchRuntimeGlobalWeatherMap,
   fetchSystemHealth,
+  fetchWorkspaceBundle,
 } from '@/services/api';
 import type {
   BootstrapPayload,
@@ -391,6 +387,19 @@ function emptyWorkspaceBundle(): WorkspaceBundle {
     chart: null,
     content: null,
     lob: null,
+  };
+}
+
+function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBundle): WorkspaceBundle {
+  const current = base || emptyWorkspaceBundle();
+  return {
+    market: patch.market || current.market,
+    price: patch.price || current.price,
+    chart: patch.chart?.points?.length ? patch.chart : current.chart,
+    trades: patch.trades?.length ? patch.trades : current.trades,
+    oracle: patch.oracle?.timeline?.length ? patch.oracle : current.oracle,
+    content: patch.content?.items?.length ? patch.content : current.content,
+    lob: patch.lob || current.lob,
   };
 }
 
@@ -810,7 +819,13 @@ export function App() {
       fetchLatestContent(12),
       fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSortRef.current),
       fetchAllActiveMarkets('', FAST_MARKETS_PAGE_SIZE),
-      fetchPanelRuntimeData(FAST_RUNTIME_PANELS),
+      fetchPanelRuntimeData(
+        FAST_RUNTIME_PANELS,
+        (panelId, value) => {
+          setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
+        },
+        (panelId) => setPanelsLoading([panelId], false),
+      ),
     ]);
 
     const fallbackMarkets = bootstrapPayload?.activeMarketsPreview || [];
@@ -853,7 +868,7 @@ export function App() {
     try {
       const patch = await fetchPanelRuntimeData(eligible, (panelId, value) => {
         setRuntimeData((current) => mergeRuntimeData(current, { [panelId]: value }));
-      });
+      }, (panelId) => setPanelsLoading([panelId], false));
       setRuntimeData((current) => mergeRuntimeData(current, patch));
     } finally {
       eligible.forEach((panel) => slowRefreshInFlightRef.current.delete(panel.id));
@@ -1036,17 +1051,6 @@ export function App() {
           focusMarketGroup(firstGroup, firstGroup.defaultOutcomeKey || null, firstGroup.defaultMarketId ?? null);
           return true;
         };
-
-        void fetchMarketGroups('', FAST_MARKETS_PAGE_SIZE, marketGroupSortRef.current)
-          .then((marketGroupsPayload) => {
-            if (cancelled) return;
-            const groups = marketGroupsPayload.items || [];
-            setMarketGroups(groups);
-            focusFirstGroupIfInitial(groups);
-          })
-          .catch(() => {
-            // The full runtime refresh below still retries market groups and keeps the workspace hydrated.
-          });
 
         void refreshRuntimePanels({ bootstrapPayload, activePanelIds: immediatePanelIds })
           .then(({ marketsPayload, marketGroupsPayload }) => {
@@ -1235,90 +1239,62 @@ export function App() {
       || null;
     const initialBundle = cachedBundle || (listMarket ? optimisticBundleFromMarket(listMarket) : emptyWorkspaceBundle());
     setBundle(initialBundle);
+    setBundleLoading(!cachedBundle && !listMarket);
     if (!cachedBundle) {
       bundleCacheRef.current.set(currentMarketId, initialBundle);
     }
 
-    function applyBundlePatch(patch: Partial<WorkspaceBundle>) {
+    function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       setBundle((previous) => {
-        const next = {
-          ...emptyWorkspaceBundle(),
-          ...(previous || bundleCacheRef.current.get(currentMarketId) || emptyWorkspaceBundle()),
-          ...patch,
-        };
+        const base = previous || bundleCacheRef.current.get(currentMarketId) || initialBundle;
+        const next = mergeWorkspaceBundle(base, loadedBundle);
         bundleCacheRef.current.set(currentMarketId, next);
         return next;
       });
     }
 
-    function loadBundleProgressively() {
-      setBundleLoading(true);
-      let pendingPrimary = 4;
-      const markPrimaryDone = () => {
-        pendingPrimary -= 1;
-        if (pendingPrimary <= 0 && !cancelled && bundleRequestSeqRef.current === requestSeq) {
+    function refreshLobSnapshot() {
+      fetchMarketLob(currentMarketId, 2600)
+        .then((lob) => applyLoadedBundle({ ...emptyWorkspaceBundle(), lob }))
+        .catch(() => undefined);
+    }
+
+    function refreshContentSnapshot() {
+      fetchMarketContent(currentMarketId, 6, 2200)
+        .then((content) => applyLoadedBundle({ ...emptyWorkspaceBundle(), content }))
+        .catch(() => undefined);
+    }
+
+    fetchWorkspaceBundle(currentMarketId)
+      .then((loadedBundle) => applyLoadedBundle(loadedBundle))
+      .catch((loadError) => {
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !cachedBundle) {
+          setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
           setBundleLoading(false);
         }
-      };
+      });
+    refreshLobSnapshot();
+    refreshContentSnapshot();
 
-      fetchMarketSummary(currentMarketId)
-        .then((market) => applyBundlePatch({ market }))
-        .catch((loadError) => {
-          if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket) {
-            setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
-          }
-        })
-        .finally(markPrimaryDone);
-
-      fetchMarketPrice(currentMarketId)
-        .then((price) => applyBundlePatch({ price }))
-        .catch(() => undefined)
-        .finally(markPrimaryDone);
-
-      fetchMarketChart(currentMarketId)
-        .then((chart) => applyBundlePatch({ chart }))
-        .catch(() => undefined)
-        .finally(markPrimaryDone);
-
-      fetchMarketLob(currentMarketId)
-        .then((lob) => applyBundlePatch({ lob }))
-        .catch(() => undefined)
-        .finally(markPrimaryDone);
-
-      fetchMarketTrades(currentMarketId)
-        .then((trades) => applyBundlePatch({ trades }))
-        .catch(() => undefined);
-
-      fetchMarketOracle(currentMarketId)
-        .then((oracle) => applyBundlePatch({ oracle }))
-        .catch(() => undefined);
-
-      fetchMarketContent(currentMarketId)
-        .then((content) => applyBundlePatch({ content }))
-        .catch(() => undefined);
-    }
-
-    function refreshSecondaryBundleData() {
-      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
-      fetchMarketPrice(currentMarketId).then((price) => applyBundlePatch({ price })).catch(() => undefined);
-      fetchMarketChart(currentMarketId).then((chart) => applyBundlePatch({ chart })).catch(() => undefined);
-      fetchMarketLob(currentMarketId).then((lob) => applyBundlePatch({ lob })).catch(() => undefined);
-      fetchMarketTrades(currentMarketId).then((trades) => applyBundlePatch({ trades })).catch(() => undefined);
-      fetchMarketOracle(currentMarketId).then((oracle) => applyBundlePatch({ oracle })).catch(() => undefined);
-      fetchMarketContent(currentMarketId).then((content) => applyBundlePatch({ content })).catch(() => undefined);
-    }
-
-    loadBundleProgressively();
     const timer = window.setInterval(() => {
-      refreshSecondaryBundleData();
-    }, 20000);
+      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      fetchWorkspaceBundle(currentMarketId)
+        .then((loadedBundle) => applyLoadedBundle(loadedBundle))
+        .catch(() => undefined);
+      refreshLobSnapshot();
+      refreshContentSnapshot();
+    }, 45000);
 
     const loadingTimer = window.setTimeout(() => {
       if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
         setBundleLoading(false);
       }
-    }, 5500);
+    }, 4500);
 
     return () => {
       cancelled = true;

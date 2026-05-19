@@ -479,6 +479,14 @@ def get_market_by_slug(ctx: dict, slug: str) -> Optional[dict]:
             mss_detail.settlement_event_id,
             mss_detail.settlement_event_time,
             mss_detail.settlement_transaction,
+            COALESCE(mss_detail.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss_detail.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss_detail.is_final, FALSE) AS is_final,
+            COALESCE(mss_detail.completion_status, 'OPEN') AS completion_status,
+            mss_detail.completion_source,
+            mss_detail.completion_time,
+            COALESCE(mss_detail.gamma_closed, FALSE) AS gamma_closed,
+            mss_detail.gamma_closed_time,
             mlp.latest_yes_price,
             mlp.latest_no_price,
             mlp.latest_price
@@ -508,6 +516,14 @@ def get_market_by_id(ctx: dict, market_id: int) -> Optional[dict]:
             mss_detail.settlement_event_id,
             mss_detail.settlement_event_time,
             mss_detail.settlement_transaction,
+            COALESCE(mss_detail.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss_detail.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss_detail.is_final, FALSE) AS is_final,
+            COALESCE(mss_detail.completion_status, 'OPEN') AS completion_status,
+            mss_detail.completion_source,
+            mss_detail.completion_time,
+            COALESCE(mss_detail.gamma_closed, FALSE) AS gamma_closed,
+            mss_detail.gamma_closed_time,
             mlp.latest_yes_price,
             mlp.latest_no_price,
             mlp.latest_price
@@ -565,8 +581,8 @@ def get_recent_trades_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
     )
 
 
-def get_oracle_events_by_market_id(ctx: dict, market_id: int) -> List[Dict[str, Any]]:
-    market = get_market_by_id(ctx, market_id)
+def get_oracle_events_by_market_id(ctx: dict, market_id: int, market: Optional[dict] = None) -> List[Dict[str, Any]]:
+    market = market if market is not None else get_market_by_id(ctx, market_id)
     if market:
         where_sql, where_params = oracle_event_lookup_clause(MarketIdentity.from_row(market), "oe")
     else:
@@ -575,14 +591,26 @@ def get_oracle_events_by_market_id(ctx: dict, market_id: int) -> List[Dict[str, 
         f"""
         SELECT
             oe.id, oe.tx_hash, oe.block_number, oe.event_time, oe.event_status, oe.external_market_id,
-            oe.market_id, oe.market_title, oe.matched_by, oe.question_id, oe.condition_id,
+            COALESCE(oe.market_id, m.id) AS market_id, COALESCE(m.title, oe.market_title) AS market_title,
+            oe.matched_by, COALESCE(NULLIF(oe.question_id, ''), m.question_id) AS question_id,
+            COALESCE(NULLIF(oe.condition_id, ''), m.condition_id) AS condition_id,
             oe.proposed_price, oe.settled_price, oe.payout, oe.requester, oe.proposer, oe.disputer,
-            oe.proposal_transaction, oe.settlement_transaction, oe.source_adapter, oe.source_oracle
+            oe.proposal_transaction, oe.settlement_transaction, oe.source_adapter, oe.source_oracle,
+            m.slug AS market_slug, m.category AS market_category,
+            COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss.is_final, FALSE) AS is_final,
+            COALESCE(mss.settlement_code, 0) AS snapshot_settlement_code,
+            COALESCE(mss.settlement_outcome, 'UNKNOWN') AS snapshot_settlement_outcome,
+            mss.settlement_source AS snapshot_settlement_source
         FROM oracle_events oe
+        LEFT JOIN markets m ON m.id = COALESCE(oe.market_id, ?)
+        LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
         WHERE {where_sql}
         ORDER BY oe.block_number ASC, oe.id ASC
         """,
-        where_params,
+        (market_id, *where_params),
     )
     return [ctx["normalize_oracle_event"](row) for row in rows]
 
@@ -597,8 +625,15 @@ def get_recent_oracle_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
     )
 
 
-def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
-    market = get_market_by_id(ctx, market_id)
+def get_market_price_summary(
+    ctx: dict,
+    market_id: int,
+    market: Optional[dict] = None,
+    *,
+    include_runtime_price: bool = True,
+    include_recent_stats: bool = True,
+) -> Dict[str, Any]:
+    market = market if market is not None else get_market_by_id(ctx, market_id)
     summary_row = ctx["query_one"](
         """
         SELECT
@@ -617,14 +652,14 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
     latest_yes_price = summary_row.get("latest_yes_price")
     latest_no_price = summary_row.get("latest_no_price")
     updated_at = summary_row.get("latest_trade_at")
-    clob_snapshot = ctx["get_market_clob_price_snapshot"](market)
+    clob_snapshot = ctx["get_market_clob_price_snapshot"](market) if include_runtime_price else None
     if clob_snapshot:
         latest_price = clob_snapshot.get("latestYesPrice") or clob_snapshot.get("latestPrice") or latest_price
         latest_yes_price = clob_snapshot.get("latestYesPrice") or latest_yes_price
         latest_no_price = clob_snapshot.get("latestNoPrice") or latest_no_price
         updated_at = clob_snapshot.get("updatedAt") or updated_at
 
-    trade_source = ctx["get_existing_trade_read_source"]()
+    trade_source = ctx["get_existing_trade_read_source"]() if include_recent_stats else None
     if trade_source is None:
         recent_stats = {"price_24h_ago": None, "price_1h_ago": None, "trade_count_24h": 0, "volume_24h": 0}
     elif ctx["_identifier_name"](trade_source) == ctx["TRADE_V2_CORE_TABLE"]:
@@ -688,8 +723,16 @@ def get_market_price_summary(ctx: dict, market_id: int) -> Dict[str, Any]:
     }
 
 
-def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", interval: str = "5m") -> Dict[str, Any]:
-    market = get_market_by_id(ctx, market_id)
+def get_market_chart_payload(
+    ctx: dict,
+    market_id: int,
+    range_name: str = "1d",
+    interval: str = "5m",
+    market: Optional[dict] = None,
+    price: Optional[Dict[str, Any]] = None,
+    include_runtime_series: bool = True,
+) -> Dict[str, Any]:
+    market = market if market is not None else get_market_by_id(ctx, market_id)
     chart_context = _extract_market_chart_context(ctx, market, range_name)
     if chart_context:
         return {
@@ -708,13 +751,15 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
             "referenceRule": chart_context.get("referenceRule"),
             "points": chart_context.get("points"),
         }
-    points = ctx["get_market_clob_price_series"](market, range_name=range_name, interval=interval)
+    points: List[Dict[str, Any]] = []
     if not points:
         limit = 400
         if range_name == "7d":
             limit = 700
         points = ctx["get_trade_derived_market_price_series"](market_id, limit=limit)
-    price = get_market_price_summary(ctx, market_id)
+    if not points and include_runtime_series:
+        points = ctx["get_market_clob_price_series"](market, range_name=range_name, interval=interval)
+    price = price if price is not None else get_market_price_summary(ctx, market_id, market=market)
     latest = price.get("latestYesPrice") or price.get("latestPrice")
     latest_decimal = _decimal_from_any(latest)
     if points and latest_decimal is not None:
@@ -738,19 +783,35 @@ def get_market_chart_payload(ctx: dict, market_id: int, range_name: str = "1d", 
     }
 
 
-def get_market_oracle_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
-    market = get_market_by_id(ctx, market_id)
+def get_market_oracle_payload(ctx: dict, market_id: int, market: Optional[dict] = None) -> Dict[str, Any]:
+    market = market if market is not None else get_market_by_id(ctx, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    return {
-        "marketId": market_id,
-        "localMarketId": market_id,
-        "gammaMarketId": market.get("gamma_market_id"),
-        "questionId": market.get("question_id"),
-        "oracle": market.get("oracle"),
-        "currentStatus": market.get("status"),
-        "timeline": get_oracle_events_by_market_id(ctx, market_id),
-    }
+    cache_key = json.dumps({"marketId": int(market_id), "v": 2}, sort_keys=True, ensure_ascii=True)
+
+    def build_payload() -> Dict[str, Any]:
+        return {
+            "marketId": market_id,
+            "localMarketId": market_id,
+            "gammaMarketId": market.get("gamma_market_id"),
+            "questionId": market.get("question_id"),
+            "oracle": market.get("oracle"),
+            "currentStatus": market.get("status"),
+            "completionStatus": market.get("completion_status"),
+            "isTradingClosed": _truthy_flag(market.get("is_trading_closed")),
+            "isResolved": _truthy_flag(market.get("is_resolved")),
+            "isFinal": _truthy_flag(market.get("is_final")),
+            "settlementOutcome": market.get("settlement_outcome"),
+            "settlementSource": market.get("settlement_source"),
+            "timeline": get_oracle_events_by_market_id(ctx, market_id, market=market),
+        }
+
+    return ctx["get_snapshot_payload"](
+        "snapshot:market_oracle_payload",
+        cache_key,
+        build_payload,
+        ttl_seconds=60,
+    )
 
 
 def enrich_market_rows_with_runtime_prices(
@@ -886,6 +947,14 @@ def _settlement_payload(row: Dict[str, Any], *, include_raw: bool = False) -> Di
         "settlementEventId": row.get("settlement_event_id"),
         "settlementEventTime": row.get("settlement_event_time"),
         "settlementTransaction": row.get("settlement_transaction"),
+        "completionStatus": row.get("completion_status") or "OPEN",
+        "completionSource": row.get("completion_source"),
+        "completionTime": row.get("completion_time"),
+        "isTradingClosed": _truthy_flag(row.get("is_trading_closed")),
+        "isResolved": _truthy_flag(row.get("is_resolved")),
+        "isFinal": _truthy_flag(row.get("is_final")),
+        "gammaClosed": _truthy_flag(row.get("gamma_closed")),
+        "gammaClosedTime": row.get("gamma_closed_time"),
     }
     if include_raw:
         payload["settlementRaw"] = row.get("settlement_raw")
@@ -893,6 +962,15 @@ def _settlement_payload(row: Dict[str, Any], *, include_raw: bool = False) -> Di
 
 
 def _market_status_from_snapshot(row: Dict[str, Any], now_iso: str) -> str:
+    completion_status = str(row.get("completion_status") or "").strip().upper()
+    if completion_status in {"SETTLED", "CANCELLED", "UNKNOWN"} and _truthy_flag(row.get("is_final")):
+        return "Settled"
+    if completion_status == "DISPUTED":
+        return "Disputed"
+    if completion_status == "PROPOSED":
+        return "Proposed"
+    if _truthy_flag(row.get("is_trading_closed")):
+        return "Closed"
     if _settlement_code(row) in {1, 2, 3} or _truthy_flag(row.get("has_settle")):
         return "Settled"
     if _truthy_flag(row.get("has_propose")):
@@ -943,6 +1021,14 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
                 mss.settlement_event_id,
                 mss.settlement_event_time,
                 mss.settlement_transaction,
+                COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+                COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+                COALESCE(mss.is_final, FALSE) AS is_final,
+                COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+                mss.completion_source,
+                mss.completion_time,
+                COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+                mss.gamma_closed_time,
                 {stats_alias}.trade_count_24h,
                 {stats_alias}.volume_24h,
                 {stats_alias}.latest_price,
@@ -954,6 +1040,7 @@ def _active_market_candidate_select_sql(stats_alias: str) -> str:
             LEFT JOIN market_list_serving {stats_alias} ON {stats_alias}.market_id = m.id
             WHERE COALESCE(mss.has_settle, FALSE) = FALSE
               AND COALESCE(mss.has_propose, FALSE) = FALSE
+              AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
               AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
@@ -987,6 +1074,14 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
                 mss.settlement_event_id,
                 mss.settlement_event_time,
                 mss.settlement_transaction,
+                COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+                COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+                COALESCE(mss.is_final, FALSE) AS is_final,
+                COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+                mss.completion_source,
+                mss.completion_time,
+                COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+                mss.gamma_closed_time,
                 0 AS trade_count_24h,
                 0 AS volume_24h,
                 NULL AS latest_price,
@@ -997,6 +1092,7 @@ def _fallback_active_market_candidate_rows(ctx: dict, now_iso: str, limit: int) 
             LEFT JOIN market_status_snapshot mss ON mss.market_id = m.id
             WHERE COALESCE(mss.has_settle, FALSE) = FALSE
               AND COALESCE(mss.has_propose, FALSE) = FALSE
+              AND COALESCE(mss.is_trading_closed, FALSE) = FALSE
               AND COALESCE(mss.settlement_code, 0) = 0
               AND (m.end_date IS NULL OR m.end_date >= ?)
               AND {DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL}
@@ -1034,6 +1130,14 @@ def _get_market_detail_rows_by_ids(ctx: dict, market_ids: List[int]) -> Dict[int
             mss.settlement_event_time,
             mss.settlement_transaction,
             mss.settlement_raw,
+            COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+            COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+            COALESCE(mss.is_final, FALSE) AS is_final,
+            COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+            mss.completion_source,
+            mss.completion_time,
+            COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+            mss.gamma_closed_time,
             COALESCE(mlp.latest_yes_price, mls.latest_price) AS latest_price,
             COALESCE(mls.latest_trade_at, mlp.latest_trade_at) AS latest_trade_at,
             mls.price_24h_ago
@@ -1071,7 +1175,7 @@ def get_markets_payload(
     params: List[Any] = []
     recent_trade_cutoff = _iso_hours_before(now_iso, 24 * 7)
     if status == "active":
-        filters.append("(COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
+        filters.append("(COALESCE(mss.is_trading_closed, FALSE) = FALSE AND COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND (m.end_date IS NULL OR m.end_date >= ?))")
         params.append(now_iso)
         if not query:
             filters.append(f"({DEFAULT_ACTIVE_MARKET_EXCLUSION_SQL})")
@@ -1080,7 +1184,7 @@ def get_markets_payload(
             filters.append(_default_active_market_recent_trade_sql("mls"))
             params.append(recent_trade_cutoff)
     elif status == "closed":
-        filters.append("(COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) OR (COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
+        filters.append("(COALESCE(mss.is_trading_closed, FALSE) = TRUE OR COALESCE(mss.has_settle, FALSE) = TRUE OR COALESCE(mss.settlement_code, 0) IN (1, 2, 3) OR (COALESCE(mss.has_settle, FALSE) = FALSE AND COALESCE(mss.has_propose, FALSE) = FALSE AND COALESCE(mss.settlement_code, 0) = 0 AND m.end_date IS NOT NULL AND m.end_date < ?))")
         params.append(now_iso)
     if query:
         pattern = f"%{query}%"
@@ -1113,6 +1217,14 @@ def get_markets_payload(
                 mss.settlement_event_id,
                 mss.settlement_event_time,
                 mss.settlement_transaction,
+                COALESCE(mss.is_trading_closed, FALSE) AS is_trading_closed,
+                COALESCE(mss.is_resolved, FALSE) AS is_resolved,
+                COALESCE(mss.is_final, FALSE) AS is_final,
+                COALESCE(mss.completion_status, 'OPEN') AS completion_status,
+                mss.completion_source,
+                mss.completion_time,
+                COALESCE(mss.gamma_closed, FALSE) AS gamma_closed,
+                mss.gamma_closed_time,
                 mls.trade_count_24h,
                 mls.volume_24h,
                 mls.latest_price,
@@ -1167,6 +1279,14 @@ def get_markets_payload(
                     "settlement_event_id": candidate.get("settlement_event_id"),
                     "settlement_event_time": candidate.get("settlement_event_time"),
                     "settlement_transaction": candidate.get("settlement_transaction"),
+                    "is_trading_closed": candidate.get("is_trading_closed"),
+                    "is_resolved": candidate.get("is_resolved"),
+                    "is_final": candidate.get("is_final"),
+                    "completion_status": candidate.get("completion_status"),
+                    "completion_source": candidate.get("completion_source"),
+                    "completion_time": candidate.get("completion_time"),
+                    "gamma_closed": candidate.get("gamma_closed"),
+                    "gamma_closed_time": candidate.get("gamma_closed_time"),
                 }
             )
             normalized["status"] = _market_status_from_snapshot(normalized, now_iso)
@@ -1241,6 +1361,14 @@ def build_active_markets_payload(
             "settlement_event_id": row.get("settlement_event_id"),
             "settlement_event_time": row.get("settlement_event_time"),
             "settlement_transaction": row.get("settlement_transaction"),
+            "is_trading_closed": row.get("is_trading_closed"),
+            "is_resolved": row.get("is_resolved"),
+            "is_final": row.get("is_final"),
+            "completion_status": row.get("completion_status"),
+            "completion_source": row.get("completion_source"),
+            "completion_time": row.get("completion_time"),
+            "gamma_closed": row.get("gamma_closed"),
+            "gamma_closed_time": row.get("gamma_closed_time"),
         }
         for row in candidate_rows
         if row.get("id") is not None
@@ -1289,7 +1417,7 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
             "status": "active",
             "includeRuntimePrices": include_runtime_prices,
             "includeChange24h": include_runtime_prices,
-            "v": 13,
+            "v": 14,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -1329,11 +1457,36 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     market = get_market_by_id(ctx, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    return {
-        "market": ctx["normalize_market"](market),
-        "localMarketId": market_id,
-        "gammaMarketId": market.get("gamma_market_id"),
-        "priceSeries": get_market_chart_payload(ctx, market_id).get("points", []),
-        "trades": get_trades_by_market_id(ctx, market_id, limit=100, offset=0),
-        "oracleEvents": get_oracle_events_by_market_id(ctx, market_id),
-    }
+    cache_key = json.dumps({"marketId": int(market_id), "v": 7}, sort_keys=True, ensure_ascii=True)
+
+    def build_payload() -> Dict[str, Any]:
+        price = get_market_price_summary(
+            ctx,
+            market_id,
+            market=market,
+            include_runtime_price=False,
+            include_recent_stats=False,
+        )
+        chart = get_market_chart_payload(ctx, market_id, market=market, price=price, include_runtime_series=False)
+        oracle_payload = get_market_oracle_payload(ctx, market_id, market=market)
+        oracle_events = oracle_payload.get("timeline", [])
+        normalized_market = ctx["normalize_market"](market)
+        return {
+            "market": normalized_market,
+            "localMarketId": market_id,
+            "gammaMarketId": market.get("gamma_market_id"),
+            "price": price,
+            "chart": chart,
+            "priceSeries": chart.get("points", []),
+            "trades": get_trades_by_market_id(ctx, market_id, limit=48, offset=0),
+            "oracle": oracle_payload,
+            "oracleEvents": oracle_events,
+            "content": None,
+        }
+
+    return ctx["get_snapshot_payload"](
+        "snapshot:market_detail_bundle",
+        cache_key,
+        build_payload,
+        ttl_seconds=90,
+    )

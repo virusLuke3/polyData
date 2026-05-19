@@ -851,6 +851,7 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
             market_id BIGINT PRIMARY KEY REFERENCES core.markets(id),
             has_settle BOOLEAN NOT NULL DEFAULT FALSE,
             has_propose BOOLEAN NOT NULL DEFAULT FALSE,
+            has_dispute BOOLEAN NOT NULL DEFAULT FALSE,
             settlement_code SMALLINT NOT NULL DEFAULT 0 CHECK (settlement_code IN (0, 1, 2, 3)),
             settlement_outcome TEXT NOT NULL DEFAULT 'UNKNOWN',
             settlement_source TEXT,
@@ -858,11 +859,20 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
             settlement_event_id BIGINT,
             settlement_event_time TIMESTAMPTZ,
             settlement_transaction TEXT,
+            is_trading_closed BOOLEAN NOT NULL DEFAULT FALSE,
+            is_resolved BOOLEAN NOT NULL DEFAULT FALSE,
+            is_final BOOLEAN NOT NULL DEFAULT FALSE,
+            completion_status TEXT NOT NULL DEFAULT 'OPEN',
+            completion_source TEXT,
+            completion_time TIMESTAMPTZ,
+            gamma_closed BOOLEAN NOT NULL DEFAULT FALSE,
+            gamma_closed_time TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """
     )
     for col, col_type in (
+        ("has_dispute", "BOOLEAN NOT NULL DEFAULT FALSE"),
         ("settlement_code", "SMALLINT NOT NULL DEFAULT 0"),
         ("settlement_outcome", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
         ("settlement_source", "TEXT"),
@@ -870,6 +880,14 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("settlement_event_id", "BIGINT"),
         ("settlement_event_time", "TIMESTAMPTZ"),
         ("settlement_transaction", "TEXT"),
+        ("is_trading_closed", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("is_resolved", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("is_final", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("completion_status", "TEXT NOT NULL DEFAULT 'OPEN'"),
+        ("completion_source", "TEXT"),
+        ("completion_time", "TIMESTAMPTZ"),
+        ("gamma_closed", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ("gamma_closed_time", "TIMESTAMPTZ"),
     ):
         ensure_column_exists(conn, "core.market_status_snapshot", col, col_type)
     conn.execute(
@@ -971,7 +989,12 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("core.markets", "idx_markets_end_date", ["end_date"]),
         ("core.markets", "idx_markets_created_at", ["created_at"]),
         ("core.market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
         ("core.market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
+        ("core.market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
         ("core.market_resolution_fast", "idx_mrf_settlement_code", ["settlement_code"]),
         ("core.market_resolution_fast", "idx_mrf_condition_id", ["condition_id"]),
         ("core.market_resolution_fast", "idx_mrf_slug", ["slug"]),
@@ -1156,6 +1179,7 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
             market_id INTEGER PRIMARY KEY,
             has_settle INTEGER NOT NULL DEFAULT 0,
             has_propose INTEGER NOT NULL DEFAULT 0,
+            has_dispute INTEGER NOT NULL DEFAULT 0,
             settlement_code INTEGER NOT NULL DEFAULT 0,
             settlement_outcome TEXT NOT NULL DEFAULT 'UNKNOWN',
             settlement_source TEXT,
@@ -1163,11 +1187,20 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
             settlement_event_id INTEGER,
             settlement_event_time TEXT,
             settlement_transaction TEXT,
+            is_trading_closed INTEGER NOT NULL DEFAULT 0,
+            is_resolved INTEGER NOT NULL DEFAULT 0,
+            is_final INTEGER NOT NULL DEFAULT 0,
+            completion_status TEXT NOT NULL DEFAULT 'OPEN',
+            completion_source TEXT,
+            completion_time TEXT,
+            gamma_closed INTEGER NOT NULL DEFAULT 0,
+            gamma_closed_time TEXT,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
     for col, col_type in (
+        ("has_dispute", "INTEGER NOT NULL DEFAULT 0"),
         ("settlement_code", "INTEGER NOT NULL DEFAULT 0"),
         ("settlement_outcome", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
         ("settlement_source", "TEXT"),
@@ -1175,6 +1208,14 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("settlement_event_id", "INTEGER"),
         ("settlement_event_time", "TEXT"),
         ("settlement_transaction", "TEXT"),
+        ("is_trading_closed", "INTEGER NOT NULL DEFAULT 0"),
+        ("is_resolved", "INTEGER NOT NULL DEFAULT 0"),
+        ("is_final", "INTEGER NOT NULL DEFAULT 0"),
+        ("completion_status", "TEXT NOT NULL DEFAULT 'OPEN'"),
+        ("completion_source", "TEXT"),
+        ("completion_time", "TEXT"),
+        ("gamma_closed", "INTEGER NOT NULL DEFAULT 0"),
+        ("gamma_closed_time", "TEXT"),
     ):
         try:
             cursor.execute(f"ALTER TABLE market_status_snapshot ADD COLUMN {col} {col_type}")
@@ -1348,7 +1389,12 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
         ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
@@ -1361,6 +1407,7 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("address_market_stats", "idx_address_market_stats_market", ["market_id"]),
         ("address_market_stats", "idx_address_market_stats_last_trade_at", ["last_trade_at"]),
         ("oracle_events", "idx_oracle_events_market_id", ["market_id"]),
+        ("oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),
@@ -1488,6 +1535,7 @@ def _init_mysql_schema(conn) -> None:
             market_id BIGINT NOT NULL PRIMARY KEY,
             has_settle TINYINT NOT NULL DEFAULT 0,
             has_propose TINYINT NOT NULL DEFAULT 0,
+            has_dispute TINYINT NOT NULL DEFAULT 0,
             settlement_code TINYINT NOT NULL DEFAULT 0,
             settlement_outcome VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
             settlement_source VARCHAR(64),
@@ -1495,6 +1543,14 @@ def _init_mysql_schema(conn) -> None:
             settlement_event_id BIGINT,
             settlement_event_time DATETIME(6),
             settlement_transaction VARCHAR(255),
+            is_trading_closed TINYINT NOT NULL DEFAULT 0,
+            is_resolved TINYINT NOT NULL DEFAULT 0,
+            is_final TINYINT NOT NULL DEFAULT 0,
+            completion_status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
+            completion_source VARCHAR(64),
+            completion_time DATETIME(6),
+            gamma_closed TINYINT NOT NULL DEFAULT 0,
+            gamma_closed_time DATETIME(6),
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             CONSTRAINT fk_market_status_snapshot_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -1644,6 +1700,7 @@ def _init_mysql_schema(conn) -> None:
         ensure_column_exists(conn, "trades", col, col_type)
     ensure_column_exists(conn, "market_list_serving", "price_24h_ago", "DECIMAL(20, 10)")
     for col, col_type in (
+        ("has_dispute", "TINYINT NOT NULL DEFAULT 0"),
         ("settlement_code", "TINYINT NOT NULL DEFAULT 0"),
         ("settlement_outcome", "VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'"),
         ("settlement_source", "VARCHAR(64)"),
@@ -1651,6 +1708,14 @@ def _init_mysql_schema(conn) -> None:
         ("settlement_event_id", "BIGINT"),
         ("settlement_event_time", "DATETIME(6)"),
         ("settlement_transaction", "VARCHAR(255)"),
+        ("is_trading_closed", "TINYINT NOT NULL DEFAULT 0"),
+        ("is_resolved", "TINYINT NOT NULL DEFAULT 0"),
+        ("is_final", "TINYINT NOT NULL DEFAULT 0"),
+        ("completion_status", "VARCHAR(32) NOT NULL DEFAULT 'OPEN'"),
+        ("completion_source", "VARCHAR(64)"),
+        ("completion_time", "DATETIME(6)"),
+        ("gamma_closed", "TINYINT NOT NULL DEFAULT 0"),
+        ("gamma_closed_time", "DATETIME(6)"),
     ):
         ensure_column_exists(conn, "market_status_snapshot", col, col_type)
     _ensure_mysql_uma_adapter_mapping_schema(conn)
@@ -1667,7 +1732,12 @@ def _init_mysql_schema(conn) -> None:
         ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
         ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_lifecycle_flags", ["has_settle", "has_propose", "has_dispute", "market_id"]),
         ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_flags", ["is_final", "is_resolved", "is_trading_closed", "market_id"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
+        ("market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
         ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
         ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
@@ -1680,6 +1750,7 @@ def _init_mysql_schema(conn) -> None:
         ("address_market_stats", "idx_address_market_stats_market", ["market_id"]),
         ("address_market_stats", "idx_address_market_stats_last_trade_at", ["last_trade_at"]),
         ("oracle_events", "idx_oracle_events_market_id", ["market_id"]),
+        ("oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"]),
         ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
         ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
         ("oracle_events", "idx_oracle_events_block", ["block_number"]),

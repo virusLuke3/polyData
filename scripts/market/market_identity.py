@@ -203,10 +203,10 @@ def oracle_event_lookup_clause(identity: MarketIdentity, alias: str = "oe") -> t
         clauses.append(f"{prefix}external_market_id = ?")
         params.append(identity.gamma_market_id)
     if identity.condition_id:
-        clauses.append(f"LOWER({prefix}condition_id) = LOWER(?)")
+        clauses.append(f"{prefix}condition_id = ?")
         params.append(identity.condition_id)
     if identity.question_id:
-        clauses.append(f"LOWER({prefix}question_id) = LOWER(?)")
+        clauses.append(f"{prefix}question_id = ?")
         params.append(identity.question_id)
     return " OR ".join(clauses), tuple(params)
 
