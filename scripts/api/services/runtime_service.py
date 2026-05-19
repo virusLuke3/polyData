@@ -11,7 +11,7 @@ def build_market_group_cache_key(items: List[tuple[str, str, str]], *, kind: str
         {
             "kind": kind,
             "symbols": [symbol for _, _, symbol in items],
-            "snapshotVersion": 2 if kind == "crypto" else 1,
+            "snapshotVersion": 3 if kind == "crypto" else 2,
         },
         sort_keys=True,
         ensure_ascii=True,
