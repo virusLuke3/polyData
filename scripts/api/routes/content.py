@@ -19,16 +19,28 @@ def create_content_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/content/market/<int:market_id>", methods=["GET"])
     def api_content_by_market_id(market_id: int):
-        market = helpers["get_market_by_id"](market_id)
-        if not market:
-            return jsonify({"error": "Market not found", "marketId": market_id}), 404
         limit = min(20, max(1, int(request.args.get("limit", 8))))
-        return jsonify(helpers["get_related_content_payload"](market_id, limit=limit))
+        try:
+            market = helpers["get_market_by_id"](market_id)
+            if not market:
+                return jsonify({"error": "Market not found", "marketId": market_id}), 404
+            return jsonify(helpers["get_related_content_payload"](market_id, limit=limit))
+        except Exception:
+            payload = helpers["get_runtime_content_latest"](limit=limit)
+            payload["marketId"] = market_id
+            payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
+            payload["degraded"] = True
+            return jsonify(payload)
 
     @bp.route("/content/latest", methods=["GET"])
     def api_content_latest():
         limit = min(20, max(1, int(request.args.get("limit", 8))))
-        payload = helpers["get_latest_content_payload"](limit=limit)
+        try:
+            payload = helpers["get_latest_content_payload"](limit=limit)
+        except Exception:
+            payload = helpers["get_runtime_content_latest"](limit=limit)
+            payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
+            payload["degraded"] = True
         _publish_latest_content(payload)
         return jsonify(payload)
 

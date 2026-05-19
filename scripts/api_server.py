@@ -258,6 +258,10 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_labor_wage_services_pressure_snapshot": get_labor_wage_services_pressure_snapshot,
         "get_labor_services_inflation_monitor_snapshot": get_labor_services_inflation_monitor_snapshot,
         "get_latest_content_payload": lambda limit=8: content_service.get_latest_content_payload(build_service_context(), limit=limit),
+        "get_runtime_content_latest": lambda limit=8: {
+            "items": CONTENT_RUNTIME_PROVIDER.get_latest_items(limit=limit),
+            "sourceMode": "runtime-rss",
+        },
         "get_market_by_id": get_market_by_id,
         "get_market_by_slug": get_market_by_slug,
         "get_market_chart_payload": get_market_chart_payload,
