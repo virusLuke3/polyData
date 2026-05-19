@@ -18,6 +18,9 @@ import type {
   RuntimeCryptoFundingPayload,
   RuntimeCpiReleaseCalendarPayload,
   RuntimeEnergyGasolineShockPayload,
+  RuntimeEquityEventCommandPayload,
+  RuntimeFinanceLiquidityRegimePayload,
+  RuntimeFinanceMarketAtlasPayload,
   RuntimeGlobalWeatherMapPayload,
   RuntimeGridEsportsPayload,
   RuntimeFoodRetailBasketPayload,
@@ -31,6 +34,7 @@ import type {
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeNewMarketSignalsPayload,
+  RuntimeOnchainTradfiPerpRadarPayload,
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
   RuntimeSportsOddsPayload,
@@ -38,6 +42,8 @@ import type {
   SystemHealth,
   TradeRow,
   WorkspaceBundle,
+  WorkspaceDiagnostics,
+  WorkspaceIdentity,
 } from '@/types';
 
 const RAW_BASE = import.meta.env.DEV
@@ -173,6 +179,22 @@ export function fetchRuntimeCrypto() {
 
 export function fetchRuntimeCryptoFundingWatch(limit = 18) {
   return apiGet<RuntimeCryptoFundingPayload>(`/runtime/crypto/funding-watch?limit=${limit}`);
+}
+
+export function fetchRuntimeFinanceMarketAtlas(limit = 16) {
+  return apiGet<RuntimeFinanceMarketAtlasPayload>(`/runtime/finance/market-atlas?limit=${limit}`);
+}
+
+export function fetchRuntimeEquityEventCommand(limit = 12) {
+  return apiGet<RuntimeEquityEventCommandPayload>(`/runtime/finance/equity-event-command?limit=${limit}`);
+}
+
+export function fetchRuntimeOnchainTradfiPerpRadar(limit = 12) {
+  return apiGet<RuntimeOnchainTradfiPerpRadarPayload>(`/runtime/finance/onchain-tradfi-perp-radar?limit=${limit}`);
+}
+
+export function fetchRuntimeFinanceLiquidityRegime(limit = 12) {
+  return apiGet<RuntimeFinanceLiquidityRegimePayload>(`/runtime/finance/liquidity-regime?limit=${limit}`);
 }
 
 export function fetchRuntimeF1(limit = 10) {
@@ -318,6 +340,8 @@ export function fetchMarketSummary(marketId: number, timeoutMs = 3500) {
 
 type MarketDetailBundlePayload = {
   market?: MarketSummary | null;
+  identity?: WorkspaceIdentity | null;
+  diagnostics?: WorkspaceDiagnostics | null;
   price?: PriceSummary | null;
   chart?: ChartPayload | null;
   priceSeries?: ChartPayload['points'];
@@ -343,6 +367,8 @@ export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500
   );
   return {
     market: payload.market || null,
+    identity: payload.identity || null,
+    diagnostics: payload.diagnostics || null,
     price: payload.price || null,
     chart,
     trades: payload.trades || [],
@@ -364,8 +390,34 @@ export function fetchMarketPrice(marketId: number, timeoutMs = 5000) {
   return apiGetWithTimeout<PriceSummary>(`/markets/${marketId}/price`, timeoutMs);
 }
 
-export function fetchMarketChart(marketId: number, timeoutMs = 5000) {
-  return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?range=1d&interval=5m`, timeoutMs);
+type MarketChartRange = '1h' | '6h' | '1d' | '1w' | '1m' | 'all' | string;
+
+function intervalForMarketChartRange(range: MarketChartRange) {
+  switch (range) {
+    case '1h':
+      return '1m';
+    case '6h':
+      return '3m';
+    case '1d':
+      return '5m';
+    case '1w':
+      return '1h';
+    case '1m':
+    case 'all':
+      return '4h';
+    default:
+      return '5m';
+  }
+}
+
+export function fetchMarketChart(
+  marketId: number,
+  range: MarketChartRange = '1d',
+  interval = intervalForMarketChartRange(range),
+  timeoutMs = 6500,
+) {
+  const params = new URLSearchParams({ range, interval });
+  return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?${params.toString()}`, timeoutMs);
 }
 
 export function fetchMarketTrades(marketId: number, limit = 24, timeoutMs = 4000) {
@@ -393,12 +445,16 @@ export function fetchMarketLobByToken(tokenId: string, title = '', noTokenId = '
 }
 
 function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle): WorkspaceBundle {
+  const primaryOracle = primary.oracle;
+  const secondaryOracle = secondary.oracle;
   return {
     market: primary.market || secondary.market,
+    identity: primary.identity || secondary.identity,
+    diagnostics: primary.diagnostics || secondary.diagnostics,
     price: primary.price || secondary.price,
     chart: primary.chart?.points?.length ? primary.chart : secondary.chart,
     trades: primary.trades?.length ? primary.trades : secondary.trades,
-    oracle: primary.oracle?.timeline?.length ? primary.oracle : secondary.oracle,
+    oracle: primaryOracle ? primaryOracle : secondaryOracle,
     content: primary.content?.items?.length ? primary.content : secondary.content,
     lob: primary.lob || secondary.lob,
   };
@@ -434,6 +490,8 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
     const [contentResult, lobResult] = await Promise.allSettled([contentPromise, lobPromise]);
     const secondary: WorkspaceBundle = {
       market: null,
+      identity: null,
+      diagnostics: null,
       price: null,
       chart: null,
       trades: [],

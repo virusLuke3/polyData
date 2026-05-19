@@ -218,7 +218,9 @@ export type OracleEvent = {
 export type OraclePayload = {
   marketId: number;
   localMarketId?: number | null;
+  gammaMarketId?: string | number | null;
   questionId?: string | null;
+  conditionId?: string | null;
   oracle?: string | null;
   currentStatus?: string | null;
   completionStatus?: string | null;
@@ -255,6 +257,7 @@ export type ChartPayload = {
   range: string;
   interval: string;
   kind?: 'probability' | 'underlying-price' | string;
+  historyStatus?: 'ok' | 'short' | 'flat' | 'snapshot' | 'missing' | string | null;
   sourceSymbol?: string | null;
   sourceLabel?: string | null;
   pairLabel?: string | null;
@@ -314,12 +317,42 @@ export type LobPayload = {
   marketTitle?: string;
   fetchedAt?: string;
   tokenMode?: boolean;
+  source?: string | null;
+  bookStatus?: 'ok' | 'no-book' | string | null;
+  fallbackReason?: string | null;
   yes?: LobSide;
   no?: LobSide;
 };
 
+export type WorkspaceIdentity = {
+  localMarketId?: number | null;
+  marketId?: number | null;
+  gammaMarketId?: string | number | null;
+  slug?: string | null;
+  conditionId?: string | null;
+  questionId?: string | null;
+  oracle?: string | null;
+  yesTokenId?: string | null;
+  noTokenId?: string | null;
+};
+
+export type WorkspaceDiagnostics = {
+  marketId?: number | null;
+  identityStatus?: 'ok' | 'partial' | string;
+  chartStatus?: 'ok' | 'short' | 'flat' | 'snapshot' | 'missing' | string;
+  oracleStatus?: string | null;
+  oracleEventCount?: number;
+  tradeCount?: number;
+  hasPrice?: boolean;
+  hasLobTokens?: boolean;
+  issues?: string[];
+  level?: 'ok' | 'warn' | 'critical' | string;
+};
+
 export type WorkspaceBundle = {
   market: MarketSummary | null;
+  identity?: WorkspaceIdentity | null;
+  diagnostics?: WorkspaceDiagnostics | null;
   trades: TradeRow[];
   oracle: OraclePayload | null;
   price: PriceSummary | null;
@@ -1225,6 +1258,138 @@ export type RuntimeNewMarketSignalsPayload = {
   items: RuntimeNewMarketSignalItem[];
   generatedAt?: string;
   status?: string | null;
+};
+
+export type RuntimeFinanceCoverageKey = 'quote' | 'earn' | 'sec' | 'perp' | 'etf' | 'clob' | 'oracle' | 'flow' | string;
+
+export type RuntimeFinanceLinkedMarket = {
+  marketId?: number | string | null;
+  title?: string | null;
+  probability?: number | string | null;
+  change24h?: number | string | null;
+  volume24h?: number | string | null;
+  liquidity?: number | string | null;
+  spread?: number | string | null;
+  endDate?: string | null;
+  category?: string | null;
+  categoryLabel?: string | null;
+  coverage?: RuntimeFinanceCoverageKey[];
+  topReason?: string | null;
+  gapScore?: number | string | null;
+};
+
+export type RuntimeFinanceMarketAtlasCategory = {
+  id?: string | null;
+  label?: string | null;
+  activeCount?: number | string | null;
+  volume24h?: number | string | null;
+  topTitle?: string | null;
+  coverage?: RuntimeFinanceCoverageKey[];
+};
+
+export type RuntimeFinanceMarketAtlasPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    activeCount?: number | string | null;
+    categoryCount?: number | string | null;
+    topCategory?: string | null;
+    topDislocation?: RuntimeFinanceLinkedMarket | null;
+    coverageCount?: number | string | null;
+  } | null;
+  categories?: RuntimeFinanceMarketAtlasCategory[];
+  items?: RuntimeFinanceLinkedMarket[];
+};
+
+export type RuntimeEquityEventRow = {
+  symbol?: string | null;
+  company?: string | null;
+  price?: number | string | null;
+  change1d?: number | string | null;
+  volume24h?: number | string | null;
+  nextEvent?: string | null;
+  nextEventAt?: string | null;
+  eventType?: string | null;
+  eventTone?: string | null;
+  badges?: string[];
+  linkedMarkets?: RuntimeFinanceLinkedMarket[];
+  pmktGapScore?: number | string | null;
+};
+
+export type RuntimeEquityEventCommandPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    trackedCount?: number | string | null;
+    catalystCount?: number | string | null;
+    topSymbol?: string | null;
+    signal?: string | null;
+  } | null;
+  items?: RuntimeEquityEventRow[];
+};
+
+export type RuntimeOnchainTradfiPerpRow = {
+  symbol?: string | null;
+  display?: string | null;
+  assetClass?: string | null;
+  markPx?: number | string | null;
+  oraclePx?: number | string | null;
+  spotPx?: number | string | null;
+  basisBps?: number | string | null;
+  funding?: number | string | null;
+  openInterest?: number | string | null;
+  dayNotional?: number | string | null;
+  compositeScore?: number | string | null;
+  alerts?: string[];
+  linkedMarkets?: RuntimeFinanceLinkedMarket[];
+};
+
+export type RuntimeOnchainTradfiPerpRadarPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    assetCount?: number | string | null;
+    alertCount?: number | string | null;
+    topSymbol?: string | null;
+    signal?: string | null;
+  } | null;
+  items?: RuntimeOnchainTradfiPerpRow[];
+};
+
+export type RuntimeFinanceLiquidityComponent = {
+  key?: string | null;
+  label?: string | null;
+  value?: number | string | null;
+  tone?: string | null;
+  detail?: string | null;
+};
+
+export type RuntimeFinanceLiquidityRow = {
+  id?: string | null;
+  label?: string | null;
+  source?: string | null;
+  signal?: string | null;
+  value?: number | string | null;
+  tone?: string | null;
+  linkedMarket?: RuntimeFinanceLinkedMarket | null;
+};
+
+export type RuntimeFinanceLiquidityRegimePayload = {
+  generatedAt?: string;
+  status?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    regimeLabel?: string | null;
+    regimeScore?: number | string | null;
+    alertCount?: number | string | null;
+    signal?: string | null;
+  } | null;
+  components?: RuntimeFinanceLiquidityComponent[];
+  items?: RuntimeFinanceLiquidityRow[];
 };
 
 export type PanelDefinition = {

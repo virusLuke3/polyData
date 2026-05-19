@@ -83,7 +83,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, weather_news_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, weather_news_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -226,6 +226,7 @@ def build_route_helpers() -> Dict[str, Any]:
     return {
         "build_seed_health_payload": lambda: system_service.build_seed_health_payload(build_service_context()),
         "build_system_health_payload": build_system_health_payload,
+        "app": app,
         "COMMODITY_SYMBOLS": COMMODITY_SYMBOLS,
         "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
         "LOB_RUNTIME_MANAGER": LOB_RUNTIME_MANAGER,
@@ -245,6 +246,10 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_energy_gasoline_shock_snapshot": get_energy_gasoline_shock_snapshot,
         "get_fed_reaction_growth_risk_board_snapshot": get_fed_reaction_growth_risk_board_snapshot,
         "get_fed_rates_polymarket_gap_snapshot": get_fed_rates_polymarket_gap_snapshot,
+        "get_finance_market_atlas_snapshot": lambda limit=16: finance_panels_service.get_finance_market_atlas_snapshot(build_service_context(), limit=limit),
+        "get_equity_event_command_snapshot": lambda limit=12: finance_panels_service.get_equity_event_command_snapshot(build_service_context(), limit=limit),
+        "get_onchain_tradfi_perp_radar_snapshot": lambda limit=12: finance_panels_service.get_onchain_tradfi_perp_radar_snapshot(build_service_context(), limit=limit),
+        "get_finance_liquidity_regime_snapshot": lambda limit=12: finance_panels_service.get_finance_liquidity_regime_snapshot(build_service_context(), limit=limit),
         "get_food_retail_basket_snapshot": get_food_retail_basket_snapshot,
         "get_f1_panel_snapshot": get_f1_panel_snapshot,
         "get_geo_sanctions_shock_snapshot": get_geo_sanctions_shock_snapshot,
@@ -313,6 +318,7 @@ def build_route_helpers() -> Dict[str, Any]:
             no_token_id=no_token_id,
             market_title=market_title,
         ),
+        "get_snapshot_payload": get_snapshot_payload,
         "get_suspicious_trades_snapshot": get_suspicious_trades_snapshot,
         "get_top_addresses_cached": lambda days=None, limit=50: address_service.get_top_addresses_cached(build_service_context(), days, limit),
         "get_whale_trades_snapshot": get_whale_trades_snapshot,
@@ -404,6 +410,10 @@ def build_service_context() -> Dict[str, Any]:
         "get_energy_gasoline_shock_snapshot": lambda limit=6: energy_gasoline_shock_service.get_energy_gasoline_shock_snapshot(build_service_context(), limit=limit),
         "get_fed_reaction_growth_risk_board_snapshot": lambda limit=36: macro_cpi_registry_service.get_fed_reaction_growth_risk_board_snapshot(build_service_context(), limit=limit),
         "get_fed_rates_polymarket_gap_snapshot": lambda limit=8: macro_cpi_panels_service.get_fed_rates_polymarket_gap_snapshot(build_service_context(), limit=limit),
+        "get_finance_market_atlas_snapshot": lambda limit=16: finance_panels_service.get_finance_market_atlas_snapshot(build_service_context(), limit=limit),
+        "get_equity_event_command_snapshot": lambda limit=12: finance_panels_service.get_equity_event_command_snapshot(build_service_context(), limit=limit),
+        "get_onchain_tradfi_perp_radar_snapshot": lambda limit=12: finance_panels_service.get_onchain_tradfi_perp_radar_snapshot(build_service_context(), limit=limit),
+        "get_finance_liquidity_regime_snapshot": lambda limit=12: finance_panels_service.get_finance_liquidity_regime_snapshot(build_service_context(), limit=limit),
         "get_food_retail_basket_snapshot": lambda limit=8: food_retail_basket_service.get_food_retail_basket_snapshot(build_service_context(), limit=limit),
         "get_f1_panel_snapshot": lambda limit=10: f1_runtime_service.get_f1_panel_snapshot(build_service_context(), limit=limit),
         "get_geo_sanctions_shock_snapshot": lambda limit=6: geo_sanctions_shock_service.get_geo_sanctions_shock_snapshot(build_service_context(), limit=limit),
