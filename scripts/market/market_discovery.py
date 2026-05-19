@@ -97,6 +97,7 @@ def _attach_event_meta_to_market(m: Dict, ev: Dict) -> None:
     m["_event_id"] = ev.get("id")
     m["_event_neg_risk"] = ev.get("negRisk", len(ev.get("markets", [])) > 1)
     m["_event_slug"] = ev.get("slug", ev.get("ticker", ""))
+    m["_event_title"] = ev.get("title") or ev.get("name")
     m["_event_category"] = ev.get("category")
     m["_event_subcategory"] = ev.get("subcategory")
     m["_event_categories"] = ev.get("categories")
@@ -2087,6 +2088,9 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
 
     return {
         "gamma_market_id": gamma_market_id,
+        "event_id": str(m.get("_event_id") or "").strip(),
+        "event_slug": str(m.get("_event_slug") or "").strip(),
+        "event_title": str(m.get("_event_title") or "").strip(),
         "slug": slug,
         "condition_id": _ensure_0x(condition_id),
         "question_id": question_id,  # may be None
@@ -2436,9 +2440,10 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
     if not markets:
         return 0
     rows = []
+    legacy_rows = []
     for market in markets:
         cids = market.get("clob_token_ids", []) or []
-        rows.append((
+        base_row = (
             market.get("gamma_market_id", "") or "",
             market.get("slug"),
             market.get("condition_id"),
@@ -2454,18 +2459,30 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
             market.get("category", "") or "",
             _json_for_db(market.get("tags", []) or []),
             _json_for_db(cids),
+        )
+        legacy_rows.append(base_row)
+        rows.append((
+            market.get("gamma_market_id", "") or "",
+            market.get("event_id", "") or "",
+            market.get("event_slug", "") or "",
+            market.get("event_title", "") or "",
+            *base_row[1:],
         ))
     cursor = conn.cursor()
     if _is_postgres_target():
         cursor.executemany(
             """
             INSERT INTO markets (
-                gamma_market_id, slug, condition_id, question_id, oracle,
+                gamma_market_id, event_id, event_slug, event_title,
+                slug, condition_id, question_id, oracle,
                 yes_token_id, no_token_id, title, description,
                 enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(condition_id) DO UPDATE SET
                 gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                event_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_id,'')), ''), markets.event_id),
+                event_slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_slug,'')), ''), markets.event_slug),
+                event_title=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_title,'')), ''), markets.event_title),
                 slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
                 question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
                 oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
@@ -2512,7 +2529,7 @@ def batch_upsert_markets(conn, markets: List[Dict]) -> int:
                 tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
                 clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
             """,
-            rows,
+            legacy_rows,
         )
     conn.commit()
     upsert_market_tokens_for_conditions(
@@ -2640,7 +2657,7 @@ def upsert_market(conn, market: Dict) -> int:
     """
     cids = market.get("clob_token_ids", []) or []
     cursor = conn.cursor()
-    row = (
+    legacy_row = (
         market.get("gamma_market_id", "") or "",
         market.get("slug"),
         market.get("condition_id"),
@@ -2657,16 +2674,27 @@ def upsert_market(conn, market: Dict) -> int:
         _json_for_db(market.get("tags", []) or []),
         _json_for_db(cids),
     )
+    row = (
+        market.get("gamma_market_id", "") or "",
+        market.get("event_id", "") or "",
+        market.get("event_slug", "") or "",
+        market.get("event_title", "") or "",
+        *legacy_row[1:],
+    )
     if _is_postgres_target():
         cursor.execute(
             """
             INSERT INTO markets (
-                gamma_market_id, slug, condition_id, question_id, oracle,
+                gamma_market_id, event_id, event_slug, event_title,
+                slug, condition_id, question_id, oracle,
                 yes_token_id, no_token_id, title, description,
                 enable_neg_risk, end_date, created_at, category, tags, clob_token_ids
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(condition_id) DO UPDATE SET
                 gamma_market_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.gamma_market_id,'')), ''), markets.gamma_market_id),
+                event_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_id,'')), ''), markets.event_id),
+                event_slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_slug,'')), ''), markets.event_slug),
+                event_title=COALESCE(NULLIF(TRIM(COALESCE(excluded.event_title,'')), ''), markets.event_title),
                 slug=COALESCE(NULLIF(TRIM(COALESCE(excluded.slug,'')), ''), markets.slug),
                 question_id=COALESCE(NULLIF(TRIM(COALESCE(excluded.question_id,'')), ''), markets.question_id),
                 oracle=COALESCE(NULLIF(TRIM(COALESCE(excluded.oracle,'')), ''), markets.oracle),
@@ -2713,7 +2741,7 @@ def upsert_market(conn, market: Dict) -> int:
                 tags=COALESCE(NULLIF(TRIM(COALESCE(markets.tags,'[]')), '[]'), excluded.tags),
                 clob_token_ids=COALESCE(NULLIF(TRIM(COALESCE(markets.clob_token_ids,'[]')), '[]'), excluded.clob_token_ids)
             """,
-            row,
+            legacy_row,
         )
     conn.commit()
     cursor.execute("SELECT id FROM markets WHERE condition_id = ?", (market["condition_id"],))

@@ -10,6 +10,7 @@ production services on one machine.
 - `polydata-trade-sync.service`
 - `polydata-oracle-sync.service`
 - `polydata-analytics-sync.service`
+- `polydata-event-market-serving.service`
 - `polydata-new-market-signal.service`
 - `polydata-geo-sanctions-shock.service`
 - `polydata-jin10-seed.service`
@@ -93,10 +94,11 @@ loginctl enable-linger "$USER"
 5. Inspect status and logs:
 
 ```bash
-systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync polydata-new-market-signal polydata-geo-sanctions-shock polydata-jin10-seed polydata-f1-seed polydata-nba-seed polydata-market-group-seed polydata-crypto-funding-seed polydata-finance-external-sources-seed polydata-inflation-nowcast-seed polydata-alpha-signal-seed polydata-whale-trades-seed polydata-suspicious-trades-seed polydata-bootstrap-seed
+systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync polydata-event-market-serving polydata-new-market-signal polydata-geo-sanctions-shock polydata-jin10-seed polydata-f1-seed polydata-nba-seed polydata-market-group-seed polydata-crypto-funding-seed polydata-finance-external-sources-seed polydata-inflation-nowcast-seed polydata-alpha-signal-seed polydata-whale-trades-seed polydata-suspicious-trades-seed polydata-bootstrap-seed
 journalctl --user-unit polydata-api -f
 journalctl --user-unit polydata-market-sync -f
 journalctl --user-unit polydata-new-market-signal -f
+journalctl --user-unit polydata-event-market-serving -f
 journalctl --user-unit polydata-geo-sanctions-shock -f
 journalctl --user-unit polydata-jin10-seed -f
 journalctl --user-unit polydata-f1-seed -f

@@ -648,6 +648,165 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     return (bucket, multi_penalty, -volume, -trade_count, -recency, -created_ts)
 
 
+def _serving_table_ready(ctx: dict) -> bool:
+    backend_getter = ctx.get("get_backend")
+    if callable(backend_getter):
+        try:
+            if str(backend_getter()).lower() not in {"postgres", "postgresql"}:
+                return False
+        except Exception:
+            return False
+    table_exists = ctx.get("table_exists")
+    if not callable(table_exists):
+        return False
+    try:
+        if not table_exists("event_market_serving"):
+            return False
+        rows = ctx["query_all"]("SELECT 1 FROM event_market_serving LIMIT 1", ())
+        return bool(rows)
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger:
+            logger.exception("event_market_serving readiness check failed")
+        return False
+
+
+def _serving_json_list(value: Any) -> List[Any]:
+    items = _as_list(value)
+    if len(items) == 1 and isinstance(items[0], str):
+        text = items[0].strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+    return items
+
+
+def _serving_group_from_row(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
+    outcomes = [item for item in _serving_json_list(row.get("outcomes")) if isinstance(item, dict)]
+    top_outcomes = [item for item in _serving_json_list(row.get("top_outcomes")) if isinstance(item, dict)]
+    if not top_outcomes:
+        top_outcomes = sorted(
+            [outcome for outcome in outcomes if _float_value(outcome.get("yesPrice")) is not None],
+            key=lambda outcome: _float_value(outcome.get("yesPrice")) or 0.0,
+            reverse=True,
+        )[:5]
+    return {
+        "groupId": row.get("group_id") or f"event:{row.get('event_id') or row.get('serving_key')}",
+        "eventId": row.get("event_id") or row.get("serving_key"),
+        "title": row.get("title") or row.get("event_title") or "Untitled event",
+        "slug": row.get("event_slug"),
+        "category": row.get("category") or "market",
+        "tags": _serving_json_list(row.get("tags")),
+        "createdAt": row.get("created_at"),
+        "endDate": row.get("end_date"),
+        "volume24h": _float_value(row.get("volume_24h")) or 0.0,
+        "tradeCount24h": int(_float_value(row.get("trade_count_24h")) or 0),
+        "outcomeCount": int(row.get("outcome_count") or len(outcomes)),
+        "lastActivityAt": row.get("last_activity_at"),
+        "defaultOutcomeKey": row.get("default_outcome_key"),
+        "defaultMarketId": row.get("default_market_id"),
+        "outcomes": outcomes,
+        "topOutcomes": top_outcomes,
+        "completionStatus": row.get("completion_status") or "OPEN",
+        "isTradingClosed": bool(row.get("is_trading_closed")),
+        "sourceMode": "postgres-serving",
+        "generatedAt": ctx["utc_now_iso"](),
+    }
+
+
+def _serving_market_groups_payload(
+    ctx: dict,
+    *,
+    query: str,
+    page: int,
+    page_size: int,
+    sort: str,
+) -> Optional[Dict[str, Any]]:
+    if not _serving_table_ready(ctx):
+        return None
+    where = ["outcome_count > 0"]
+    params: List[Any] = []
+    if sort == "active":
+        where.append("is_trading_closed = FALSE")
+        where.append("completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')")
+    if query:
+        like = f"%{query}%"
+        where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
+        params.extend([like, like, like, like])
+    where_sql = " AND ".join(where)
+    order_sql = {
+        "active": "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST, created_at DESC NULLS LAST",
+        "new": "created_at DESC NULLS LAST, last_activity_at DESC NULLS LAST, volume_24h DESC",
+        "volume": "volume_24h DESC, last_activity_at DESC NULLS LAST, active_rank DESC",
+    }.get(sort, "active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST")
+    offset = (page - 1) * page_size
+    rows = ctx["query_all"](
+        f"""
+        SELECT
+          serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
+          created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
+          default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
+          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
+        FROM event_market_serving
+        WHERE {where_sql}
+        ORDER BY {order_sql}
+        LIMIT ? OFFSET ?
+        """,
+        [*params, page_size, offset],
+    )
+    total_row = ctx["query_all"](
+        f"SELECT COUNT(*) AS total FROM event_market_serving WHERE {where_sql}",
+        params,
+    )
+    total = int((total_row[0] or {}).get("total") or 0) if total_row else 0
+    return {
+        "items": [_serving_group_from_row(ctx, row) for row in rows],
+        "pagination": {
+            "page": page,
+            "pageSize": page_size,
+            "total": total,
+            "totalPages": max(1, (total + page_size - 1) // page_size),
+            "hasMore": offset + len(rows) < total,
+        },
+        "generatedAt": ctx["utc_now_iso"](),
+        "sourceMode": "postgres-serving",
+    }
+
+
+def _serving_market_group_detail(ctx: dict, identifier: str) -> Optional[Dict[str, Any]]:
+    if not _serving_table_ready(ctx):
+        return None
+    raw = str(identifier or "").strip()
+    normalized = raw.removeprefix("event:")
+    candidates = list(dict.fromkeys([raw, normalized, f"event:{normalized}", f"slug:{normalized}"]))
+    placeholders = ",".join("?" for _ in candidates)
+    rows = ctx["query_all"](
+        f"""
+        SELECT
+          serving_key, group_id, event_id, event_slug, event_title, title, category, tags,
+          created_at, end_date, volume_24h, trade_count_24h, last_activity_at, outcome_count,
+          default_market_id, default_condition_id, default_gamma_market_id, default_outcome_key,
+          top_outcomes, outcomes, completion_status, is_trading_closed, active_rank, updated_at
+        FROM event_market_serving
+        WHERE serving_key IN ({placeholders})
+           OR group_id IN ({placeholders})
+           OR event_id IN ({placeholders})
+           OR event_slug IN ({placeholders})
+        ORDER BY active_rank DESC, volume_24h DESC
+        LIMIT 1
+        """,
+        [*candidates, *candidates, *candidates, *candidates],
+    )
+    if not rows:
+        return None
+    group = _serving_group_from_row(ctx, rows[0])
+    group["status"] = "ok"
+    return group
+
+
 def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status: str = "degraded") -> Dict[str, Any]:
     return {
         "items": [],
@@ -678,9 +837,13 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 7}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 9}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
+        serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)
+        if serving_payload is not None:
+            return serving_payload
+
         fetch_target = max(100, min(1000, (page * page_size * 3)))
         if sort == "active":
             recent_events: List[Dict[str, Any]] = []
@@ -781,9 +944,13 @@ def get_market_group_detail_payload(ctx: dict, event_id: str) -> Optional[Dict[s
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 4}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 6}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
+        serving_payload = _serving_market_group_detail(ctx, identifier)
+        if serving_payload is not None:
+            return serving_payload
+
         try:
             event = _fetch_gamma_event_by_id(ctx, identifier)
         except Exception:
@@ -824,7 +991,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 6}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 8}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = get_market_group_detail_payload(ctx, identifier)

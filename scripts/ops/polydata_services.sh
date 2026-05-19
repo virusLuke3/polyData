@@ -14,12 +14,14 @@ CORE_SERVICES=(
   "polydata-market-sync.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
+  "polydata-event-market-serving.service"
   "polydata-new-market-signal.service"
 )
 DATA_SERVICES=(
   "polydata-market-sync.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
+  "polydata-event-market-serving.service"
   "polydata-new-market-signal.service"
 )
 

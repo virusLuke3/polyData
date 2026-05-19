@@ -825,6 +825,9 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         CREATE TABLE IF NOT EXISTS core.markets (
             id BIGINT PRIMARY KEY DEFAULT nextval('core.markets_id_seq'),
             gamma_market_id TEXT,
+            event_id TEXT,
+            event_slug TEXT,
+            event_title TEXT,
             slug TEXT NOT NULL,
             condition_id TEXT NOT NULL UNIQUE,
             question_id TEXT,
@@ -845,6 +848,12 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         )
         """
     )
+    for col, col_type in (
+        ("event_id", "TEXT"),
+        ("event_slug", "TEXT"),
+        ("event_title", "TEXT"),
+    ):
+        ensure_column_exists(conn, "core.markets", col, col_type)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS core.market_status_snapshot (
@@ -980,8 +989,41 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         """
     )
     ensure_column_exists(conn, "core.market_list_serving", "price_24h_ago", "NUMERIC(20, 10)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.event_market_serving (
+            serving_key TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL UNIQUE,
+            event_id TEXT,
+            event_slug TEXT,
+            event_title TEXT,
+            title TEXT NOT NULL,
+            category TEXT,
+            tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at TIMESTAMPTZ,
+            end_date TIMESTAMPTZ,
+            volume_24h NUMERIC(38, 18) NOT NULL DEFAULT 0,
+            trade_count_24h BIGINT NOT NULL DEFAULT 0,
+            last_activity_at TIMESTAMPTZ,
+            outcome_count INTEGER NOT NULL DEFAULT 0,
+            default_market_id BIGINT REFERENCES core.markets(id) ON DELETE SET NULL,
+            default_condition_id TEXT,
+            default_gamma_market_id TEXT,
+            default_outcome_key TEXT,
+            top_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            outcomes JSONB NOT NULL DEFAULT '[]'::jsonb,
+            completion_status TEXT NOT NULL DEFAULT 'OPEN',
+            is_trading_closed BOOLEAN NOT NULL DEFAULT FALSE,
+            active_rank DOUBLE PRECISION NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'postgres',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
     for table, index_name, cols in (
         ("core.markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
+        ("core.markets", "idx_markets_event_id", ["event_id"]),
+        ("core.markets", "idx_markets_event_slug", ["event_slug"]),
         ("core.markets", "idx_markets_slug", ["slug"]),
         ("core.markets", "idx_markets_question_id", ["question_id"]),
         ("core.markets", "idx_markets_yes_token_id", ["yes_token_id"]),
@@ -1004,11 +1046,53 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("core.market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("core.market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("core.market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
+        ("core.event_market_serving", "idx_event_market_serving_event_default", ["event_id", "default_market_id"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_tags_gin ON core.markets USING GIN (tags)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_clob_token_ids_gin ON core.markets USING GIN (clob_token_ids)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_category_lower ON core.markets (lower(category))")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_markets_created_id_desc ON core.markets (created_at DESC NULLS LAST, id DESC)")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_market_status_snapshot_open_market_id
+          ON core.market_status_snapshot (market_id)
+          WHERE has_settle = FALSE
+            AND has_propose = FALSE
+            AND is_trading_closed = FALSE
+            AND settlement_code = 0
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_market_list_serving_volume_activity_desc
+          ON core.market_list_serving (volume_24h DESC, trade_count_24h DESC, last_trade_at DESC, market_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_market_list_serving_recent_trade_desc
+          ON core.market_list_serving (last_trade_at DESC NULLS LAST, latest_trade_at DESC NULLS LAST, market_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_event_market_serving_active_desc
+          ON core.event_market_serving (volume_24h DESC, last_activity_at DESC NULLS LAST, serving_key)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_event_market_serving_status_active_desc
+          ON core.event_market_serving (completion_status, is_trading_closed, volume_24h DESC)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_event_market_serving_rank_desc
+          ON core.event_market_serving (active_rank DESC, volume_24h DESC, last_activity_at DESC NULLS LAST)
+        """
+    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_markets_search_text_simple_gin
