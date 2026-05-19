@@ -46,6 +46,18 @@ function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
   return items.slice(0, Math.min(4, items.length));
 }
 
+function topSources(items: ContentItem[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const source = String(item.source || item.contentType || 'intel').trim();
+    if (!source) return;
+    counts.set(source, (counts.get(source) || 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5);
+}
+
 function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   const [activeTab, setActiveTab] = useState<IntelTab['id']>('news');
   const items = focusedContent(ctx);
@@ -54,6 +66,7 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
   ) as Record<IntelTab['id'], ReturnType<typeof contentByType>>, [items]);
   const visibleItems = tabItems[activeTab] || [];
   const activeLabel = INTEL_TABS.find((tab) => tab.id === activeTab)?.label || 'Intel';
+  const sources = useMemo(() => topSources(visibleItems), [visibleItems]);
 
   return (
     <Panel
@@ -78,7 +91,17 @@ function RelatedIntelPanel({ ctx }: { ctx: PanelRuntimeContext }) {
           </button>
         ))}
       </div>
-      {contentList(visibleItems, `No ${activeLabel.toLowerCase()} intel for this market yet.`)}
+      {sources.length ? (
+        <div className="wm-intel-source-strip" aria-label="Related intel source mix">
+          {sources.map(([source, count]) => (
+            <span key={source}>
+              <b>{source}</b>
+              <em>{count}</em>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {contentList(visibleItems, `No ${activeLabel.toLowerCase()} intel for this market yet.`, 20)}
     </Panel>
   );
 }

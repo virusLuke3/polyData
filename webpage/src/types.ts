@@ -270,6 +270,7 @@ export type ContentItem = {
   id?: string | number;
   contentType?: string | null;
   source?: string | null;
+  category?: string | null;
   title?: string | null;
   url?: string | null;
   publishedAt?: string | null;

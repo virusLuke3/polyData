@@ -314,7 +314,7 @@ type ContentTag = {
 };
 
 function contentText(item: ContentItem) {
-  return `${item.source || ''} ${item.title || ''} ${item.summary || ''} ${item.contentType || ''}`.toLowerCase();
+  return `${item.source || ''} ${item.category || ''} ${item.title || ''} ${item.summary || ''} ${item.contentType || ''}`.toLowerCase();
 }
 
 function firstMatchingTag(text: string): ContentTag | null {
@@ -371,17 +371,18 @@ function cleanIntelSummary(value?: string | null) {
   return text;
 }
 
-function contentList(items: ContentItem[], emptyMessage: string) {
+function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20) {
   if (!items.length) return emptyState(emptyMessage);
   return (
     <div className="wm-intel-list">
-      {items.slice(0, 8).map((item, index) => {
+      {items.slice(0, maxItems).map((item, index) => {
         const tone = contentTone(item.contentType);
         const tags = contentTags(item, tone);
         const priority = contentPriority(tags);
         const summary = cleanIntelSummary(item.summary);
         return (
           <a className={`wm-intel-card ${tone} priority-${priority}`} href={item.url || '#'} target="_blank" rel="noreferrer" key={`${item.url}-${index}`}>
+            <span className="wm-intel-rank">{String(index + 1).padStart(2, '0')}</span>
             <div className="wm-intel-topline">
               <div className="wm-intel-meta">
                 <span className="wm-intel-dot" aria-hidden="true" />
