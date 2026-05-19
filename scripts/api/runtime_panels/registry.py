@@ -149,10 +149,15 @@ def _assert_unique(panels: Iterable[RuntimePanelModule]) -> None:
 _assert_unique(RUNTIME_PANEL_MODULES)
 
 _PANELS_BY_ROUTE: Dict[str, RuntimePanelModule] = {panel.route: panel for panel in RUNTIME_PANEL_MODULES}
+_PANELS_BY_ID: Dict[str, RuntimePanelModule] = {panel.panel_id: panel for panel in RUNTIME_PANEL_MODULES}
 
 
 def get_panel_by_route(route: str) -> Optional[RuntimePanelModule]:
     return _PANELS_BY_ROUTE.get(route)
+
+
+def get_panel_by_id(panel_id: str) -> Optional[RuntimePanelModule]:
+    return _PANELS_BY_ID.get(panel_id)
 
 
 def get_panel_routes() -> List[str]:

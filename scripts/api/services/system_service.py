@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict
+
+
+SYSTEM_HEALTH_CACHE_NAMESPACE = "system:health"
+SYSTEM_HEALTH_CACHE_KEY = "payload-v1"
+SYSTEM_HEALTH_CACHE_TTL_SECONDS = 15
+_SYSTEM_HEALTH_CACHE_LOCK = threading.Lock()
+_SYSTEM_HEALTH_REFRESH_LOCK = threading.Lock()
+_SYSTEM_HEALTH_CACHE: Dict[str, Any] = {}
+_SYSTEM_HEALTH_REFRESHING = False
 
 
 SEED_META_SPECS = [
@@ -292,7 +302,14 @@ def _freshness_label(age_seconds: int | None, expected_interval_seconds: int) ->
     return "stale"
 
 
-def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
+def _system_health_cache_ttl_seconds() -> int:
+    try:
+        return max(1, int(os.environ.get("POLYDATA_SYSTEM_HEALTH_CACHE_TTL_SECONDS", SYSTEM_HEALTH_CACHE_TTL_SECONDS)))
+    except (TypeError, ValueError):
+        return SYSTEM_HEALTH_CACHE_TTL_SECONDS
+
+
+def _build_system_health_payload_uncached(ctx: dict) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "database": ctx["describe_db_target"](),
         "redis": bool(ctx["get_redis_client"]()),
@@ -337,6 +354,74 @@ def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
         if ctx["table_exists"]("market_latest_prices")
         else None,
     }
+    return payload
+
+
+def _store_system_health_payload(ctx: dict, payload: Dict[str, Any], ttl_seconds: int) -> None:
+    writer = ctx.get("set_cached_json")
+    if callable(writer):
+        writer(SYSTEM_HEALTH_CACHE_NAMESPACE, SYSTEM_HEALTH_CACHE_KEY, payload, ttl_seconds)
+    with _SYSTEM_HEALTH_CACHE_LOCK:
+        _SYSTEM_HEALTH_CACHE["value"] = payload
+        _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+
+
+def _schedule_system_health_refresh(ctx: dict, ttl_seconds: int) -> None:
+    global _SYSTEM_HEALTH_REFRESHING
+    with _SYSTEM_HEALTH_REFRESH_LOCK:
+        if _SYSTEM_HEALTH_REFRESHING:
+            return
+        _SYSTEM_HEALTH_REFRESHING = True
+
+    def refresh() -> None:
+        global _SYSTEM_HEALTH_REFRESHING
+        try:
+            payload = _build_system_health_payload_uncached(ctx)
+            _store_system_health_payload(ctx, payload, ttl_seconds)
+        except Exception:
+            ctx["app"].logger.exception("system-health refresh failed")
+        finally:
+            with _SYSTEM_HEALTH_REFRESH_LOCK:
+                _SYSTEM_HEALTH_REFRESHING = False
+
+    thread = threading.Thread(target=refresh, name="system-health-refresh", daemon=True)
+    thread.start()
+
+
+def build_system_health_payload(ctx: dict) -> Dict[str, Any]:
+    ttl_seconds = _system_health_cache_ttl_seconds()
+    now = time.monotonic()
+    stale_payload = None
+    with _SYSTEM_HEALTH_CACHE_LOCK:
+        cached = _SYSTEM_HEALTH_CACHE.get("value")
+        if isinstance(cached, dict) and float(_SYSTEM_HEALTH_CACHE.get("expires_at") or 0.0) > now:
+            return cached
+        if isinstance(cached, dict):
+            stale_payload = cached
+
+    reader = ctx.get("get_cached_json")
+    if callable(reader):
+        redis_payload = reader(SYSTEM_HEALTH_CACHE_NAMESPACE, SYSTEM_HEALTH_CACHE_KEY)
+        if isinstance(redis_payload, dict):
+            with _SYSTEM_HEALTH_CACHE_LOCK:
+                _SYSTEM_HEALTH_CACHE["value"] = redis_payload
+                _SYSTEM_HEALTH_CACHE["expires_at"] = time.monotonic() + ttl_seconds
+            return redis_payload
+
+    if stale_payload is not None:
+        _schedule_system_health_refresh(ctx, ttl_seconds)
+        return stale_payload
+
+    try:
+        payload = _build_system_health_payload_uncached(ctx)
+    except Exception:
+        with _SYSTEM_HEALTH_CACHE_LOCK:
+            cached = _SYSTEM_HEALTH_CACHE.get("value")
+            if isinstance(cached, dict):
+                return cached
+        raise
+
+    _store_system_health_payload(ctx, payload, ttl_seconds)
     return payload
 
 

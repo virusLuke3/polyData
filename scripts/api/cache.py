@@ -127,7 +127,6 @@ def _refresh_snapshot_payload_async(ctx: dict, namespace: str, cache_key: str, b
 def get_snapshot_payload(ctx: dict, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
     redis_payload = get_cached_payload(ctx, namespace, cache_key)
     if redis_payload is not None:
-        ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
         return redis_payload
 
     sqlite_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
