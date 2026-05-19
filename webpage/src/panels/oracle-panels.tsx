@@ -7,8 +7,30 @@ import { formatRelative, shortHash } from './shared/formatters';
 import { globalOracle } from './shared/selectors';
 
 function focusedOraclePayload(ctx: PanelRenderContext): OraclePayload | null {
-  if (!ctx.selectedMarketId) return null;
-  return ctx.bundle?.oracle || null;
+  if (ctx.selectedMarketId && ctx.bundle?.oracle) return ctx.bundle.oracle;
+  const selectedGroup = ctx.selectedMarketGroupDetail || ctx.selectedMarketGroup;
+  const selectedOutcome = (
+    (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    || (selectedGroup?.topOutcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    || null
+  );
+  if (!selectedOutcome && !ctx.selectedMarketId) return null;
+  return {
+    marketId: Number(selectedOutcome?.marketId || ctx.selectedMarketId || 0),
+    localMarketId: selectedOutcome?.marketId ?? ctx.selectedMarketId ?? null,
+    gammaMarketId: selectedOutcome?.gammaMarketId ?? ctx.bundle?.market?.gammaMarketId ?? ctx.selectedMarket?.gammaMarketId ?? null,
+    conditionId: selectedOutcome?.conditionId ?? ctx.selectedMarket?.conditionId ?? ctx.bundle?.market?.conditionId ?? null,
+    questionId: ctx.selectedMarket?.questionId ?? ctx.bundle?.market?.questionId ?? null,
+    oracle: ctx.selectedMarket?.oracle ?? ctx.bundle?.market?.oracle ?? null,
+    currentStatus: ctx.selectedMarket?.status ?? 'OPEN',
+    completionStatus: 'OPEN',
+    isTradingClosed: false,
+    isResolved: false,
+    isFinal: false,
+    settlementOutcome: 'UNKNOWN',
+    settlementSource: selectedOutcome?.marketId ? 'market' : 'gamma-event',
+    timeline: [],
+  };
 }
 
 function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
@@ -19,7 +41,7 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
     <div className="wm-oracle-shell focused">
       <div className="wm-oracle-summary-strip">
         <span><strong>{status}</strong> status</span>
-        <span><strong>{payload.questionId ? 'YES' : 'NO'}</strong> bound</span>
+          <span><strong>{payload.questionId || payload.conditionId || payload.gammaMarketId ? 'YES' : 'NO'}</strong> bound</span>
         <span><strong>{payload.timeline?.length || 0}</strong> events</span>
       </div>
       <article className="wm-oracle-event-card focused">
@@ -42,7 +64,7 @@ function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
         </div>
         <div className="wm-oracle-proof-grid">
           <span>Oracle <strong>{shortHash(payload.oracle || '', 8, 5) || '--'}</strong></span>
-          <span>QID <strong>{shortHash(payload.questionId || '', 8, 5) || '--'}</strong></span>
+          <span>QID <strong>{shortHash(payload.questionId || payload.conditionId || '', 8, 5) || '--'}</strong></span>
           <span>Source <strong>{payload.settlementSource || 'market'}</strong></span>
         </div>
       </article>

@@ -13,6 +13,7 @@ import time
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Optional, Tuple, Any
 
 try:
@@ -100,6 +101,14 @@ def _attach_event_meta_to_market(m: Dict, ev: Dict) -> None:
     m["_event_subcategory"] = ev.get("subcategory")
     m["_event_categories"] = ev.get("categories")
     m["_event_tags"] = ev.get("tags")
+    if not (m.get("createdAt") or m.get("created_at")):
+        event_created_at = ev.get("startDate") or ev.get("start_date") or ev.get("createdAt") or ev.get("created_at")
+        if event_created_at:
+            m["createdAt"] = event_created_at
+    if not (m.get("endDate") or m.get("end_date")):
+        event_end_date = ev.get("endDate") or ev.get("end_date")
+        if event_end_date:
+            m["endDate"] = event_end_date
 
 
 def _attach_embedded_event_meta_to_market(m: Dict) -> None:
@@ -963,6 +972,206 @@ def _bool_for_db(value: Any) -> Any:
     return flag if _is_postgres_target() else int(flag)
 
 
+def _decimal_text(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    try:
+        return format(Decimal(str(value)), "f")
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _probability_text(value: Any) -> Optional[str]:
+    text = _decimal_text(value)
+    if text is None:
+        return None
+    try:
+        probability = Decimal(text)
+    except InvalidOperation:
+        return None
+    if probability < 0 or probability > 1:
+        return None
+    return format(probability, "f")
+
+
+def _gamma_outcome_prices(market: Dict) -> List[Any]:
+    raw = market.get("outcomePrices") or market.get("outcome_prices")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+    return raw if isinstance(raw, list) else []
+
+
+def _gamma_yes_no_prices(market: Dict) -> Tuple[Optional[str], Optional[str]]:
+    prices = _gamma_outcome_prices(market)
+    yes_price = _probability_text(prices[0]) if prices else None
+    no_price = _probability_text(prices[1]) if len(prices) > 1 else None
+    if yes_price is None:
+        yes_price = _probability_text(
+            market.get("lastTradePrice")
+            or market.get("last_trade_price")
+            or market.get("bestAsk")
+            or market.get("bestBid")
+        )
+    if no_price is None and yes_price is not None:
+        no_price = format(Decimal("1") - Decimal(yes_price), "f")
+    return yes_price, no_price
+
+
+def _gamma_price_24h_ago(yes_price: Optional[str], market: Dict) -> Optional[str]:
+    if yes_price is None:
+        return None
+    change = _decimal_text(market.get("oneDayPriceChange") or market.get("one_day_price_change"))
+    if change is None:
+        return None
+    try:
+        price = Decimal(yes_price) - Decimal(change)
+    except InvalidOperation:
+        return None
+    if price < 0 or price > 1:
+        return None
+    return format(price, "f")
+
+
+def _gamma_volume_24h(market: Dict) -> str:
+    return _decimal_text(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h")) or "0"
+
+
+def _upsert_market_serving_from_gamma(conn, markets: List[Dict]) -> int:
+    if not markets:
+        return 0
+    try:
+        if not table_exists(conn, "market_latest_prices") or not table_exists(conn, "market_list_serving"):
+            return 0
+    except Exception:
+        return 0
+
+    by_condition = {
+        str(market.get("condition_id") or "").strip(): market
+        for market in markets
+        if str(market.get("condition_id") or "").strip()
+    }
+    if not by_condition:
+        return 0
+
+    conditions = sorted(by_condition)
+    market_id_by_condition: Dict[str, int] = {}
+    for start in range(0, len(conditions), 500):
+        chunk = conditions[start:start + 500]
+        placeholders = ",".join(["?"] * len(chunk))
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, condition_id FROM markets WHERE condition_id IN ({placeholders})",
+            tuple(chunk),
+        )
+        for row in cur.fetchall():
+            market_id_by_condition[str(row[1])] = int(row[0])
+
+    latest_rows: List[Tuple[Any, ...]] = []
+    serving_rows: List[Tuple[Any, ...]] = []
+    for condition_id, market in by_condition.items():
+        market_id = market_id_by_condition.get(condition_id)
+        if market_id is None:
+            continue
+        latest_yes = market.get("_gamma_latest_yes_price")
+        latest_no = market.get("_gamma_latest_no_price")
+        latest_at = _datetime_for_db(market.get("_gamma_latest_trade_at"))
+        volume_24h = market.get("_gamma_volume_24h") or "0"
+        price_24h_ago = market.get("_gamma_price_24h_ago")
+        if latest_yes is not None or latest_no is not None:
+            latest_rows.append(
+                (
+                    market_id,
+                    latest_at,
+                    None,
+                    None,
+                    latest_yes,
+                    latest_at,
+                    None,
+                    None,
+                    latest_yes,
+                    latest_at,
+                    None,
+                    None,
+                    latest_no,
+                )
+            )
+        serving_rows.append(
+            (
+                market_id,
+                latest_yes,
+                latest_at,
+                price_24h_ago,
+                0,
+                volume_24h,
+                latest_at if Decimal(str(volume_24h or "0")) > 0 else None,
+            )
+        )
+
+    if latest_rows:
+        conn.executemany(
+            """
+            INSERT INTO market_latest_prices (
+                market_id,
+                latest_trade_at,
+                latest_trade_block,
+                latest_trade_log_index,
+                latest_price,
+                latest_yes_trade_at,
+                latest_yes_trade_block,
+                latest_yes_trade_log_index,
+                latest_yes_price,
+                latest_no_trade_at,
+                latest_no_trade_block,
+                latest_no_trade_log_index,
+                latest_no_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(market_id) DO UPDATE SET
+                latest_trade_at = COALESCE(excluded.latest_trade_at, market_latest_prices.latest_trade_at),
+                latest_price = COALESCE(excluded.latest_price, market_latest_prices.latest_price),
+                latest_yes_trade_at = COALESCE(excluded.latest_yes_trade_at, market_latest_prices.latest_yes_trade_at),
+                latest_yes_price = COALESCE(excluded.latest_yes_price, market_latest_prices.latest_yes_price),
+                latest_no_trade_at = COALESCE(excluded.latest_no_trade_at, market_latest_prices.latest_no_trade_at),
+                latest_no_price = COALESCE(excluded.latest_no_price, market_latest_prices.latest_no_price),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            latest_rows,
+        )
+    if serving_rows:
+        conn.executemany(
+            """
+            INSERT INTO market_list_serving (
+                market_id,
+                latest_price,
+                latest_trade_at,
+                price_24h_ago,
+                trade_count_24h,
+                volume_24h,
+                last_trade_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(market_id) DO UPDATE SET
+                latest_price = COALESCE(excluded.latest_price, market_list_serving.latest_price),
+                latest_trade_at = COALESCE(excluded.latest_trade_at, market_list_serving.latest_trade_at),
+                price_24h_ago = COALESCE(excluded.price_24h_ago, market_list_serving.price_24h_ago),
+                trade_count_24h = CASE
+                    WHEN excluded.trade_count_24h > market_list_serving.trade_count_24h THEN excluded.trade_count_24h
+                    ELSE market_list_serving.trade_count_24h
+                END,
+                volume_24h = CASE
+                    WHEN excluded.volume_24h > market_list_serving.volume_24h THEN excluded.volume_24h
+                    ELSE market_list_serving.volume_24h
+                END,
+                last_trade_at = COALESCE(excluded.last_trade_at, market_list_serving.last_trade_at),
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            serving_rows,
+        )
+    conn.commit()
+    return len(serving_rows)
+
+
 def _get_market_created_at(market: Dict) -> Optional[datetime]:
     """统一读取 market 级 createdAt，用于增量断点推进。"""
     return _parse_iso_date(market.get("createdAt") or market.get("created_at"))
@@ -999,6 +1208,7 @@ def _flush_buffer_to_db(
             norms.append(n)
     if norms:
         batch_upsert_markets(conn, norms)
+        _upsert_market_serving_from_gamma(conn, norms)
         total_written += len(norms)
         print(f"  ... wrote {len(norms)} markets to DB (total {total_written})", file=sys.stderr)
     return [], total_written
@@ -1872,6 +2082,8 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
     tags = _normalize_tags_payload(tags_raw)
     if not category and tags:
         category = _derive_category_from_tags(tags)
+    latest_yes_price, latest_no_price = _gamma_yes_no_prices(m)
+    gamma_updated_at = m.get("updatedAt") or m.get("updated_at") or m.get("lastTradeTimestamp") or m.get("last_trade_timestamp")
 
     return {
         "gamma_market_id": gamma_market_id,
@@ -1889,6 +2101,11 @@ def normalize_market_from_gamma(m: Dict) -> Optional[Dict]:
         "created_at": created_at,
         "category": category,
         "tags": tags,
+        "_gamma_latest_yes_price": latest_yes_price,
+        "_gamma_latest_no_price": latest_no_price,
+        "_gamma_latest_trade_at": gamma_updated_at or created_at,
+        "_gamma_price_24h_ago": _gamma_price_24h_ago(latest_yes_price, m),
+        "_gamma_volume_24h": _gamma_volume_24h(m),
     }
 
 
@@ -2720,6 +2937,7 @@ def run_market_discovery(
         init_schema(db_path=db_path)
         with get_db(db_path) as conn:
             batch_upsert_markets(conn, norms)
+            _upsert_market_serving_from_gamma(conn, norms)
     elif not db_path or output_json:
         out_path = output_json or "market_discovery.json"
         with open(out_path, "w", encoding="utf-8") as f:

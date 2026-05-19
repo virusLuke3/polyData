@@ -49,6 +49,7 @@ data/telegram_state.json
 data/telegram_bot_state.json
 
 runtime_logs/
+logs/
 artifacts/
 
 # PnL research scripts and outputs are still experimental.

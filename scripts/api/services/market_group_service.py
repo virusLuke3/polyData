@@ -283,8 +283,12 @@ def _query_market_rows(ctx: dict, column_expr: str, values: Iterable[str]) -> Li
     return rows
 
 
-def _local_market_lookup(ctx: dict, events: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+def _local_market_lookup(
+    ctx: dict,
+    events: List[Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     condition_ids: set[str] = set()
+    gamma_market_ids: set[str] = set()
     slugs: set[str] = set()
     yes_token_ids: set[str] = set()
     for event in events:
@@ -292,23 +296,29 @@ def _local_market_lookup(ctx: dict, events: List[Dict[str, Any]]) -> Tuple[Dict[
             if not isinstance(market, dict):
                 continue
             condition_id, slug, yes_token_id = _market_identity(market)
+            gamma_market_id = str(market.get("id") or market.get("gamma_market_id") or "").strip()
             if condition_id:
                 condition_ids.add(condition_id)
+            if gamma_market_id:
+                gamma_market_ids.add(gamma_market_id)
             if slug:
                 slugs.add(slug)
             if yes_token_id:
                 yes_token_ids.add(yes_token_id)
 
     by_condition: Dict[str, Dict[str, Any]] = {}
+    by_gamma: Dict[str, Dict[str, Any]] = {}
     by_slug: Dict[str, Dict[str, Any]] = {}
     by_yes_token: Dict[str, Dict[str, Any]] = {}
     for row in _query_market_rows(ctx, "m.condition_id", condition_ids):
         by_condition.setdefault(str(row.get("condition_key") or ""), row)
+    for row in _query_market_rows(ctx, "m.gamma_market_id", gamma_market_ids):
+        by_gamma.setdefault(str(row.get("gamma_market_id") or ""), row)
     for row in _query_market_rows(ctx, "m.slug", slugs):
         by_slug.setdefault(str(row.get("slug_key") or ""), row)
     for row in _query_market_rows(ctx, "m.yes_token_id", yes_token_ids):
         by_yes_token.setdefault(str(row.get("yes_token_id") or ""), row)
-    return by_condition, by_slug, by_yes_token
+    return by_condition, by_gamma, by_slug, by_yes_token
 
 
 def _fetch_gamma_events(
@@ -411,14 +421,15 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
     if not markets or _terminal_event(markets):
         return None
 
-    by_condition, by_slug, by_yes_token = lookups
+    by_condition, by_gamma, by_slug, by_yes_token = lookups
     event_title = str(event.get("title") or "").strip() or "Untitled event"
     outcomes: List[Dict[str, Any]] = []
     for market in markets:
         condition_id, slug, yes_token_id = _market_identity(market)
+        gamma_market_id = str(market.get("id") or market.get("gamma_market_id") or "").strip()
         token_ids = _market_token_ids(market)
         no_token_id = token_ids[1] if len(token_ids) > 1 else ""
-        local = by_condition.get(condition_id) or by_slug.get(slug) or by_yes_token.get(yes_token_id) or {}
+        local = by_condition.get(condition_id) or by_gamma.get(gamma_market_id) or by_slug.get(slug) or by_yes_token.get(yes_token_id) or {}
         gamma_yes, gamma_no = _market_prices(market)
         local_yes = _float_value(local.get("latest_yes_price"))
         yes_price = local_yes if local_yes is not None else gamma_yes
@@ -604,7 +615,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 3}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 4}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         fetch_target = max(100, min(1000, (page * page_size * 3)))
@@ -707,7 +718,7 @@ def get_market_group_detail_payload(ctx: dict, event_id: str) -> Optional[Dict[s
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 1}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 2}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         try:

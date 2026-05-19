@@ -12,6 +12,7 @@ import {
   fetchBootstrap,
   fetchLatestContent,
   fetchMarketContent,
+  fetchMarketChart,
   fetchMarketGroupChart,
   fetchMarketGroupDetail,
   fetchMarketGroups,
@@ -387,16 +388,68 @@ function emptyWorkspaceBundle(): WorkspaceBundle {
   };
 }
 
+function isSnapshotChart(chart: WorkspaceBundle['chart']) {
+  if (!chart) return false;
+  return chart.range === 'snapshot' || chart.interval === 'snapshot' || (chart.points || []).length <= 2;
+}
+
+function chooseWorkspaceChart(current: WorkspaceBundle['chart'], patch: WorkspaceBundle['chart']) {
+  const patchPoints = patch?.points || [];
+  if (!patchPoints.length) return current;
+  if (!patch) return current;
+  const currentPoints = current?.points || [];
+  if (!currentPoints.length) return patch;
+  const patchIsSnapshot = isSnapshotChart(patch);
+  const currentIsSnapshot = isSnapshotChart(current);
+  if (patchIsSnapshot && !currentIsSnapshot) return current;
+  if (!patchIsSnapshot && currentIsSnapshot) return patch;
+  if (patch.range !== current?.range && !patchIsSnapshot) return patch;
+  return patchPoints.length >= currentPoints.length ? patch : current;
+}
+
+function lobHasLevels(lob: WorkspaceBundle['lob']) {
+  const yesLevels = (lob?.yes?.bids?.length || 0) + (lob?.yes?.asks?.length || 0);
+  const noLevels = (lob?.no?.bids?.length || 0) + (lob?.no?.asks?.length || 0);
+  return yesLevels + noLevels > 0;
+}
+
+function chooseWorkspaceLob(current: WorkspaceBundle['lob'], patch: WorkspaceBundle['lob']) {
+  if (!patch) return current;
+  if (lobHasLevels(patch)) return patch;
+  if (lobHasLevels(current)) return current;
+  return patch;
+}
+
+function bundleMatchesMarket(bundle: WorkspaceBundle | null, marketId: number) {
+  if (!bundle) return false;
+  const ids = [
+    bundle.market?.id,
+    bundle.identity?.localMarketId,
+    bundle.identity?.marketId,
+    bundle.price?.marketId,
+    bundle.oracle?.localMarketId,
+    bundle.oracle?.marketId,
+    bundle.chart?.localMarketId,
+    bundle.chart?.marketId,
+    bundle.content?.marketId,
+    bundle.lob?.localMarketId,
+    bundle.lob?.marketId,
+  ];
+  return ids.some((id) => Number(id) === Number(marketId));
+}
+
 function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBundle): WorkspaceBundle {
   const current = base || emptyWorkspaceBundle();
   return {
     market: patch.market || current.market,
+    identity: patch.identity || current.identity,
+    diagnostics: patch.diagnostics || current.diagnostics,
     price: patch.price || current.price,
-    chart: patch.chart?.points?.length ? patch.chart : current.chart,
+    chart: chooseWorkspaceChart(current.chart, patch.chart),
     trades: patch.trades?.length ? patch.trades : current.trades,
-    oracle: patch.oracle?.timeline?.length ? patch.oracle : current.oracle,
+    oracle: patch.oracle || current.oracle,
     content: patch.content?.items?.length ? patch.content : current.content,
-    lob: patch.lob || current.lob,
+    lob: chooseWorkspaceLob(current.lob, patch.lob),
   };
 }
 
@@ -1226,6 +1279,29 @@ export function App() {
   }, [selectedMarketGroupChartRange, selectedMarketGroupId]);
 
   useEffect(() => {
+    if (!selectedMarketId || selectedMarketGroupId) return;
+    let cancelled = false;
+    const currentMarketId = selectedMarketId;
+    const chartRange = selectedMarketGroupChartRange;
+
+    fetchMarketChart(currentMarketId, chartRange, undefined, 6500)
+      .then((chartPayload) => {
+        if (cancelled) return;
+        setBundle((previous) => {
+          const base = previous || bundleCacheRef.current.get(currentMarketId) || emptyWorkspaceBundle();
+          const next = mergeWorkspaceBundle(base, { ...emptyWorkspaceBundle(), chart: chartPayload });
+          bundleCacheRef.current.set(currentMarketId, next);
+          return next;
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMarketGroupChartRange, selectedMarketGroupId, selectedMarketId]);
+
+  useEffect(() => {
     if (!selectedMarketId) return;
     const currentMarketId = selectedMarketId;
     const requestSeq = ++bundleRequestSeqRef.current;
@@ -1243,6 +1319,7 @@ export function App() {
 
     function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
+      if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
       setBundle((previous) => {
         const base = previous || bundleCacheRef.current.get(currentMarketId) || initialBundle;
         const next = mergeWorkspaceBundle(base, loadedBundle);

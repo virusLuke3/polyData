@@ -8,6 +8,18 @@ def _empty_book_side() -> Dict[str, Any]:
     return {"bids": [], "asks": [], "bestBid": None, "bestAsk": None, "spread": None}
 
 
+def _book_side_has_levels(side: Dict[str, Any]) -> bool:
+    if not isinstance(side, dict):
+        return False
+    return bool(side.get("bids") or side.get("asks"))
+
+
+def _lob_payload_has_levels(payload: Dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return _book_side_has_levels(payload.get("yes") or {}) or _book_side_has_levels(payload.get("no") or {})
+
+
 def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
     if not token_id:
         return _empty_book_side()
@@ -47,13 +59,17 @@ def _book_side_from_clob(ctx: dict, token_id: str) -> Dict[str, Any]:
 
 
 def _clob_book_fallback(ctx: dict, market: Dict[str, Any], yes_token_id: str, no_token_id: str) -> Dict[str, Any]:
-    return {
+    payload = {
         "marketId": market.get("id"),
+        "localMarketId": market.get("id"),
         "marketTitle": str(market.get("title") or ""),
         "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source": "clob-book",
         "yes": _book_side_from_clob(ctx, yes_token_id),
         "no": _book_side_from_clob(ctx, no_token_id),
     }
+    payload["bookStatus"] = "ok" if _lob_payload_has_levels(payload) else "no-book"
+    return payload
 
 
 def get_runtime_lob_by_token_payload(
@@ -74,6 +90,7 @@ def get_runtime_lob_by_token_payload(
             "marketTitle": str(market_title or ""),
             "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "tokenMode": True,
+            "source": "clob-book",
             "yes": _book_side_from_clob(ctx, yes_token_id),
             "no": _book_side_from_clob(ctx, no_token_id) if no_token_id else _empty_book_side(),
         }
@@ -97,12 +114,23 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     if not yes_token_id or not no_token_id:
         return {"error": "Market is missing token ids", "marketId": market_id, "localMarketId": market_id, "_status": 409}
     try:
-        return ctx["LOB_RUNTIME_MANAGER"].get_market_snapshot(
+        runtime_payload = ctx["LOB_RUNTIME_MANAGER"].get_market_snapshot(
             market_id=market_id,
             yes_token_id=yes_token_id,
             no_token_id=no_token_id,
             market_title=str(market.get("title") or ""),
         )
+        if isinstance(runtime_payload, dict):
+            runtime_payload.setdefault("localMarketId", market_id)
+            runtime_payload.setdefault("source", "runtime-lob")
+            runtime_payload.setdefault("bookStatus", "ok" if _lob_payload_has_levels(runtime_payload) else "no-book")
+        if _lob_payload_has_levels(runtime_payload):
+            return runtime_payload
+        fallback_payload = _clob_book_fallback(ctx, market, yes_token_id, no_token_id)
+        if _lob_payload_has_levels(fallback_payload):
+            fallback_payload["fallbackReason"] = "runtime-empty"
+            return fallback_payload
+        return runtime_payload if isinstance(runtime_payload, dict) else fallback_payload
     except Exception as exc:
         ctx["app"].logger.warning("lob-runtime failed market_id=%s; falling back to CLOB /book: %s", market_id, exc)
         try:

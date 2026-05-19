@@ -562,25 +562,6 @@ function renderDetailChart(chart: ChartPayload | null) {
   );
 }
 
-function fallbackChartFromPrice(marketId: number | null | undefined, price?: string | number | null): ChartPayload | null {
-  const numeric = Number(price);
-  if (!marketId || !Number.isFinite(numeric)) return null;
-  const now = Date.now();
-  const timestamp = (offsetMinutes: number) => new Date(now - offsetMinutes * 60_000).toISOString();
-  return {
-    marketId,
-    localMarketId: marketId,
-    range: 'snapshot',
-    interval: 'snapshot',
-    kind: 'probability',
-    points: [
-      { timestamp: timestamp(30), yesPrice: numeric, noPrice: 1 - numeric },
-      { timestamp: timestamp(15), yesPrice: numeric, noPrice: 1 - numeric },
-      { timestamp: timestamp(0), yesPrice: numeric, noPrice: 1 - numeric },
-    ],
-  };
-}
-
 export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const { renderPanelSlot, ...ctx } = props;
   const focusedMarket = ctx.selectedMarket;
@@ -592,7 +573,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     || (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || null
   );
-  const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
+  const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.identity?.localMarketId ?? ctx.bundle?.identity?.marketId ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
   const selectedTokenId = String(selectedOutcome?.yesTokenId || '').trim();
@@ -631,13 +612,21 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
   const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
   const displayedNoPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice;
-  const chartFallback = fallbackChartFromPrice(ctx.selectedMarketId, displayedYesPrice);
-  const displayChart = (chart?.points || []).length ? chart : chartFallback;
+  const chartStatus = String(chart?.historyStatus || '').toLowerCase();
+  const chartPointCount = chart?.points?.length || 0;
+  const chartRenderable = Boolean(
+    chart
+      && chartPointCount > 2
+      && chartStatus !== 'snapshot'
+      && chartStatus !== 'missing',
+  );
+  const displayChart = chartRenderable ? chart : null;
   const chartPoints = displayChart?.points || [];
   const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
   const showFocusedOutcomeFallback = Boolean(detail && !hasEventHistory && hasFocusedMarketHistory);
-  const noTradesYet = executionAvailable && trades.length === 0 && Number(displayedTrades || 0) === 0;
+  const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
+  const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
@@ -883,14 +872,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         >
           <div className="wm-focus-trades">
             <div className="wm-focus-trades-meta">
-              <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
+              <span>{trades[0]?.timestamp ? `latest ${formatRelative(trades[0].timestamp)}` : (hasServingTradeActivity ? 'summary only' : noTradesYet ? 'no trades yet' : 'waiting for trades')}</span>
               <strong>{trades[0] && tradeNotional(trades[0]) ? `$${formatCompact(tradeNotional(trades[0]))}` : '--'}</strong>
             </div>
             {!executionAvailable && detail
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
               ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade))
-              : emptyState(noTradesYet ? 'No orderfilled rows exist for this outcome yet.' : 'No local orderfilled rows are available for this market.')}
+              : emptyState(hasServingTradeActivity ? 'Volume is available, but raw OrderFilled rows are not indexed locally yet.' : noTradesYet ? 'No orderfilled rows exist for this outcome yet.' : 'No local orderfilled rows are available for this market.')}
           </div>
         </Panel>
       ))}
