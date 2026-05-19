@@ -486,21 +486,23 @@ def _normalize_group(ctx: dict, event: Dict[str, Any], lookups: Tuple[Dict[str, 
         label = str(outcome.get("label") or "").lower()
         score = 0.0
         if outcome.get("marketId") is not None:
-            score += 100.0
+            score += 12.0
+        if outcome.get("yesTokenId"):
+            score += 8.0
         if volume > 0:
             score += min(40.0, volume ** 0.25)
         if trades > 0:
             score += min(20.0, trades)
         if price is not None:
             if 0.02 < price < 0.98:
-                score += 15.0
+                score += 40.0
             if price <= 0.01 or price >= 0.99:
-                score -= 35.0
+                score -= 60.0
         if "completed match" in label or label.strip() in {"completed", "match completed"}:
-            score -= 25.0
+            score -= 30.0
         return (score, volume, trades)
 
-    default_candidates = [outcome for outcome in outcomes if outcome.get("marketId") is not None]
+    default_candidates = [outcome for outcome in outcomes if outcome.get("marketId") is not None or outcome.get("yesTokenId")]
     default_outcome = max(default_candidates, key=_default_outcome_score, default=None)
     if default_outcome is None and top_outcomes:
         default_outcome = top_outcomes[0]
@@ -658,7 +660,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 5}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 6}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         fetch_target = max(100, min(1000, (page * page_size * 3)))
@@ -761,7 +763,7 @@ def get_market_group_detail_payload(ctx: dict, event_id: str) -> Optional[Dict[s
     identifier = str(event_id or "").strip()
     if not identifier:
         return None
-    cache_key = json.dumps({"eventId": identifier, "v": 3}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "v": 4}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         try:
@@ -804,7 +806,7 @@ def get_market_group_chart_payload(ctx: dict, event_id: str, *, range_name: str 
     normalized_range = str(range_name or "1d").strip().lower()
     if normalized_range not in CHART_RANGE_INTERVALS:
         normalized_range = "1d"
-    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 5}, sort_keys=True)
+    cache_key = json.dumps({"eventId": identifier, "range": normalized_range, "v": 6}, sort_keys=True)
 
     def _builder() -> Optional[Dict[str, Any]]:
         detail = get_market_group_detail_payload(ctx, identifier)
