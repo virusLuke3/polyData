@@ -6,6 +6,7 @@ production services on one machine.
 ## Included units
 
 - `polydata-api.service`
+- `polydata-db-reverse-tunnel.service` (installed on the local DB host, not GCP)
 - `polydata-market-sync.service`
 - `polydata-trade-sync.service`
 - `polydata-oracle-sync.service`
@@ -69,6 +70,15 @@ chmod 600 ~/.config/polydata/polydata.env
 Set `POLYDATA_PYTHON_BIN` in `~/.config/polydata/polydata.env` if your services
 should run from a conda environment or venv.
 
+For the local machine that owns PostgreSQL, set the tunnel target before
+installing `polydata-db-reverse-tunnel.service`:
+
+```bash
+POLYDATA_GCP_SSH_TARGET=jhuaiyu3@34.143.254.155
+POLYDATA_LOCAL_POSTGRES_PORT=45432
+POLYDATA_REMOTE_POSTGRES_PORT=45432
+```
+
 2. Copy the unit files:
 
 ```bash
@@ -96,6 +106,7 @@ loginctl enable-linger "$USER"
 ```bash
 systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync polydata-event-market-serving polydata-new-market-signal polydata-geo-sanctions-shock polydata-jin10-seed polydata-f1-seed polydata-nba-seed polydata-market-group-seed polydata-crypto-funding-seed polydata-finance-external-sources-seed polydata-inflation-nowcast-seed polydata-alpha-signal-seed polydata-whale-trades-seed polydata-suspicious-trades-seed polydata-bootstrap-seed
 journalctl --user-unit polydata-api -f
+journalctl --user-unit polydata-db-reverse-tunnel -f
 journalctl --user-unit polydata-market-sync -f
 journalctl --user-unit polydata-new-market-signal -f
 journalctl --user-unit polydata-event-market-serving -f

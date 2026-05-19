@@ -310,14 +310,19 @@ def _local_market_lookup(
     by_gamma: Dict[str, Dict[str, Any]] = {}
     by_slug: Dict[str, Dict[str, Any]] = {}
     by_yes_token: Dict[str, Dict[str, Any]] = {}
-    for row in _query_market_rows(ctx, "m.condition_id", condition_ids):
-        by_condition.setdefault(str(row.get("condition_key") or ""), row)
-    for row in _query_market_rows(ctx, "m.gamma_market_id", gamma_market_ids):
-        by_gamma.setdefault(str(row.get("gamma_market_id") or ""), row)
-    for row in _query_market_rows(ctx, "m.slug", slugs):
-        by_slug.setdefault(str(row.get("slug_key") or ""), row)
-    for row in _query_market_rows(ctx, "m.yes_token_id", yes_token_ids):
-        by_yes_token.setdefault(str(row.get("yes_token_id") or ""), row)
+    try:
+        for row in _query_market_rows(ctx, "m.condition_id", condition_ids):
+            by_condition.setdefault(str(row.get("condition_key") or ""), row)
+        for row in _query_market_rows(ctx, "m.gamma_market_id", gamma_market_ids):
+            by_gamma.setdefault(str(row.get("gamma_market_id") or ""), row)
+        for row in _query_market_rows(ctx, "m.slug", slugs):
+            by_slug.setdefault(str(row.get("slug_key") or ""), row)
+        for row in _query_market_rows(ctx, "m.yes_token_id", yes_token_ids):
+            by_yes_token.setdefault(str(row.get("yes_token_id") or ""), row)
+    except Exception:
+        logger = getattr(ctx.get("app"), "logger", None)
+        if logger:
+            logger.exception("market-group local lookup failed; falling back to Gamma-only groups")
     return by_condition, by_gamma, by_slug, by_yes_token
 
 
@@ -918,7 +923,7 @@ def get_market_groups_payload(
 
         visible = groups[offset: offset + page_size]
         has_more = len(groups) > offset + page_size or len(candidate_events) > len(lookup_events)
-        return {
+        payload = {
             "items": visible,
             "pagination": {
                 "page": page,
@@ -929,6 +934,10 @@ def get_market_groups_payload(
             },
             "generatedAt": ctx["utc_now_iso"](),
         }
+        if not any((outcome.get("localMarketId") or outcome.get("marketId")) for group in visible for outcome in group.get("outcomes") or []):
+            payload["status"] = "degraded"
+            payload["sourceMode"] = "gamma-fallback"
+        return payload
 
     if "get_snapshot_payload" in ctx:
         return ctx["get_snapshot_payload"](
