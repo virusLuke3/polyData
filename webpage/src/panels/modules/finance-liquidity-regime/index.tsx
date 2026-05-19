@@ -1,10 +1,10 @@
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFinanceLiquidityRegime } from '@/services/api';
-import type { RuntimeFinanceLiquidityRegimePayload, RuntimeFinanceLiquidityRow } from '@/types';
+import type { RuntimeFinanceLiquidityComponent, RuntimeFinanceLiquidityRegimePayload, RuntimeFinanceLiquidityRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, FinanceSignalRow, moneyLabel, numberLabel, panelTone, sortCycle } from '../finance-common';
+import { badgeLabel, MiniBar, MiniSparkline, moneyLabel, numberLabel, numericValue, panelTone, sortCycle } from '../finance-common';
 
 type LiquiditySort = 'PMKT' | 'COT' | 'FLOW' | 'RISK';
 const SORTS: LiquiditySort[] = ['PMKT', 'COT', 'FLOW', 'RISK'];
@@ -19,32 +19,36 @@ function sortItems(items: RuntimeFinanceLiquidityRow[], sort: LiquiditySort) {
 
 function LiquidityRow({ item }: { item: RuntimeFinanceLiquidityRow }) {
   return (
-    <FinanceSignalRow
-      tone={item.tone || 'neutral'}
-      code={item.source || 'PMKT'}
-      meta={(
-        <>
-          <span>{item.source || 'PMKT'}</span>
-          <span>{item.signal || 'WATCH'}</span>
-          <div className="wm-finance-chip-row">
-            <span className={`wm-finance-chip ${item.tone || 'neutral'}`}>{String(item.tone || 'neutral').toUpperCase()}</span>
-          </div>
-        </>
-      )}
-      title={item.label || 'Liquidity row'}
-      stats={[
-        { label: 'FLOW', value: moneyLabel(item.value), tone: item.tone || 'neutral' },
-        { label: 'PMKT', value: item.linkedMarket ? `${numberLabel(item.linkedMarket.probability, 0)}%` : 'NO LINK', tone: item.linkedMarket ? 'ok' : 'neutral' },
-        { label: 'VOL', value: item.linkedMarket ? moneyLabel(item.linkedMarket.volume24h) : '--' },
-      ]}
-    />
+    <div className={`wm-finance-liquidity-line ${item.tone || 'neutral'}`}>
+      <MiniSparkline seed={item.id || item.label} tone={item.tone || 'neutral'} bias={numericValue(item.value) > 0 ? 0.8 : -0.3} />
+      <div className="wm-finance-line-main">
+        <span>{item.source || 'PMKT'} · {item.signal || 'WATCH'}</span>
+        <strong>{item.label || 'Liquidity row'}</strong>
+        <MiniBar value={item.linkedMarket?.probability ? Number(item.linkedMarket.probability) * 100 : item.value} max={100} tone={item.tone || 'neutral'} />
+      </div>
+      <div className="wm-finance-line-value">
+        <strong>{moneyLabel(item.value)}</strong>
+        <span>{item.linkedMarket ? `PMKT ${numberLabel(item.linkedMarket.probability, 0)}%` : 'NO LINK'}</span>
+      </div>
+    </div>
   );
 }
 
-function componentWidth(value?: string | number | null) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '8%';
-  return `${Math.max(6, Math.min(100, Math.abs(numeric)))}%`;
+function ComponentRow({ component }: { component: RuntimeFinanceLiquidityComponent }) {
+  const tone = component.tone || 'neutral';
+  return (
+    <div className={`wm-finance-cot-row ${tone}`}>
+      <div>
+        <strong>{component.label || component.key}</strong>
+        <span>{component.detail || component.key}</span>
+      </div>
+      <MiniSparkline seed={component.key || component.label} tone={tone} bias={numericValue(component.value) > 0 ? 0.55 : -0.15} />
+      <div>
+        <b>{component.value === null || component.value === undefined ? 'PENDING' : numberLabel(component.value)}</b>
+        <MiniBar value={component.value} max={100} tone={tone} />
+      </div>
+    </div>
+  );
 }
 
 function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiquidityRegimePayload | null }) {
@@ -76,32 +80,19 @@ function FinanceLiquidityRegimePanel({ payload }: { payload?: RuntimeFinanceLiqu
         <span><strong>{numberLabel(summary?.alertCount || 0, 0)}</strong> alerts</span>
         <span><strong>{numberLabel(items.length, 0)}</strong> rows</span>
       </div>
-      <FinanceSignalRow
-        className="is-lead"
-        tone={Number(summary?.regimeScore) >= 70 ? 'ok' : Number(summary?.regimeScore) >= 52 ? 'watch' : 'bad'}
-        code="RISK"
-        meta={(
-          <>
-            <span>{summary?.signal || 'LIQUIDITY WARMING'}</span>
-            <span>RISK BACKDROP</span>
-          </>
-        )}
-        title={summary?.regimeLabel || 'FRAGILE'}
-        stats={[
-          { label: 'SCORE', value: numberLabel(summary?.regimeScore, 0) },
-          { label: 'FLOW', value: moneyLabel(pmktVolume) },
-          { label: 'ALERTS', value: numberLabel(summary?.alertCount || 0, 0), tone: summary?.alertCount ? 'watch' : 'neutral' },
-          { label: 'MODE', value: sort },
-        ]}
-      />
-      <div className="wm-finance-factor-list">
-        {(payload?.components || []).slice(0, 5).map((component) => (
-          <div key={component.key || component.label} className={`wm-finance-factor-row ${component.tone || 'neutral'}`} style={{ '--finance-fill': componentWidth(component.value) }}>
-            <span><strong>{component.label || component.key}</strong><em>{component.detail || component.key}</em></span>
-            <b>{component.value === null || component.value === undefined ? 'PENDING' : numberLabel(component.value)}</b>
-            <i><small /></i>
-          </div>
-        ))}
+      <div className="wm-finance-regime-head">
+        <div>
+          <span>{summary?.signal || 'LIQUIDITY WARMING'}</span>
+          <strong>{summary?.regimeLabel || 'FRAGILE'}</strong>
+        </div>
+        <MiniSparkline seed="liquidity-regime" tone={Number(summary?.regimeScore) >= 70 ? 'ok' : 'watch'} bias={Number(summary?.regimeScore) >= 70 ? 0.8 : 0.1} />
+        <div>
+          <b>{numberLabel(summary?.regimeScore, 0)}</b>
+          <span>{moneyLabel(pmktVolume)}</span>
+        </div>
+      </div>
+      <div className="wm-finance-cot-list">
+        {(payload?.components || []).slice(0, 5).map((component) => <ComponentRow key={component.key || component.label} component={component} />)}
       </div>
       <div className="wm-finance-list">
         {items.length ? items.map((item) => <LiquidityRow key={item.id || item.label} item={item} />) : (

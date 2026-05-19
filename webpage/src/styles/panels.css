@@ -1195,6 +1195,505 @@
   line-height: 1;
 }
 
+/* Finance v4: compact market-data widgets with charts, bars, and right-aligned values. */
+.wm-finance-spark {
+  width: 76px;
+  height: 34px;
+  display: block;
+  overflow: visible;
+}
+
+.wm-finance-spark polyline {
+  fill: none;
+  stroke: #8b96a0;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wm-finance-spark.ok polyline {
+  stroke: #30f27f;
+}
+
+.wm-finance-spark.watch polyline {
+  stroke: #f5b334;
+}
+
+.wm-finance-spark.bad polyline {
+  stroke: #ff4f57;
+}
+
+.wm-finance-mini-bar {
+  width: 100%;
+  height: 4px;
+  display: block;
+  margin-top: 5px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.wm-finance-mini-bar i {
+  display: block;
+  height: 100%;
+  background: #8c969f;
+}
+
+.wm-finance-mini-bar.ok i {
+  background: #30f27f;
+}
+
+.wm-finance-mini-bar.watch i {
+  background: #f5b334;
+}
+
+.wm-finance-mini-bar.bad i {
+  background: #ff4f57;
+}
+
+.wm-finance-quote-list,
+.wm-finance-cot-list {
+  margin: 0 10px 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wm-finance-quote-row,
+.wm-finance-market-line,
+.wm-finance-equity-line,
+.wm-finance-perp-line,
+.wm-finance-liquidity-line,
+.wm-finance-cot-row {
+  position: relative;
+  min-width: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background: rgba(255, 255, 255, 0.006);
+}
+
+.wm-finance-market-head,
+.wm-finance-watch-head,
+.wm-finance-cot-head,
+.wm-finance-regime-head {
+  margin: 8px 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(80, 112, 143, 0.28);
+  background:
+    linear-gradient(90deg, rgba(45, 255, 132, 0.07), transparent 62%),
+    rgba(8, 13, 15, 0.74);
+}
+
+.wm-finance-market-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  border-left: 4px solid #30f27f;
+}
+
+.wm-finance-market-head > span,
+.wm-finance-market-head em,
+.wm-finance-watch-head span,
+.wm-finance-cot-head span,
+.wm-finance-regime-head span {
+  color: #878f89;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.wm-finance-market-head > strong {
+  display: -webkit-box;
+  color: #f0f3ef;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.16;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-finance-market-head > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.wm-finance-market-head b,
+.wm-finance-regime-head b {
+  color: #eff4ef;
+  font-style: normal;
+}
+
+.wm-finance-market-head b.ok,
+.wm-finance-line-value .ok,
+.wm-finance-equity-price .ok {
+  color: #30f27f;
+}
+
+.wm-finance-market-head b.bad,
+.wm-finance-line-value .bad,
+.wm-finance-equity-price .bad {
+  color: #ff4f57;
+}
+
+.wm-finance-quote-row {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.wm-finance-quote-row.compact {
+  min-height: 34px;
+}
+
+.wm-finance-quote-main {
+  min-width: 0;
+}
+
+.wm-finance-quote-main strong {
+  display: block;
+  color: #e8ece8;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-quote-main span,
+.wm-finance-line-main span,
+.wm-finance-perp-meta span,
+.wm-finance-equity-tags span {
+  display: block;
+  color: #838c86;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.wm-finance-quote-value {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.wm-finance-quote-value strong {
+  color: #dfe5df;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wm-finance-market-line {
+  min-height: 63px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 62px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px 7px 0;
+}
+
+.wm-finance-market-line::before,
+.wm-finance-perp-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: #7f91a2;
+}
+
+.wm-finance-market-line.ok::before,
+.wm-finance-perp-line.ok::before,
+.wm-finance-equity-line.ok::before,
+.wm-finance-liquidity-line.ok::before {
+  background: #30f27f;
+}
+
+.wm-finance-market-line.bad::before,
+.wm-finance-perp-line.bad::before,
+.wm-finance-equity-line.bad::before,
+.wm-finance-liquidity-line.bad::before {
+  background: #ff4f57;
+}
+
+.wm-finance-market-line.watch::before,
+.wm-finance-perp-line.watch::before,
+.wm-finance-liquidity-line.watch::before {
+  background: #f5b334;
+}
+
+.wm-finance-line-code {
+  min-width: 0;
+  padding-left: 12px;
+  color: #9cc8e9;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-finance-line-main {
+  min-width: 0;
+}
+
+.wm-finance-line-main strong {
+  display: -webkit-box;
+  color: #f0f3ef;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.16;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-finance-line-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.wm-finance-line-value {
+  min-width: 0;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+  color: #dfe5df;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wm-finance-line-value strong {
+  color: #eef2ee;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.wm-finance-line-value span,
+.wm-finance-line-value em {
+  color: #8a938c;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.05;
+}
+
+.wm-finance-equity-line {
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 10px 12px 9px 14px;
+}
+
+.wm-finance-equity-line::before,
+.wm-finance-liquidity-line::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  background: #7f91a2;
+}
+
+.wm-finance-equity-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-finance-equity-price strong {
+  color: #eef2ee;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.wm-finance-equity-price em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.wm-finance-equity-event,
+.wm-finance-equity-tags {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.wm-finance-equity-event b {
+  display: block;
+  margin-top: 3px;
+  color: #dfe5df;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-equity-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wm-finance-watch-head {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.wm-finance-watch-head strong,
+.wm-finance-cot-head strong,
+.wm-finance-regime-head strong {
+  display: block;
+  color: #eef2ee;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.12;
+}
+
+.wm-finance-watch-head > div {
+  min-width: 0;
+}
+
+.wm-finance-watch-head > div:last-child {
+  text-align: right;
+}
+
+.wm-finance-watch-head em {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.wm-finance-perp-line {
+  min-height: 82px;
+  display: grid;
+  grid-template-columns: 38px 76px minmax(0, 1fr) 62px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 9px 8px 0;
+}
+
+.wm-finance-perp-meta {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-left: 0;
+}
+
+.wm-finance-cot-head,
+.wm-finance-regime-head {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.wm-finance-cot-head > div,
+.wm-finance-regime-head > div {
+  min-width: 0;
+}
+
+.wm-finance-cot-head > div:last-child,
+.wm-finance-regime-head > div:last-child {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  font-family: var(--font-mono);
+}
+
+.wm-finance-liquidity-line {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 72px;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 10px 8px 14px;
+}
+
+.wm-finance-cot-row {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 62px;
+  gap: 9px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.wm-finance-cot-row strong {
+  display: block;
+  color: #e7ece7;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.12;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-cot-row span {
+  display: block;
+  margin-top: 4px;
+  color: #858e88;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.wm-finance-cot-row b {
+  display: block;
+  color: #eef2ee;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: right;
+}
+
+.wm-finance-brief-line {
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.wm-finance-brief-line strong {
+  font-size: 11px;
+}
+
 .wm-panel-body {
   padding: 8px;
   min-height: 0;

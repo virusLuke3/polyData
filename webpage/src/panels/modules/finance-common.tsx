@@ -28,6 +28,11 @@ export function signedPercentLabel(value?: string | number | null, digits = 1) {
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(digits)}%`;
 }
 
+export function numericValue(value?: string | number | null, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 export function dateLabel(value?: string | null) {
   if (!value) return 'OPEN';
   const relative = formatRelative(value);
@@ -196,5 +201,62 @@ export function FinanceSignalRow({
         {children}
       </div>
     </article>
+  );
+}
+
+function hashSeed(seed?: string | number | null) {
+  const text = String(seed || 'finance');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) % 9973;
+  }
+  return hash || 137;
+}
+
+function sparkPoints(seed?: string | number | null, bias = 0, count = 12) {
+  const base = hashSeed(seed);
+  const points: number[] = [];
+  let value = 48 + (base % 17) - 8;
+  for (let index = 0; index < count; index += 1) {
+    const wave = Math.sin((base + index * 13) * 0.33) * 8;
+    const pulse = ((base + index * 19) % 11) - 5;
+    value += bias * 5 + wave * 0.22 + pulse * 0.38;
+    points.push(Math.max(12, Math.min(88, value)));
+  }
+  return points;
+}
+
+export function MiniSparkline({
+  seed,
+  tone = 'neutral',
+  bias = 0,
+}: {
+  seed?: string | number | null;
+  tone?: string;
+  bias?: number;
+}) {
+  const values = sparkPoints(seed, bias);
+  const points = values.map((value, index) => `${(index / (values.length - 1)) * 100},${100 - value}`).join(' ');
+  return (
+    <svg className={`wm-finance-spark ${tone}`} viewBox="0 0 100 44" aria-hidden="true" focusable="false">
+      <polyline points={points} />
+    </svg>
+  );
+}
+
+export function MiniBar({
+  value,
+  tone = 'neutral',
+  max = 100,
+}: {
+  value?: string | number | null;
+  tone?: string;
+  max?: number;
+}) {
+  const width = `${Math.max(4, Math.min(100, (Math.abs(numericValue(value)) / max) * 100))}%`;
+  return (
+    <span className={`wm-finance-mini-bar ${tone}`}>
+      <i style={{ width }} />
+    </span>
   );
 }

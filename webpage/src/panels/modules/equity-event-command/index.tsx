@@ -4,7 +4,7 @@ import { fetchRuntimeEquityEventCommand } from '@/services/api';
 import type { RuntimeEquityEventCommandPayload, RuntimeEquityEventRow } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { badgeLabel, CoverageBadges, dateLabel, FinanceSignalRow, financeTone, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
+import { badgeLabel, CoverageBadges, dateLabel, financeTone, MiniBar, moneyLabel, panelTone, percentLabel, signedPercentLabel, sortCycle } from '../finance-common';
 
 type EquitySort = 'PMKT GAP' | 'NEXT EVENT' | 'STOCK MOVE' | 'VOLUME';
 const SORTS: EquitySort[] = ['PMKT GAP', 'NEXT EVENT', 'STOCK MOVE', 'VOLUME'];
@@ -22,26 +22,26 @@ function EventRow({ item }: { item: RuntimeEquityEventRow }) {
   const linked = (item.linkedMarkets || [])[0];
   const tone = financeTone(item.change1d);
   return (
-    <FinanceSignalRow
-      tone={tone}
-      code={item.symbol || 'EQ'}
-      meta={(
-        <>
-          <span>{item.eventType || 'LINKED'}</span>
-          <span>{dateLabel(item.nextEventAt)}</span>
-          <div className="wm-finance-chip-row">
-            {(item.badges || []).slice(0, 3).map((badge) => <span key={badge} className="wm-finance-chip watch">{badge}</span>)}
-          </div>
-        </>
-      )}
-      title={<>{item.company || item.symbol || 'Equity'} / {item.nextEvent || 'market watch'}</>}
-      stats={[
-        { label: 'QUOTE', value: moneyLabel(item.price), tone },
-        { label: 'MOVE', value: signedPercentLabel(item.change1d), tone },
-        { label: 'PMKT', value: percentLabel(linked?.probability), tone: linked ? 'ok' : 'neutral' },
-        { label: 'VOL', value: moneyLabel(linked?.volume24h || item.volume24h) },
-      ]}
-    />
+    <div className={`wm-finance-equity-line ${tone}`}>
+      <div className="wm-finance-quote-main">
+        <strong>{item.company || item.symbol || 'Equity'}</strong>
+        <span>{item.symbol || '--'}</span>
+      </div>
+      <div className="wm-finance-equity-price">
+        <strong>{moneyLabel(item.price)}</strong>
+        <em className={tone}>{signedPercentLabel(item.change1d)}</em>
+      </div>
+      <div className="wm-finance-equity-event">
+        <span>{item.eventType || 'LINKED'} · {dateLabel(item.nextEventAt)}</span>
+        <b>{item.nextEvent || linked?.title || 'market watch'}</b>
+        <MiniBar value={Number(linked?.probability) * 100} tone={linked ? 'ok' : 'neutral'} />
+      </div>
+      <div className="wm-finance-equity-tags">
+        <CoverageBadges items={linked?.coverage || item.badges} max={4} />
+        <span>PMKT {percentLabel(linked?.probability)}</span>
+        <span>VOL {moneyLabel(linked?.volume24h || item.volume24h)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -74,24 +74,16 @@ function EquityEventCommandPanel({ payload }: { payload?: RuntimeEquityEventComm
         <span><strong>quote</strong> mode</span>
       </div>
       {top ? (
-        <FinanceSignalRow
-          className="is-lead"
-          tone={financeTone(top.change1d)}
-          code={top.symbol || 'EQ'}
-          meta={(
-            <>
-              <span>Command row</span>
-              <span>{dateLabel(top.nextEventAt)}</span>
-              <CoverageBadges items={(top.linkedMarkets || [])[0]?.coverage || top.badges} max={4} />
-            </>
-          )}
-          title={<>{top.company || top.symbol} / {top.nextEvent || 'linked market'}</>}
-          stats={[
-            { label: 'QUOTE', value: moneyLabel(top.price), tone: financeTone(top.change1d) },
-            { label: 'MOVE', value: signedPercentLabel(top.change1d), tone: financeTone(top.change1d) },
-            { label: 'PMKT', value: percentLabel((top.linkedMarkets || [])[0]?.probability), tone: 'ok' },
-          ]}
-        />
+        <div className="wm-finance-watch-head">
+          <div>
+            <strong>{top.company || top.symbol}</strong>
+            <span>{top.symbol || '--'} · {top.nextEvent || 'linked market'}</span>
+          </div>
+          <div>
+            <strong>{moneyLabel(top.price)}</strong>
+            <em className={financeTone(top.change1d)}>{signedPercentLabel(top.change1d)}</em>
+          </div>
+        </div>
       ) : null}
       <div className="wm-finance-list">
         {items.length ? items.map((item) => <EventRow key={item.symbol || item.company} item={item} />) : (
