@@ -45,6 +45,18 @@ WEATHER_FAMILY_PRIORITY = {
     "global_climate": 7,
     "weather_binary": 8,
 }
+HURRICANE_SPORTS_FALSE_POSITIVE_TERMS = (
+    "carolina hurricanes",
+    "hurricanes vs",
+    "vs hurricanes",
+    "hurricanes win",
+    "will hurricanes win",
+    "nhl",
+    "playoffs",
+    "stanley cup",
+    "eastern conference",
+    "super rugby",
+)
 GAMMA_QUERY_TIMEOUT_SECONDS = 6
 GAMMA_QUERIES_PER_CITY = 2
 GAMMA_QUERY_PAUSE_SECONDS = 0.03
@@ -176,6 +188,8 @@ def _matches_high_temperature_market(text: str) -> bool:
 
 def _market_family(text: str) -> str:
     normalized = str(text or "").lower()
+    if "hurricane" in normalized and any(term in normalized for term in HURRICANE_SPORTS_FALSE_POSITIVE_TERMS):
+        return "other"
     if "highest-temperature" in normalized or "highest temperature" in normalized or "high temperature" in normalized:
         return "highest_temperature"
     if "lowest-temperature" in normalized or "lowest temperature" in normalized or "low temperature" in normalized:

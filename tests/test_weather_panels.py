@@ -327,6 +327,72 @@ def test_global_weather_map_indexes_low_temperature_and_precipitation(monkeypatc
     assert precip["topBin"]["midPriceYes"] == 0.7
 
 
+def test_global_weather_map_filters_hurricanes_sports_false_positives(monkeypatch):
+    monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bookStatus": "no-book"})
+    db_rows = [
+        {
+            "market_id": 701,
+            "slug": "will-carolina-hurricanes-win-the-2026-nhl-stanley-cup",
+            "title": "Will the Carolina Hurricanes win the 2026 NHL Stanley Cup?",
+            "description": "",
+            "end_date": "2026-06-30T00:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "sports-yes",
+            "no_token_id": "sports-no",
+            "clob_token_ids": '["sports-yes", "sports-no"]',
+            "latest_yes_price": 0.12,
+            "latest_trade_price": None,
+            "serving_latest_price": None,
+            "latest_trade_at": None,
+            "serving_latest_trade_at": None,
+            "is_trading_closed": 0,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+        {
+            "market_id": 702,
+            "slug": "will-a-hurricane-form-by-may-31",
+            "title": "Will a hurricane form by May 31?",
+            "description": "",
+            "end_date": "2026-05-31T00:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "storm-yes",
+            "no_token_id": "storm-no",
+            "clob_token_ids": '["storm-yes", "storm-no"]',
+            "latest_yes_price": 0.44,
+            "latest_trade_price": None,
+            "serving_latest_price": None,
+            "latest_trade_at": None,
+            "serving_latest_trade_at": None,
+            "is_trading_closed": 0,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+    ]
+
+    def http_json_get(url, *, params=None, **kwargs):
+        if "open.example" in url:
+            return [
+                {
+                    "current": {"temperature_2m": 22.0, "weather_code": 2, "time": "2026-05-12T12:00"},
+                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [22.0]},
+                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [27.0], "temperature_2m_min": [16.0]},
+                }
+            ]
+        if "aviation.example" in url:
+            return []
+        return []
+
+    ctx = make_ctx(http_json_get=http_json_get)
+    ctx["DB_PATH"] = "fake"
+    ctx["get_connection"] = lambda *args, **kwargs: FakeConnection(db_rows)
+    payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
+
+    assert payload["summary"]["marketFamilyCounts"] == {"hurricane": 1}
+    assert payload["unmappedMarkets"][0]["title"] == "Will a hurricane form by May 31?"
+    assert all("Carolina Hurricanes" not in str(item) for item in payload["unmappedMarkets"])
+
+
 def test_global_weather_map_prefers_clob_book_over_db_price(monkeypatch):
     calls = {"clob": 0}
 
