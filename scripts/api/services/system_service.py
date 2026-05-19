@@ -82,6 +82,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 30,
     },
     {
+        "panelId": "finance-external-sources",
+        "namespace": "seed-meta:finance",
+        "cacheKey": "external-sources",
+        "serviceName": "polydata-finance-external-sources-seed.service",
+        "intervalEnv": "POLYDATA_FINANCE_EXTERNAL_SOURCES_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 900,
+    },
+    {
         "panelId": "esports-intel",
         "namespace": "seed-meta:esports",
         "cacheKey": "esports-intel",

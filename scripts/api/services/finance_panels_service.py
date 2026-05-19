@@ -5,6 +5,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from . import finance_external_sources_service
+
 
 DEFAULT_MARKET_ATLAS_LIMIT = 16
 DEFAULT_EQUITY_EVENT_LIMIT = 12
@@ -183,6 +185,10 @@ def _cached(ctx: dict, namespace: str, cache_key: str, builder, ttl_seconds: int
     return builder()
 
 
+def _external_sources(ctx: dict) -> Dict[str, Any]:
+    return finance_external_sources_service.read_finance_external_sources(ctx)
+
+
 def get_finance_market_atlas_snapshot(ctx: dict, limit: int = DEFAULT_MARKET_ATLAS_LIMIT) -> Dict[str, Any]:
     limit = max(4, min(40, int(limit or DEFAULT_MARKET_ATLAS_LIMIT)))
 
@@ -349,6 +355,7 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
     limit = max(4, min(24, int(limit or DEFAULT_TRADFI_PERP_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
+        external = _external_sources(ctx)
         equity_payload = get_equity_event_command_snapshot(ctx, limit=limit)
         rows: List[Dict[str, Any]] = []
         try:
@@ -356,6 +363,34 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
         except Exception:
             funding_payload = {}
         crypto_assets = [asset for asset in (funding_payload or {}).get("assets", []) if isinstance(asset, dict)]
+        seeded_perps = [
+            item
+            for item in (((external.get("tradfiPerps") or {}).get("items")) or [])
+            if isinstance(item, dict)
+        ]
+
+        for item in seeded_perps:
+            symbol = str(item.get("symbol") or "").upper()
+            if symbol not in TRADFI_PERP_SYMBOLS:
+                continue
+            funding = _safe_float(item.get("funding"))
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "display": item.get("display") or f"{symbol}-PERP",
+                    "assetClass": item.get("assetClass") or ("crypto" if symbol in {"BTC", "ETH", "SOL"} else "stock"),
+                    "markPx": item.get("markPx"),
+                    "oraclePx": item.get("oraclePx"),
+                    "spotPx": item.get("spotPx"),
+                    "basisBps": item.get("basisBps"),
+                    "funding": funding,
+                    "openInterest": item.get("openInterest"),
+                    "dayNotional": item.get("dayNotional"),
+                    "compositeScore": abs(funding or 0.0) * 1000 + min((_safe_float(item.get("dayNotional")) or 0.0) / 100000000.0, 5.0),
+                    "alerts": list(dict.fromkeys((item.get("alerts") or []) + ["SEEDED"])),
+                    "linkedMarkets": [],
+                }
+            )
 
         for item in (equity_payload.get("items") or [])[:limit]:
             symbol = str(item.get("symbol") or "").upper()
@@ -411,10 +446,16 @@ def get_onchain_tradfi_perp_radar_snapshot(ctx: dict, limit: int = DEFAULT_TRADF
             seen.add(symbol)
             unique_rows.append(row)
         top = unique_rows[0] if unique_rows else None
+        external_sources = external.get("sources") if isinstance(external.get("sources"), dict) else {}
         return {
             "generatedAt": _now(ctx),
             "status": "ok" if unique_rows else "warming",
-            "sources": {"hyperliquid": "funding" if crypto_assets else "warming", "tradexyz": "not-seeded", "quotes": "ok" if equity_payload.get("items") else "warming", "pmkt": "linked"},
+            "sources": {
+                "hyperliquid": external_sources.get("hyperliquid") or ("funding" if crypto_assets else "warming"),
+                "tradexyz": external_sources.get("tradexyz") or ("proxy" if seeded_perps else "warming"),
+                "quotes": "ok" if equity_payload.get("items") else "warming",
+                "pmkt": "linked",
+            },
             "summary": {
                 "assetCount": len(unique_rows),
                 "alertCount": sum(len(item.get("alerts") or []) for item in unique_rows),
@@ -431,13 +472,31 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
     limit = max(4, min(24, int(limit or DEFAULT_LIQUIDITY_REGIME_LIMIT)))
 
     def _builder() -> Dict[str, Any]:
+        external = _external_sources(ctx)
         atlas = get_finance_market_atlas_snapshot(ctx, limit=max(limit, 16))
         perp = get_onchain_tradfi_perp_radar_snapshot(ctx, limit=limit)
         markets = [item for item in (atlas.get("items") or []) if isinstance(item, dict)]
+        cot_items = [item for item in (((external.get("cot") or {}).get("items")) or []) if isinstance(item, dict)]
+        etf_items = [item for item in (((external.get("etfFlow") or {}).get("items")) or []) if isinstance(item, dict)]
+        stablecoin_items = [item for item in (((external.get("stablecoin") or {}).get("items")) or []) if isinstance(item, dict)]
         volume = sum(_safe_float(item.get("volume24h")) or 0.0 for item in markets)
         flow_rows = [item for item in markets if (_safe_float(item.get("volume24h")) or 0.0) > 25000]
         perp_alerts = sum(len(item.get("alerts") or []) for item in (perp.get("items") or []))
-        regime_score = min(100, int(35 + min(volume / 50000.0, 35) + len(flow_rows) * 3 + min(perp_alerts * 2, 12)))
+        etf_net_flow = _safe_float((external.get("etfFlow") or {}).get("netFlowProxyUsd"))
+        stablecoin_supply_change = _safe_float((external.get("stablecoin") or {}).get("supplyChange7dPct"))
+        cot_avg_net = None
+        cot_nets = [_safe_float(item.get("netPctOpenInterest")) for item in cot_items]
+        cot_nets = [item for item in cot_nets if item is not None]
+        if cot_nets:
+            cot_avg_net = sum(cot_nets) / len(cot_nets)
+        external_score = 0
+        if etf_net_flow is not None:
+            external_score += 4 if etf_net_flow > 0 else -4
+        if stablecoin_supply_change is not None:
+            external_score += max(-5, min(5, stablecoin_supply_change * 2))
+        if cot_avg_net is not None:
+            external_score += max(-5, min(5, cot_avg_net / 5))
+        regime_score = min(100, max(0, int(35 + min(volume / 50000.0, 35) + len(flow_rows) * 3 + min(perp_alerts * 2, 12) + external_score)))
         if regime_score >= 70:
             label = "RISK-ON"
             signal = "LIQUIDITY IMPROVING"
@@ -450,9 +509,9 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
         components = [
             {"key": "pmktDepth", "label": "PMKT Volume", "value": volume, "tone": "ok" if volume else "watch", "detail": f"{len(markets)} finance markets"},
             {"key": "perpOi", "label": "Perp Alerts", "value": perp_alerts, "tone": "watch" if perp_alerts else "neutral", "detail": "funding/OI proxy"},
-            {"key": "breadth", "label": "Breadth", "value": None, "tone": "missing", "detail": "seed pending"},
-            {"key": "etfFlow", "label": "ETF Flow", "value": None, "tone": "missing", "detail": "seed pending"},
-            {"key": "stablecoin", "label": "Stablecoin", "value": None, "tone": "missing", "detail": "seed pending"},
+            {"key": "cot", "label": "COT Positioning", "value": cot_avg_net, "tone": "ok" if cot_items else "missing", "detail": f"{len(cot_items)} CFTC rows" if cot_items else "seed pending"},
+            {"key": "etfFlow", "label": "ETF Flow", "value": etf_net_flow, "tone": "ok" if etf_net_flow and etf_net_flow > 0 else ("watch" if etf_net_flow is not None else "missing"), "detail": f"{len(etf_items)} ETF proxies" if etf_items else "seed pending"},
+            {"key": "stablecoin", "label": "Stablecoin", "value": stablecoin_supply_change, "tone": "ok" if stablecoin_items else "missing", "detail": f"{len(stablecoin_items)} pegs" if stablecoin_items else "seed pending"},
         ]
         rows: List[Dict[str, Any]] = []
         for market in markets[:limit]:
@@ -467,10 +526,53 @@ def get_finance_liquidity_regime_snapshot(ctx: dict, limit: int = DEFAULT_LIQUID
                     "linkedMarket": market,
                 }
             )
+        for item in cot_items[:3]:
+            rows.append(
+                {
+                    "id": f"cot:{item.get('symbol')}",
+                    "label": item.get("market") or f"{item.get('symbol')} COT positioning",
+                    "source": "COT",
+                    "signal": "POSITIONING",
+                    "value": item.get("netPctOpenInterest"),
+                    "tone": "ok" if (_safe_float(item.get("netPctOpenInterest")) or 0.0) >= 0 else "watch",
+                    "linkedMarket": None,
+                }
+            )
+        for item in etf_items[:3]:
+            rows.append(
+                {
+                    "id": f"etf:{item.get('symbol')}",
+                    "label": f"{item.get('symbol')} ETF flow proxy",
+                    "source": "ETF",
+                    "signal": "FLOW",
+                    "value": item.get("flowProxyUsd"),
+                    "tone": "ok" if (_safe_float(item.get("flowProxyUsd")) or 0.0) >= 0 else "watch",
+                    "linkedMarket": None,
+                }
+            )
+        for item in stablecoin_items[:2]:
+            rows.append(
+                {
+                    "id": f"stablecoin:{item.get('symbol')}",
+                    "label": f"{item.get('symbol')} stablecoin supply / peg",
+                    "source": "STBL",
+                    "signal": "PEG",
+                    "value": item.get("change7dPct"),
+                    "tone": "ok" if abs(_safe_float(item.get("deviationBps")) or 0.0) < 50 else "watch",
+                    "linkedMarket": None,
+                }
+            )
+        external_sources = external.get("sources") if isinstance(external.get("sources"), dict) else {}
         return {
             "generatedAt": _now(ctx),
             "status": "ok" if rows else "warming",
-            "sources": {"pmkt": "ok" if markets else "empty", "perp": perp.get("status") or "warming", "cot": "not-seeded", "etf": "not-seeded"},
+            "sources": {
+                "pmkt": "ok" if markets else "empty",
+                "perp": perp.get("status") or "warming",
+                "cot": external_sources.get("cot") or ("ok" if cot_items else "seed-miss"),
+                "etf": external_sources.get("etfFlow") or ("ok" if etf_items else "seed-miss"),
+                "stablecoin": external_sources.get("stablecoin") or ("ok" if stablecoin_items else "seed-miss"),
+            },
             "summary": {
                 "regimeLabel": label,
                 "regimeScore": regime_score,
