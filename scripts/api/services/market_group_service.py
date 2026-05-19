@@ -571,7 +571,7 @@ def _active_group_sort_key(group: Dict[str, Any], *, now_ts: float) -> Tuple[int
     else:
         bucket = 3
         recency = max(created_ts, last_activity_ts)
-    return (bucket, multi_penalty, -volume, -recency, -created_ts)
+    return (bucket, -recency, multi_penalty, -volume, -created_ts)
 
 
 def _empty_market_groups_payload(ctx: dict, *, page: int, page_size: int, status: str = "degraded") -> Dict[str, Any]:
