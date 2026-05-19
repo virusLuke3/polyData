@@ -1613,7 +1613,7 @@ export function App() {
     setWeatherMapLoading(true);
     setWeatherMapError(null);
     try {
-      const payload = await fetchRuntimeGlobalWeatherMap(34);
+      const payload = await fetchRuntimeGlobalWeatherMap(60);
       setWeatherMapPayload(payload);
       setRuntimeData((current) => mergeRuntimeData(current, { 'global-temperature-monitor': payload }));
       setSelectedWeatherCityId((current) => current || String(payload.items?.[0]?.cityId || ''));

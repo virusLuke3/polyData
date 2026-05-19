@@ -39,6 +39,15 @@ TAG_PATTERNS = {
     "forecast": re.compile(r"\b(forecast|weather|outlook)\b", re.I),
 }
 
+WEATHER_TOPIC_QUERIES: List[Dict[str, str]] = [
+    {"city_id": "global-hurricane", "city": "Hurricane", "marketFamily": "hurricane", "news_query": "hurricane forecast OR NOAA hurricane OR tropical storm"},
+    {"city_id": "global-tornado", "city": "Tornado", "marketFamily": "tornado", "news_query": "tornado warning OR severe storm outlook OR SPC tornado"},
+    {"city_id": "global-precipitation", "city": "Precipitation", "marketFamily": "precipitation", "news_query": "rainfall forecast OR flood warning OR precipitation outlook"},
+    {"city_id": "global-climate", "city": "Climate", "marketFamily": "global_climate", "news_query": "global temperature OR climate anomaly OR heat record"},
+    {"city_id": "global-volcano", "city": "Volcano", "marketFamily": "volcano", "news_query": "volcano eruption OR volcanic alert"},
+    {"city_id": "global-pandemic", "city": "Pandemic", "marketFamily": "pandemic", "news_query": "pandemic outbreak OR WHO health emergency"},
+]
+
 
 def _utc_now_iso(ctx: dict) -> str:
     now = ctx.get("utc_now_iso")
@@ -138,6 +147,7 @@ def fetch_google_news_rss(ctx: dict, city: Dict[str, Any]) -> List[Dict[str, Any
                 "url": link,
                 "severity": _severity(combined),
                 "tags": tags or ["forecast"],
+                "marketFamily": city.get("marketFamily"),
             }
         )
     return items
@@ -174,7 +184,7 @@ def build_news_summary(articles: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def build_weather_news_payload(ctx: dict, *, limit: int = DEFAULT_NEWS_LIMIT) -> Dict[str, Any]:
-    cities = load_weather_cities()
+    cities = [*load_weather_cities(), *WEATHER_TOPIC_QUERIES]
     articles: List[Dict[str, Any]] = []
     source_states: Dict[str, str] = {}
     for city in cities:

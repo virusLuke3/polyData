@@ -241,11 +241,11 @@ export function fetchRuntimeEnergyGasolineShock(limit = 6) {
   return apiGet<RuntimeEnergyGasolineShockPayload>(`/runtime/macro/energy-gasoline-shock?limit=${limit}`);
 }
 
-export function fetchRuntimeGlobalWeatherMap(limit = 34) {
+export function fetchRuntimeGlobalWeatherMap(limit = 60) {
   return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/global-map?limit=${limit}`);
 }
 
-export function fetchRuntimeGlobalTemperatureMonitor(limit = 34) {
+export function fetchRuntimeGlobalTemperatureMonitor(limit = 60) {
   return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/temperature-monitor?limit=${limit}`);
 }
 

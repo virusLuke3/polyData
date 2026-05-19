@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-PANEL_ID = "global-temperature-monitor"
-ROUTE = "/runtime/weather/temperature-monitor"
+PANEL_ID = "weather-market-browser"
+ROUTE = "/runtime/weather/market-browser"
 DEFAULT_LIMIT = 60
 MIN_LIMIT = 8
 MAX_LIMIT = 100

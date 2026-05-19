@@ -72,7 +72,10 @@ export function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): Runti
 }
 
 export function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
-  return city?.bins?.length ? city.bins : expectedQuoteBins(city);
+  const family = String(city?.marketFamily || city?.metricType || '').toLowerCase();
+  if (city?.bins?.length) return city.bins;
+  if (family && !family.includes('temperature')) return [];
+  return expectedQuoteBins(city);
 }
 
 export function quoteCoverage(city?: RuntimeGlobalWeatherCity | null) {

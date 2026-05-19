@@ -16,9 +16,35 @@ from weather.weather_codes import describe_weather_code
 
 GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE = "snapshot:weather:global-map"
 GLOBAL_WEATHER_MAP_CACHE_KEY = "panel-v1"
-DEFAULT_ITEM_LIMIT = 34
+DEFAULT_ITEM_LIMIT = 60
 
-WEATHER_MARKET_TERMS = ("temperature", "highest temperature", "high temperature", "weather")
+WEATHER_MARKET_TERMS = (
+    "temperature",
+    "highest temperature",
+    "lowest temperature",
+    "high temperature",
+    "low temperature",
+    "precipitation",
+    "rain",
+    "snow",
+    "weather",
+    "climate",
+    "tornado",
+    "hurricane",
+    "volcano",
+    "pandemic",
+)
+WEATHER_FAMILY_PRIORITY = {
+    "highest_temperature": 0,
+    "lowest_temperature": 1,
+    "precipitation": 2,
+    "hurricane": 3,
+    "tornado": 4,
+    "volcano": 5,
+    "pandemic": 6,
+    "global_climate": 7,
+    "weather_binary": 8,
+}
 GAMMA_QUERY_TIMEOUT_SECONDS = 6
 GAMMA_QUERIES_PER_CITY = 2
 GAMMA_QUERY_PAUSE_SECONDS = 0.03
@@ -148,6 +174,151 @@ def _matches_high_temperature_market(text: str) -> bool:
     return "highest-temperature-in-" in text or "highest temperature" in text or "high temperature" in text
 
 
+def _market_family(text: str) -> str:
+    normalized = str(text or "").lower()
+    if "highest-temperature" in normalized or "highest temperature" in normalized or "high temperature" in normalized:
+        return "highest_temperature"
+    if "lowest-temperature" in normalized or "lowest temperature" in normalized or "low temperature" in normalized:
+        return "lowest_temperature"
+    if "precipitation" in normalized or re.search(r"\b(rain|rainfall|snowfall)\b", normalized):
+        return "precipitation"
+    if "hurricane" in normalized:
+        return "hurricane"
+    if "tornado" in normalized:
+        return "tornado"
+    if "volcano" in normalized or "volcanic" in normalized:
+        return "volcano"
+    if "pandemic" in normalized or "outbreak" in normalized or "epidemic" in normalized:
+        return "pandemic"
+    if "climate" in normalized or "global warming" in normalized or "global temperature" in normalized:
+        return "global_climate"
+    if _matches_weather_market(normalized):
+        return "weather_binary"
+    return "other"
+
+
+def _family_label(family: str) -> str:
+    return {
+        "highest_temperature": "High temperature",
+        "lowest_temperature": "Low temperature",
+        "precipitation": "Precipitation",
+        "hurricane": "Hurricane",
+        "tornado": "Tornado",
+        "volcano": "Volcano",
+        "pandemic": "Pandemic",
+        "global_climate": "Global climate",
+        "weather_binary": "Weather",
+    }.get(family, str(family or "Weather").replace("_", " ").title())
+
+
+def _extract_month_label(text: str) -> Optional[str]:
+    match = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b(?:\s+\d{4})?", text, re.I)
+    return match.group(0).strip() if match else None
+
+
+_PRECIP_RANGE_RE = re.compile(r"(?:between\s+)?(\d+(?:\.\d+)?)\s*(?:-|to|–)\s*(\d+(?:\.\d+)?)\s*(mm|millimeters?|inches?|inch|in\.?|\"|')?", re.I)
+_PRECIP_SINGLE_RE = re.compile(r"(?:less than|under|below|more than|over|at least|or more|or less)?\s*(\d+(?:\.\d+)?)\s*(mm|millimeters?|inches?|inch|in\.?|\"|')", re.I)
+
+
+def _normalize_precip_unit(unit: Any, fallback: str = "mm") -> str:
+    text = str(unit or fallback or "mm").lower()
+    if text in {'"', "'", "in", "in.", "inch", "inches"}:
+        return "in"
+    return "mm"
+
+
+def _parse_precipitation_bin(label: Any) -> Optional[Dict[str, Any]]:
+    text = str(label or "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    range_match = _PRECIP_RANGE_RE.search(text)
+    if range_match:
+        low = _float(range_match.group(1))
+        high = _float(range_match.group(2))
+        unit = _normalize_precip_unit(range_match.group(3))
+        if low is None or high is None:
+            return None
+        return {
+            "label": text,
+            "bucketType": "range",
+            "minValue": low,
+            "maxValue": high,
+            "unit": unit,
+            "sortKey": low,
+            "metricType": "precipitation",
+        }
+    match = _PRECIP_SINGLE_RE.search(text)
+    if not match:
+        return None
+    value = _float(match.group(1))
+    unit = _normalize_precip_unit(match.group(2))
+    if value is None:
+        return None
+    if re.search(r"\b(less than|under|below|or less)\b", lowered):
+        bucket_type = "below"
+        min_value = None
+        max_value = value
+    elif re.search(r"\b(more than|over|at least|or more|\+)\b", lowered):
+        bucket_type = "above"
+        min_value = value
+        max_value = None
+    else:
+        bucket_type = "threshold"
+        min_value = value
+        max_value = value
+    return {
+        "label": text,
+        "bucketType": bucket_type,
+        "minValue": min_value,
+        "maxValue": max_value,
+        "unit": unit,
+        "sortKey": value,
+        "metricType": "precipitation",
+    }
+
+
+def _parse_generic_weather_bin(label: Any, family: str) -> Dict[str, Any]:
+    text = str(label or "").strip() or _family_label(family)
+    count_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:or more|\+|or higher|or fewer|or less)?", text, re.I)
+    value = _float(count_match.group(1)) if count_match else None
+    lowered = text.lower()
+    bucket_type = "binary"
+    min_value = None
+    max_value = None
+    if value is not None:
+        if re.search(r"\b(or more|more than|at least|\+|or higher)\b", lowered):
+            bucket_type = "above"
+            min_value = value
+        elif re.search(r"\b(or fewer|or less|less than|under|below)\b", lowered):
+            bucket_type = "below"
+            max_value = value
+        else:
+            bucket_type = "threshold"
+            min_value = value
+            max_value = value
+    return {
+        "label": text,
+        "bucketType": bucket_type,
+        "minValue": min_value,
+        "maxValue": max_value,
+        "unit": "events" if family in {"tornado", "hurricane", "volcano", "pandemic"} else "",
+        "sortKey": value if value is not None else 0,
+        "metricType": family,
+    }
+
+
+def _parse_weather_bin(label: Any, *, family: str, default_unit: str = "F") -> Optional[Dict[str, Any]]:
+    if family in {"highest_temperature", "lowest_temperature"}:
+        parsed = parse_temperature_bin(label, default_unit=default_unit)
+        if parsed:
+            parsed["metricType"] = family
+        return parsed
+    if family == "precipitation":
+        return _parse_precipitation_bin(label) or _parse_generic_weather_bin(label, family)
+    return _parse_generic_weather_bin(label, family)
+
+
 def _matches_date(text: str, dates: List[Dict[str, str]]) -> bool:
     for item in dates:
         candidates = (
@@ -183,6 +354,16 @@ def _date_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, st
     start = min(now - timedelta(days=1), first - timedelta(hours=12))
     end = last + timedelta(days=2)
     return start.isoformat().replace("+00:00", "Z"), end.isoformat().replace("+00:00", "Z")
+
+
+def _weather_market_window_bounds(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[str, str]:
+    start, end = _date_window_bounds(ctx, dates)
+    now = datetime.fromisoformat(_utc_now_iso(ctx).replace("Z", "+00:00"))
+    month_end = now + timedelta(days=45)
+    parsed_end = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    if parsed_end < month_end:
+        end = month_end.isoformat().replace("+00:00", "Z")
+    return start, end
 
 
 def _weather_by_city(ctx: dict, cities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -558,11 +739,11 @@ def _normalize_temperature_event(ctx: dict, event: Dict[str, Any], city: Dict[st
     }
 
 
-def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
+def _db_weather_market_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
     connector = ctx.get("get_connection")
     if not callable(connector):
         return [], "empty"
-    start_iso, end_iso = _date_window_bounds(ctx, dates)
+    start_iso, end_iso = _weather_market_window_bounds(ctx, dates)
     conn = None
     try:
         try:
@@ -598,11 +779,27 @@ def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[D
             WHERE
                 (
                     lower(COALESCE(m.title, '')) LIKE '%%highest temperature%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%lowest temperature%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%precipitation%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%hurricane%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%tornado%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%volcano%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%pandemic%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%climate%%'
+                    OR lower(COALESCE(m.title, '')) LIKE '%%global warming%%'
                     OR lower(COALESCE(m.slug, '')) LIKE 'highest-temperature-in-%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE 'lowest-temperature-in-%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%precipitation%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%hurricane%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%tornado%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%volcano%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%pandemic%%'
+                    OR lower(COALESCE(m.slug, '')) LIKE '%%climate%%'
+                    OR lower(COALESCE(m.category, '')) = 'weather'
                 )
                 AND (m.end_date IS NULL OR (m.end_date >= ? AND m.end_date <= ?))
             ORDER BY m.end_date ASC, m.id ASC
-            LIMIT 6000
+            LIMIT 12000
             """,
             (start_iso, end_iso),
         )
@@ -619,6 +816,12 @@ def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[D
                 conn.close()
             except Exception:
                 pass
+
+
+def _db_temperature_rows(ctx: dict, dates: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]], str]:
+    rows, status = _db_weather_market_rows(ctx, dates)
+    filtered = [row for row in rows if _market_family(_normalize_text(row.get("title"), row.get("slug"))) == "highest_temperature"]
+    return filtered, status if filtered else ("empty" if status == "ok" else status)
 
 
 def _db_market_object(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -773,6 +976,9 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
     return {
         "eventSlug": event_slug,
         "eventTitle": f"Highest temperature in {city.get('city')} on {date_iso}?",
+        "marketFamily": "highest_temperature",
+        "marketFamilyLabel": _family_label("highest_temperature"),
+        "metricType": "highest_temperature",
         "eventStatus": "live" if any((not _truthy(row.get("is_trading_closed")) and not _truthy(row.get("is_resolved")) and not _truthy(row.get("gamma_closed"))) for row in rows) else "inactive",
         "marketUrl": f"https://polymarket.com/event/{event_slug}",
         "quoteCoverage": f"{quoted}/{len(bins)}",
@@ -782,53 +988,157 @@ def _normalize_temperature_db_group(ctx: dict, city: Dict[str, Any], date_iso: s
     }
 
 
+def _normalize_weather_db_group(ctx: dict, city: Optional[Dict[str, Any]], date_iso: str, family: str, rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if family == "highest_temperature" and city is not None:
+        return _normalize_temperature_db_group(ctx, city, date_iso, rows)
+    bins: List[Dict[str, Any]] = []
+    default_unit = str((city or {}).get("unit") or "F")
+    for row in rows:
+        market = _db_market_object(row)
+        label = str(row.get("title") or row.get("slug") or "").strip()
+        parsed = _parse_weather_bin(label, family=family, default_unit=default_unit)
+        if not parsed:
+            continue
+        fallback = _db_price_fallback(row)
+        fallback_source = "db-latest" if fallback is not None else "missing"
+        gamma_market = None
+        if fallback is None:
+            fallback, gamma_market = _gamma_price_fallback(ctx, row)
+            fallback_source = "gamma-outcome" if fallback is not None else "missing"
+        if gamma_market:
+            market = {**market, **gamma_market}
+        token_ids = _token_ids(market)
+        bins.append(
+            {
+                **parsed,
+                "bestBidYes": None,
+                "bestAskYes": None,
+                "midPriceYes": round(float(fallback), 4) if fallback is not None else None,
+                "marketId": row.get("market_id"),
+                "marketSlug": row.get("slug"),
+                "marketStatus": "live" if market.get("active") else "inactive",
+                "priceSource": fallback_source,
+                "bookStatus": "not-queried",
+                "yesTokenId": token_ids[0] if token_ids else None,
+                "marketFamily": family,
+                "_clobMarket": market,
+            }
+        )
+    if not bins:
+        return None
+    bins.sort(key=lambda item: float(item.get("sortKey") or 0))
+    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=bins[0])
+    targets = bins if str(ctx.get("_weather_clob_scope") or "top").lower() == "all" else ([top] if top is not None else [])
+    for target in targets:
+        _apply_clob_quote_to_bin(ctx, target)
+    quoted = len([row for row in bins if row.get("midPriceYes") is not None])
+    top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=top)
+    _strip_internal_market(bins)
+    city_name = (city or {}).get("city") or "Global"
+    updated_at = max(
+        (
+            _json_safe_value(row.get("serving_latest_trade_at") or row.get("latest_trade_at") or row.get("end_date") or row.get("created_at"))
+            for row in rows
+        ),
+        key=_parse_ts,
+        default=None,
+    )
+    event_slug = str(rows[0].get("slug") or f"{_slugify(city_name)}-{family}-{date_iso}").strip()
+    titles = [str(row.get("title") or "").strip() for row in rows if row.get("title")]
+    return {
+        "eventSlug": event_slug,
+        "eventTitle": titles[0] if len(rows) == 1 and titles else f"{_family_label(family)} in {city_name}",
+        "marketFamily": family,
+        "marketFamilyLabel": _family_label(family),
+        "metricType": family,
+        "eventStatus": "live" if any((not _truthy(row.get("is_trading_closed")) and not _truthy(row.get("is_resolved")) and not _truthy(row.get("gamma_closed"))) for row in rows) else "inactive",
+        "marketUrl": f"https://polymarket.com/event/{event_slug}" if event_slug else None,
+        "quoteCoverage": f"{quoted}/{len(bins)}",
+        "topBin": top,
+        "bins": bins,
+        "updatedAt": updated_at,
+    }
+
+
 def _db_markets_by_city(ctx: dict, cities: List[Dict[str, Any]], dates: List[Dict[str, str]]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
-    rows, db_status = _db_temperature_rows(ctx, dates)
+    rows, db_status = _db_weather_market_rows(ctx, dates)
     if not rows:
         return {}, {str(city["city_id"]): db_status for city in cities}
 
     date_order = {item["iso"]: index for index, item in enumerate(dates)}
-    grouped: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
     city_by_id = {str(city["city_id"]): city for city in cities}
+    family_counts: Dict[str, int] = {}
+    unmapped: List[Dict[str, Any]] = []
     for row in rows:
         if _truthy(row.get("is_resolved")):
             continue
         haystack = _normalize_text(row.get("title"), row.get("description"), row.get("slug"))
-        if not _matches_high_temperature_market(haystack) or not _matches_date(haystack, dates):
+        family = _market_family(haystack)
+        if family == "other":
             continue
+        family_counts[family] = family_counts.get(family, 0) + 1
         date_iso = _matched_date_iso(haystack, dates)
         if not date_iso:
-            continue
+            end_value = row.get("end_date")
+            if end_value:
+                try:
+                    date_iso = datetime.fromisoformat(str(end_value).replace("Z", "+00:00")).date().isoformat()
+                except Exception:
+                    date_iso = _extract_month_label(haystack) or "rolling"
+            else:
+                date_iso = _extract_month_label(haystack) or "rolling"
+        matched_city = False
         for city in cities:
             if _matches_alias(haystack, city):
-                grouped.setdefault((str(city["city_id"]), date_iso), []).append(row)
+                grouped.setdefault((str(city["city_id"]), date_iso, family), []).append(row)
+                matched_city = True
                 break
+        if not matched_city:
+            unmapped.append({
+                "marketId": row.get("market_id"),
+                "title": row.get("title"),
+                "slug": row.get("slug"),
+                "family": family,
+                "endDate": _json_safe_value(row.get("end_date")),
+            })
 
     result: Dict[str, Dict[str, Any]] = {}
     source_states: Dict[str, str] = {}
-    selected_groups: Dict[str, Tuple[Dict[str, Any], str, List[Dict[str, Any]]]] = {}
+    selected_groups: Dict[str, List[Tuple[Dict[str, Any], str, str, List[Dict[str, Any]]]]] = {}
     for city_id, city in city_by_id.items():
-        candidate_groups: List[Tuple[int, int, float, str, List[Dict[str, Any]]]] = []
-        for (group_city_id, date_iso), group_rows in grouped.items():
+        candidate_groups: List[Tuple[int, int, int, float, str, str, List[Dict[str, Any]]]] = []
+        for (group_city_id, date_iso, family), group_rows in grouped.items():
             if group_city_id != city_id:
                 continue
             newest = max((_parse_ts(row.get("serving_latest_trade_at") or row.get("latest_trade_at") or row.get("end_date") or row.get("created_at")) for row in group_rows), default=0.0)
-            candidate_groups.append((date_order.get(date_iso, 999), -len(group_rows), -newest, date_iso, group_rows))
+            candidate_groups.append((WEATHER_FAMILY_PRIORITY.get(family, 99), date_order.get(date_iso, 999), -len(group_rows), -newest, date_iso, family, group_rows))
         candidate_groups.sort(key=lambda item: (item[0], item[1], item[2]))
         if candidate_groups:
-            _, _, _, date_iso, group_rows = candidate_groups[0]
-            selected_groups[city_id] = (city, date_iso, group_rows)
+            selected_groups[city_id] = [(city, date_iso, family, group_rows) for _, _, _, _, date_iso, family, group_rows in candidate_groups[:6]]
         else:
             source_states[city_id] = "empty" if db_status == "ok" else db_status
 
-    _prefetch_gamma_markets(ctx, (row for _, _, group_rows in selected_groups.values() for row in group_rows))
-    for city_id, (city, date_iso, group_rows) in selected_groups.items():
-        normalized = _normalize_temperature_db_group(ctx, city, date_iso, group_rows)
-        if normalized:
-            result[city_id] = normalized
+    _prefetch_gamma_markets(ctx, (row for groups in selected_groups.values() for _, _, _, group_rows in groups for row in group_rows))
+    for city_id, groups in selected_groups.items():
+        normalized_groups = [
+            normalized
+            for city, date_iso, family, group_rows in groups
+            for normalized in [_normalize_weather_db_group(ctx, city, date_iso, family, group_rows)]
+            if normalized
+        ]
+        if normalized_groups:
+            primary = normalized_groups[0]
+            result[city_id] = {
+                **primary,
+                "markets": normalized_groups,
+                "marketFamilies": sorted({str(group.get("marketFamily") or "") for group in normalized_groups if group.get("marketFamily")}),
+            }
             source_states[city_id] = "ok"
         else:
             source_states[city_id] = "partial"
+    ctx["_weather_family_counts"] = family_counts
+    ctx["_weather_unmapped_markets"] = unmapped[:80]
     return result, source_states
 
 
@@ -910,17 +1220,24 @@ def build_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         ),
         default=None,
     )
+    family_counts: Dict[str, int] = {}
+    for item in items:
+        for market in item.get("markets") or ([] if not item.get("marketFamily") else [item]):
+            family = str((market or {}).get("marketFamily") or "").strip()
+            if family:
+                family_counts[family] = family_counts.get(family, 0) + 1
     return {
         "cityCount": len(items),
         "mappedCount": len(mapped),
         "liveMarketCount": len(markets),
         "staleCount": len(stale),
         "hottestCity": hottest,
+        "marketFamilyCounts": family_counts,
     }
 
 
 def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
-    cities = load_weather_cities(limit=limit)
+    cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
     sources: Dict[str, str] = {}
     try:
         weather = _weather_by_city(ctx, cities)
@@ -991,6 +1308,8 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
             **weather_row,
             **metar_row,
             **market_row,
+            "markets": market_row.get("markets") or ([] if not market_row else [market_row]),
+            "marketFamilies": market_row.get("marketFamilies") or ([] if not market_row.get("marketFamily") else [market_row.get("marketFamily")]),
             "sourceStates": {
                 "openMeteo": "ok" if weather_row else "error",
                 "metar": "ok" if metar_row else "empty",
@@ -1000,6 +1319,8 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         }
         items.append(item)
     summary = build_summary(items)
+    summary["marketFamilyCounts"] = ctx.get("_weather_family_counts") or summary.get("marketFamilyCounts") or {}
+    summary["unmappedMarketCount"] = len(ctx.get("_weather_unmapped_markets") or [])
     status = "ok" if summary["mappedCount"] else "warming"
     if status == "ok" and any(value == "error" for value in sources.values()):
         status = "degraded"
@@ -1011,6 +1332,7 @@ def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIM
         "sources": sources,
         "summary": summary,
         "items": items,
+        "unmappedMarkets": ctx.get("_weather_unmapped_markets") or [],
     }
 
 
@@ -1021,8 +1343,9 @@ def _empty_payload(ctx: dict, *, status: str = "warming") -> Dict[str, Any]:
         "sourceUrl": getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"),
         "status": status,
         "sources": {},
-        "summary": {"cityCount": 0, "mappedCount": 0, "liveMarketCount": 0, "staleCount": 0, "hottestCity": None},
+        "summary": {"cityCount": 0, "mappedCount": 0, "liveMarketCount": 0, "staleCount": 0, "hottestCity": None, "marketFamilyCounts": {}, "unmappedMarketCount": 0},
         "items": [],
+        "unmappedMarkets": [],
     }
 
 
@@ -1037,6 +1360,7 @@ def normalize_global_weather_map_payload(payload: Any, *, ctx: dict, limit: int 
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or "Open-Meteo + AviationWeather + Polymarket Gamma/CLOB")
     result["sourceUrl"] = str(result.get("sourceUrl") or getattr(ctx["SETTINGS"], "weather_source_url", "https://open-meteo.com/"))
+    result["unmappedMarkets"] = [item for item in (result.get("unmappedMarkets") or []) if isinstance(item, dict)][:120]
     return result
 
 

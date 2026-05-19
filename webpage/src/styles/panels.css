@@ -9181,6 +9181,7 @@ body.panel-resize-active iframe {
 .wm-weather-trend-detail-panel .wm-panel-body,
 .wm-global-temperature-monitor-panel .wm-panel-body,
 .wm-global-weather-map-panel .wm-panel-body,
+.wm-weather-market-browser-panel .wm-panel-body,
 .wm-weather-news-panel .wm-panel-body {
   display: grid;
   align-content: start;
@@ -9221,6 +9222,109 @@ body.panel-resize-active iframe {
 
 .wm-global-temperature-monitor-panel .wm-panel-body {
   overflow: hidden;
+}
+
+.wm-weather-market-browser-panel .wm-panel-body {
+  overflow: hidden;
+}
+
+.wm-weather-market-tabs {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.wm-weather-market-tabs button,
+.wm-weather-market-row {
+  border: 1px solid #2a2a2a;
+  background: #171717;
+  color: #dfe3df;
+  font-family: var(--font-mono);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wm-weather-market-tabs button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.wm-weather-market-tabs button.active {
+  color: #33ff78;
+  border-color: rgba(51, 255, 120, 0.36);
+  background: rgba(51, 255, 120, 0.09);
+}
+
+.wm-weather-market-tabs span {
+  color: #9aa19b;
+}
+
+.wm-weather-market-list {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.wm-weather-market-row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 54px minmax(74px, 0.8fr) minmax(0, 1.8fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-left: 3px solid #7edcff;
+  text-align: left;
+  font-size: 11px;
+}
+
+.wm-weather-market-row.precipitation { border-left-color: #48d7be; }
+.wm-weather-market-row.storm,
+.wm-weather-market-row.alert { border-left-color: #ff4747; }
+.wm-weather-market-row.temperature { border-left-color: #ff9f0a; }
+
+.wm-weather-market-row.selected {
+  background: linear-gradient(90deg, rgba(126, 220, 255, 0.12), #171717 62%);
+}
+
+.wm-weather-market-family {
+  color: #f6c445;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.wm-weather-market-row strong {
+  color: #7edcff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-weather-market-row em {
+  min-width: 0;
+  color: #b7bbb7;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-weather-market-row b {
+  color: #74ff5f;
+}
+
+.wm-weather-market-row i {
+  color: #9aa19b;
+  font-style: normal;
 }
 
 .wm-temp-city-stats i,

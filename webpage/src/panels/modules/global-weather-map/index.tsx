@@ -214,5 +214,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 60000,
-  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(33),
+  fetchData: () => fetchRuntimeGlobalTemperatureMonitor(60),
 });

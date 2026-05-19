@@ -969,7 +969,11 @@ export type RuntimeWeatherQuoteBin = {
   bucketType?: string | null;
   minTemp?: number | string | null;
   maxTemp?: number | string | null;
+  minValue?: number | string | null;
+  maxValue?: number | string | null;
   unit?: string | null;
+  metricType?: string | null;
+  marketFamily?: string | null;
   bestBidYes?: number | string | null;
   bestAskYes?: number | string | null;
   midPriceYes?: number | string | null;
@@ -1004,10 +1008,27 @@ export type RuntimeGlobalWeatherCity = {
   eventSlug?: string | null;
   eventTitle?: string | null;
   eventStatus?: string | null;
+  marketFamily?: string | null;
+  marketFamilyLabel?: string | null;
+  metricType?: string | null;
   marketUrl?: string | null;
   quoteCoverage?: string | null;
   topBin?: RuntimeWeatherQuoteBin | null;
   bins?: RuntimeWeatherQuoteBin[];
+  markets?: Array<{
+    eventSlug?: string | null;
+    eventTitle?: string | null;
+    eventStatus?: string | null;
+    marketFamily?: string | null;
+    marketFamilyLabel?: string | null;
+    metricType?: string | null;
+    marketUrl?: string | null;
+    quoteCoverage?: string | null;
+    topBin?: RuntimeWeatherQuoteBin | null;
+    bins?: RuntimeWeatherQuoteBin[];
+    updatedAt?: string | null;
+  }>;
+  marketFamilies?: string[];
   sourceStates?: Record<string, string>;
   updatedAt?: string | null;
 };
@@ -1025,8 +1046,11 @@ export type RuntimeGlobalWeatherMapPayload = {
     liveMarketCount?: number | string | null;
     staleCount?: number | string | null;
     hottestCity?: RuntimeGlobalWeatherCity | null;
+    marketFamilyCounts?: Record<string, number | string>;
+    unmappedMarketCount?: number | string | null;
   } | null;
   items?: RuntimeGlobalWeatherCity[];
+  unmappedMarkets?: Array<Record<string, unknown>>;
 };
 
 export type RuntimeWeatherNewsItem = {
@@ -1040,6 +1064,7 @@ export type RuntimeWeatherNewsItem = {
   url?: string | null;
   severity?: string | null;
   tags?: string[];
+  marketFamily?: string | null;
 };
 
 export type RuntimeWeatherNewsPayload = {

@@ -103,6 +103,15 @@ def test_weather_city_watchlist_matches_polyweather_reference():
     assert len(WEATHER_CITIES) == 33
 
 
+def test_weather_city_loader_extends_db_market_universe():
+    from weather.cities import load_weather_cities
+
+    names = [city["city"] for city in load_weather_cities()]
+    assert "Hong Kong" in names
+    assert "San Francisco" in names
+    assert len(names) >= 50
+
+
 def make_settings(**kwargs):
     defaults = {
         "open_meteo_api_url": "https://open.example/forecast",
@@ -247,6 +256,75 @@ def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch)
     assert city["topBin"]["label"] == "Will the highest temperature in New York City be 80°F or higher on May 12?"
     assert city["topBin"]["midPriceYes"] == 0.46
     assert city["bins"][0]["marketSlug"] == "highest-temperature-in-new-york-on-may-12-2026-80forhigher"
+
+
+def test_global_weather_map_indexes_low_temperature_and_precipitation(monkeypatch):
+    monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", lambda ctx, market: {"bookStatus": "no-book"})
+    db_rows = [
+        {
+            "market_id": 601,
+            "slug": "lowest-temperature-in-nyc-on-may-12-2026-60-61f",
+            "title": "Will the lowest temperature in New York City be between 60-61°F on May 12?",
+            "description": "",
+            "end_date": "2026-05-12T12:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "low-yes",
+            "no_token_id": "low-no",
+            "clob_token_ids": '["low-yes", "low-no"]',
+            "latest_yes_price": 0.42,
+            "latest_trade_price": None,
+            "serving_latest_price": None,
+            "latest_trade_at": None,
+            "serving_latest_trade_at": None,
+            "is_trading_closed": 0,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+        {
+            "market_id": 602,
+            "slug": "will-nyc-have-between-2-and-3-inches-of-precipitation-in-may",
+            "title": "Will NYC have between 2-3 inches of precipitation in May?",
+            "description": "",
+            "end_date": "2026-05-31T12:00:00Z",
+            "created_at": "2026-05-12T00:00:00Z",
+            "yes_token_id": "rain-yes",
+            "no_token_id": "rain-no",
+            "clob_token_ids": '["rain-yes", "rain-no"]',
+            "latest_yes_price": 0.7,
+            "latest_trade_price": None,
+            "serving_latest_price": None,
+            "latest_trade_at": None,
+            "serving_latest_trade_at": None,
+            "is_trading_closed": 0,
+            "is_resolved": 0,
+            "gamma_closed": 0,
+        },
+    ]
+
+    def http_json_get(url, *, params=None, **kwargs):
+        if "open.example" in url:
+            return [
+                {
+                    "current": {"temperature_2m": 22.0, "weather_code": 2, "time": "2026-05-12T12:00"},
+                    "hourly": {"time": ["2026-05-12T12:00"], "temperature_2m": [22.0]},
+                    "daily": {"time": ["2026-05-12"], "temperature_2m_max": [27.0], "temperature_2m_min": [16.0]},
+                }
+            ]
+        if "aviation.example" in url:
+            return []
+        return []
+
+    ctx = make_ctx(http_json_get=http_json_get)
+    ctx["DB_PATH"] = "fake"
+    ctx["get_connection"] = lambda *args, **kwargs: FakeConnection(db_rows)
+    payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
+    city = payload["items"][0]
+    families = set(city["marketFamilies"])
+    assert "lowest_temperature" in families
+    assert "precipitation" in families
+    precip = [market for market in city["markets"] if market["marketFamily"] == "precipitation"][0]
+    assert precip["topBin"]["unit"] == "in"
+    assert precip["topBin"]["midPriceYes"] == 0.7
 
 
 def test_global_weather_map_prefers_clob_book_over_db_price(monkeypatch):

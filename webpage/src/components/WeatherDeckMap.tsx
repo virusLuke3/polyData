@@ -108,6 +108,16 @@ function binTemperatureLabel(bin: RuntimeGlobalWeatherCity['topBin'], fallbackUn
   const unit = String(bin.unit || fallbackUnit || '').toUpperCase();
   const min = numberValue(bin.minTemp);
   const max = numberValue(bin.maxTemp);
+  const minValue = numberValue(bin.minValue);
+  const maxValue = numberValue(bin.maxValue);
+  if (minValue != null || maxValue != null) {
+    const suffix = unit ? unit.toLowerCase() : '';
+    if (bin.bucketType === 'below' && maxValue != null) return `${Math.round(maxValue)}${suffix}-`;
+    if (bin.bucketType === 'above' && minValue != null) return `${Math.round(minValue)}${suffix}+`;
+    if (minValue != null && maxValue != null && minValue !== maxValue) return `${Math.round(minValue)}-${Math.round(maxValue)}${suffix}`;
+    if (minValue != null) return `${Math.round(minValue)}${suffix}`;
+    if (maxValue != null) return `${Math.round(maxValue)}${suffix}`;
+  }
   if (bin.bucketType === 'below' && max != null) return `${Math.round(max)}°${unit}-`;
   if (bin.bucketType === 'above' && min != null) return `${Math.round(min)}°${unit}+`;
   if (min != null && max != null && min !== max) return `${Math.round(min)}-${Math.round(max)}°${unit}`;

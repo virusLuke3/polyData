@@ -40,8 +40,29 @@ WEATHER_CITIES: List[Dict[str, Any]] = [
 ]
 
 
+EXTRA_WEATHER_CITIES: List[Dict[str, Any]] = [
+    {"city_id": "hong-kong", "city": "Hong Kong", "country": "HK", "region": "Asia", "lat": 22.3193, "lon": 114.1694, "timezone": "Asia/Hong_Kong", "unit": "C", "icao": "VHHH", "polymarket_aliases": ["Hong Kong", "HK"], "news_query": "Hong Kong weather OR forecast OR rain OR typhoon", "label_dx": 8, "label_dy": -12},
+    {"city_id": "san-francisco", "city": "San Francisco", "country": "US", "region": "North America", "lat": 37.7749, "lon": -122.4194, "timezone": "America/Los_Angeles", "unit": "F", "icao": "KSFO", "polymarket_aliases": ["San Francisco", "SF"], "news_query": "San Francisco weather OR forecast OR wind", "label_dx": 8, "label_dy": -12},
+    {"city_id": "istanbul", "city": "Istanbul", "country": "TR", "region": "Middle East", "lat": 41.0082, "lon": 28.9784, "timezone": "Europe/Istanbul", "unit": "C", "icao": "LTFM", "polymarket_aliases": ["Istanbul"], "news_query": "Istanbul weather OR forecast OR storm", "label_dx": 8, "label_dy": -12},
+    {"city_id": "manila", "city": "Manila", "country": "PH", "region": "Asia", "lat": 14.5995, "lon": 120.9842, "timezone": "Asia/Manila", "unit": "C", "icao": "RPLL", "polymarket_aliases": ["Manila"], "news_query": "Manila weather OR forecast OR rain OR typhoon", "label_dx": 8, "label_dy": -12},
+    {"city_id": "jakarta", "city": "Jakarta", "country": "ID", "region": "Asia", "lat": -6.2088, "lon": 106.8456, "timezone": "Asia/Jakarta", "unit": "C", "icao": "WIII", "polymarket_aliases": ["Jakarta"], "news_query": "Jakarta weather OR forecast OR rain OR flood", "label_dx": 8, "label_dy": -12},
+    {"city_id": "taipei", "city": "Taipei", "country": "TW", "region": "Asia", "lat": 25.0330, "lon": 121.5654, "timezone": "Asia/Taipei", "unit": "C", "icao": "RCTP", "polymarket_aliases": ["Taipei"], "news_query": "Taipei weather OR forecast OR rain OR typhoon", "label_dx": 8, "label_dy": -12},
+    {"city_id": "busan", "city": "Busan", "country": "KR", "region": "Asia", "lat": 35.1796, "lon": 129.0756, "timezone": "Asia/Seoul", "unit": "C", "icao": "RKPK", "polymarket_aliases": ["Busan"], "news_query": "Busan weather OR forecast OR rain", "label_dx": 8, "label_dy": -12},
+    {"city_id": "cape-town", "city": "Cape Town", "country": "ZA", "region": "Africa", "lat": -33.9249, "lon": 18.4241, "timezone": "Africa/Johannesburg", "unit": "C", "icao": "FACT", "polymarket_aliases": ["Cape Town"], "news_query": "Cape Town weather OR forecast OR wind", "label_dx": 8, "label_dy": -12},
+    {"city_id": "karachi", "city": "Karachi", "country": "PK", "region": "Asia", "lat": 24.8607, "lon": 67.0011, "timezone": "Asia/Karachi", "unit": "C", "icao": "OPKC", "polymarket_aliases": ["Karachi"], "news_query": "Karachi weather OR forecast OR heat", "label_dx": 8, "label_dy": -12},
+    {"city_id": "kuala-lumpur", "city": "Kuala Lumpur", "country": "MY", "region": "Asia", "lat": 3.1390, "lon": 101.6869, "timezone": "Asia/Kuala_Lumpur", "unit": "C", "icao": "WMKK", "polymarket_aliases": ["Kuala Lumpur"], "news_query": "Kuala Lumpur weather OR forecast OR rain", "label_dx": 8, "label_dy": -12},
+    {"city_id": "guangzhou", "city": "Guangzhou", "country": "CN", "region": "Asia", "lat": 23.1291, "lon": 113.2644, "timezone": "Asia/Shanghai", "unit": "C", "icao": "ZGGG", "polymarket_aliases": ["Guangzhou"], "news_query": "Guangzhou weather OR forecast OR rain", "label_dx": 8, "label_dy": -12},
+    {"city_id": "helsinki", "city": "Helsinki", "country": "FI", "region": "Europe", "lat": 60.1699, "lon": 24.9384, "timezone": "Europe/Helsinki", "unit": "C", "icao": "EFHK", "polymarket_aliases": ["Helsinki"], "news_query": "Helsinki weather OR forecast OR cold", "label_dx": 8, "label_dy": -12},
+    {"city_id": "jeddah", "city": "Jeddah", "country": "SA", "region": "Middle East", "lat": 21.4858, "lon": 39.1925, "timezone": "Asia/Riyadh", "unit": "C", "icao": "OEJN", "polymarket_aliases": ["Jeddah"], "news_query": "Jeddah weather OR forecast OR heat", "label_dx": 8, "label_dy": -12},
+    {"city_id": "lucknow", "city": "Lucknow", "country": "IN", "region": "Asia", "lat": 26.8467, "lon": 80.9462, "timezone": "Asia/Kolkata", "unit": "C", "icao": "VILK", "polymarket_aliases": ["Lucknow"], "news_query": "Lucknow weather OR forecast OR heat OR rain", "label_dx": 8, "label_dy": -12},
+    {"city_id": "moscow", "city": "Moscow", "country": "RU", "region": "Europe", "lat": 55.7558, "lon": 37.6173, "timezone": "Europe/Moscow", "unit": "C", "icao": "UUEE", "polymarket_aliases": ["Moscow"], "news_query": "Moscow weather OR forecast OR cold", "label_dx": 8, "label_dy": -12},
+    {"city_id": "panama-city", "city": "Panama City", "country": "PA", "region": "North America", "lat": 8.9824, "lon": -79.5199, "timezone": "America/Panama", "unit": "C", "icao": "MPTO", "polymarket_aliases": ["Panama City"], "news_query": "Panama City weather OR forecast OR rain", "label_dx": 8, "label_dy": -12},
+    {"city_id": "qingdao", "city": "Qingdao", "country": "CN", "region": "Asia", "lat": 36.0671, "lon": 120.3826, "timezone": "Asia/Shanghai", "unit": "C", "icao": "ZSQD", "polymarket_aliases": ["Qingdao"], "news_query": "Qingdao weather OR forecast OR rain", "label_dx": 8, "label_dy": -12},
+]
+
+
 def load_weather_cities(limit: int | None = None) -> List[Dict[str, Any]]:
-    rows = [dict(city) for city in WEATHER_CITIES]
+    rows = [dict(city) for city in [*WEATHER_CITIES, *EXTRA_WEATHER_CITIES]]
     if limit is None:
         return rows
     return rows[: max(1, min(int(limit), len(rows)))]
