@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(marketPanelRenderers, {
   title: 'AI Market Brief',
   eyebrow: 'agent',
   description: 'Market-wide AI brief, focal points, and convergence signals.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });

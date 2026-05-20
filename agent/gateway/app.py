@@ -10,6 +10,10 @@ from agent.market_insight import build_market_insight
 from agent.market_wide import build_market_wide_insight
 
 
+def _agent_enabled() -> bool:
+    return get_env("POLYDATA_AGENT_ENABLED").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _authorized() -> bool:
     expected = get_env("POLYDATA_AGENT_GATEWAY_TOKEN")
     if not expected:
@@ -30,6 +34,8 @@ def create_app() -> Flask:
 
     @app.post("/agent/market-insights")
     def market_insights():
+        if not _agent_enabled():
+            return jsonify({"error": "agent-disabled", "status": "disabled"}), 404
         if not _authorized():
             return jsonify({"error": "unauthorized"}), 401
         payload: Any = request.get_json(silent=True) or {}
@@ -41,6 +47,8 @@ def create_app() -> Flask:
 
     @app.post("/agent/market-wide-insights")
     def market_wide_insights():
+        if not _agent_enabled():
+            return jsonify({"error": "agent-disabled", "status": "disabled"}), 404
         if not _authorized():
             return jsonify({"error": "unauthorized"}), 401
         payload: Any = request.get_json(silent=True) or {}

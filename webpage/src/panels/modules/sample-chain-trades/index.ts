@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(chainPanelRenderers, {
   title: 'AI Special Markets',
   eyebrow: 'agent',
   description: 'Market-wide AI radar for unusual, high-attention, and fast-moving markets.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });

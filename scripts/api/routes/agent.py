@@ -19,6 +19,14 @@ _REFRESH_LOCK = threading.Lock()
 _REFRESHING_KEYS: set[str] = set()
 
 
+def _agent_enabled() -> bool:
+    return os.environ.get("POLYDATA_AGENT_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _agent_disabled_response():
+    return jsonify({"error": "agent-disabled", "status": "disabled"}), 404
+
+
 def _agent_cache_ttl() -> int:
     try:
         return max(30, int(os.environ.get("POLYDATA_AGENT_CACHE_TTL_SECONDS", "300")))
@@ -194,6 +202,8 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/agent/market-insights", methods=["POST"])
     def api_market_insights():
+        if not _agent_enabled():
+            return _agent_disabled_response()
         payload = request.get_json(silent=True) or {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
@@ -209,6 +219,8 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
 
     @bp.route("/agent/market-wide-insights", methods=["POST"])
     def api_market_wide_insights():
+        if not _agent_enabled():
+            return _agent_disabled_response()
         payload = request.get_json(silent=True) or {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400

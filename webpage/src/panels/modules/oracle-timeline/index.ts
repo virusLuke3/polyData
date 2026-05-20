@@ -6,5 +6,5 @@ export const panel = panelFromRenderer(oraclePanelRenderers, {
   title: 'AI Trend Radar',
   eyebrow: 'agent',
   description: 'Market-wide AI synthesis of Polymarket trend clusters, catalysts, and watch items.',
-  defaultEnabled: true,
+  defaultEnabled: false,
 });

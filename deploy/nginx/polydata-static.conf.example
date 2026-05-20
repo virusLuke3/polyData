@@ -9,6 +9,10 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    location ^~ /wm-api/agent/ {
+        return 403;
+    }
+
     location /wm-api/ {
         proxy_pass __POLYDATA_API_UPSTREAM__/;
         proxy_http_version 1.1;
