@@ -1744,7 +1744,25 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             include_runtime_price=False,
             include_recent_stats=False,
         )
-        chart = get_market_chart_payload(ctx, market_id, market=market, price=price, include_runtime_series=False)
+        latest = price.get("latestYesPrice") or price.get("latestPrice")
+        snapshot_time = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        chart_points = (
+            [
+                {"timestamp": snapshot_time, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+                {"timestamp": snapshot_time, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+            ]
+            if latest not in (None, "")
+            else []
+        )
+        chart = {
+            "marketId": market_id,
+            "localMarketId": market_id,
+            "range": "snapshot" if chart_points else "missing",
+            "interval": "snapshot" if chart_points else "missing",
+            "kind": "probability",
+            "historyStatus": "snapshot" if chart_points else "missing",
+            "points": chart_points,
+        }
         oracle_payload = get_market_oracle_payload(ctx, market_id, market=market)
         oracle_events = oracle_payload.get("timeline", [])
         trades: List[Dict[str, Any]] = []
