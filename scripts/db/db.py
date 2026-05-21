@@ -991,6 +991,35 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
     ensure_column_exists(conn, "core.market_list_serving", "price_24h_ago", "NUMERIC(20, 10)")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS core.market_chart_serving (
+            market_id BIGINT NOT NULL REFERENCES core.markets(id) ON DELETE CASCADE,
+            range_name TEXT NOT NULL,
+            interval_name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'probability',
+            history_status TEXT NOT NULL DEFAULT 'missing',
+            point_count INTEGER NOT NULL DEFAULT 0,
+            points JSONB NOT NULL DEFAULT '[]'::jsonb,
+            source TEXT NOT NULL DEFAULT 'postgres',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (market_id, range_name, interval_name)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS core.market_workspace_serving (
+            market_id BIGINT PRIMARY KEY REFERENCES core.markets(id) ON DELETE CASCADE,
+            detail_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            price_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            oracle_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+            content_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+            source TEXT NOT NULL DEFAULT 'postgres',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS core.event_market_serving (
             serving_key TEXT PRIMARY KEY,
             group_id TEXT NOT NULL UNIQUE,
@@ -1046,6 +1075,9 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
         ("core.market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
         ("core.market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
         ("core.market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
+        ("core.market_chart_serving", "idx_market_chart_serving_updated", ["updated_at"]),
+        ("core.market_chart_serving", "idx_market_chart_serving_status", ["history_status", "updated_at"]),
+        ("core.market_workspace_serving", "idx_market_workspace_serving_updated", ["updated_at"]),
         ("core.event_market_serving", "idx_event_market_serving_event_default", ["event_id", "default_market_id"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)

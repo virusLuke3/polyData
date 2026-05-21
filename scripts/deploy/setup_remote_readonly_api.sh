@@ -234,6 +234,7 @@ systemctl --user stop \
   polydata-oracle-sync.service \
   polydata-analytics-sync.service \
   polydata-event-market-serving.service \
+  polydata-market-workspace-serving.service \
   polydata-new-market-signal.service \
   polydata-db-reverse-tunnel.service \
   >/dev/null 2>&1 || true
@@ -244,6 +245,7 @@ systemctl --user disable \
   polydata-oracle-sync.service \
   polydata-analytics-sync.service \
   polydata-event-market-serving.service \
+  polydata-market-workspace-serving.service \
   polydata-new-market-signal.service \
   polydata-db-reverse-tunnel.service \
   >/dev/null 2>&1 || true
@@ -281,7 +283,7 @@ ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1
 
 echo "[6/7] Remote service status ..."
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service | sed -n '1,180p'"
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target; do state=\$(systemctl --user is-active \"\$unit\" 2>/dev/null || true); printf '%s %s\n' \"\$unit\" \"\$state\"; test \"\$state\" != active; done"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-market-workspace-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target; do state=\$(systemctl --user is-active \"\$unit\" 2>/dev/null || true); printf '%s %s\n' \"\$unit\" \"\$state\"; test \"\$state\" != active; done"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
 echo "[7/7] Done."

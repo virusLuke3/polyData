@@ -766,6 +766,95 @@ def get_recent_oracle_snapshot(ctx: dict, limit: int = 24) -> List[Dict[str, Any
     )
 
 
+def _json_payload(value: Any, expected_type: type) -> Optional[Any]:
+    if isinstance(value, expected_type):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, expected_type) else None
+    return None
+
+
+def _get_market_workspace_serving_row(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
+    if not ctx["table_exists"]("market_workspace_serving"):
+        return None
+    return ctx["query_one"](
+        """
+        SELECT market_id, detail_payload, price_payload, oracle_summary, content_summary, updated_at
+        FROM market_workspace_serving
+        WHERE market_id = ?
+        LIMIT 1
+        """,
+        (market_id,),
+    )
+
+
+def _get_market_workspace_detail_payload(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
+    row = _get_market_workspace_serving_row(ctx, market_id)
+    if not row:
+        return None
+    payload = _json_payload(row.get("detail_payload"), dict)
+    if not payload:
+        return None
+    payload.setdefault("servingSource", "postgres")
+    payload.setdefault("servingUpdatedAt", row.get("updated_at"))
+    return payload
+
+
+def _get_market_workspace_price_payload(ctx: dict, market_id: int) -> Optional[Dict[str, Any]]:
+    row = _get_market_workspace_serving_row(ctx, market_id)
+    if not row:
+        return None
+    payload = _json_payload(row.get("price_payload"), dict)
+    if not payload:
+        return None
+    payload.setdefault("marketId", market_id)
+    payload.setdefault("localMarketId", market_id)
+    payload.setdefault("servingSource", "postgres")
+    payload.setdefault("servingUpdatedAt", row.get("updated_at"))
+    return payload
+
+
+def _get_market_chart_serving_payload(ctx: dict, market_id: int, range_name: str, interval: str) -> Optional[Dict[str, Any]]:
+    if not ctx["table_exists"]("market_chart_serving"):
+        return None
+    normalized_range = str(range_name or "1d").strip().lower()
+    normalized_interval = str(interval or "5m").strip().lower()
+    row = ctx["query_one"](
+        """
+        SELECT market_id, range_name, interval_name, kind, history_status, point_count, points, updated_at
+        FROM market_chart_serving
+        WHERE market_id = ? AND range_name = ?
+        ORDER BY CASE WHEN interval_name = ? THEN 0 ELSE 1 END, updated_at DESC
+        LIMIT 1
+        """,
+        (market_id, normalized_range, normalized_interval),
+    )
+    if not row:
+        return None
+    points = _json_payload(row.get("points"), list) or []
+    history_status = str(row.get("history_status") or ("ok" if points else "missing"))
+    if not points and history_status == "missing":
+        return None
+    return {
+        "marketId": market_id,
+        "localMarketId": market_id,
+        "range": row.get("range_name") or normalized_range,
+        "interval": row.get("interval_name") or normalized_interval,
+        "kind": row.get("kind") or "probability",
+        "historyStatus": history_status,
+        "points": points,
+        "servingSource": "postgres",
+        "servingUpdatedAt": row.get("updated_at"),
+    }
+
+
 def get_market_price_summary(
     ctx: dict,
     market_id: int,
@@ -774,6 +863,10 @@ def get_market_price_summary(
     include_runtime_price: bool = False,
     include_recent_stats: bool = False,
 ) -> Dict[str, Any]:
+    if not include_runtime_price and not include_recent_stats:
+        serving_payload = _get_market_workspace_price_payload(ctx, market_id)
+        if serving_payload is not None:
+            return serving_payload
     if market is None and not include_runtime_price and not include_recent_stats:
         cache_key = json.dumps({"marketId": int(market_id), "v": 3}, sort_keys=True, ensure_ascii=True)
         return ctx["get_snapshot_payload"](
@@ -897,6 +990,9 @@ def get_market_chart_payload(
     price: Optional[Dict[str, Any]] = None,
     include_runtime_series: bool = True,
 ) -> Dict[str, Any]:
+    serving_payload = _get_market_chart_serving_payload(ctx, market_id, range_name, interval)
+    if serving_payload is not None:
+        return serving_payload
     if market is None and price is None:
         cache_key = json.dumps(
             {
@@ -1762,6 +1858,9 @@ def get_active_markets_snapshot(ctx: dict, page_size: int = 40, *, include_runti
 
 
 def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
+    serving_payload = _get_market_workspace_detail_payload(ctx, market_id)
+    if serving_payload is not None:
+        return serving_payload
     market = get_market_by_id(ctx, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}

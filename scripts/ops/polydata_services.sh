@@ -16,6 +16,7 @@ LOCAL_COLLECTOR_SERVICES=(
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
+  "polydata-market-workspace-serving.service"
   "polydata-db-reverse-tunnel.service"
 )
 DATA_SERVICES=(
@@ -24,6 +25,7 @@ DATA_SERVICES=(
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
+  "polydata-market-workspace-serving.service"
 )
 
 usage() {
