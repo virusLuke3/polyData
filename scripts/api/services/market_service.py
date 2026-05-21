@@ -1734,7 +1734,7 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
     market = get_market_by_id(ctx, market_id)
     if not market:
         return {"error": "Market not found", "marketId": market_id, "_status": 404}
-    cache_key = json.dumps({"marketId": int(market_id), "v": 9}, sort_keys=True, ensure_ascii=True)
+    cache_key = json.dumps({"marketId": int(market_id), "v": 10}, sort_keys=True, ensure_ascii=True)
 
     def build_payload() -> Dict[str, Any]:
         price = get_market_price_summary(
