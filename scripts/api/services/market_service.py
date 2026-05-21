@@ -904,7 +904,7 @@ def get_market_chart_payload(
                 "range": str(range_name or "1d").strip().lower(),
                 "interval": str(interval or "5m").strip().lower(),
                 "includeRuntimeSeries": bool(include_runtime_series),
-                "v": 4,
+                "v": 5,
             },
             sort_keys=True,
             ensure_ascii=True,
@@ -942,6 +942,40 @@ def get_market_chart_payload(
             "referenceRule": chart_context.get("referenceRule"),
             "points": chart_context.get("points"),
         }
+    price = price if price is not None else get_market_price_summary(ctx, market_id, market=market)
+    latest = price.get("latestYesPrice") or price.get("latestPrice")
+    latest_decimal = _decimal_from_any(latest)
+    recent_volume = _decimal_from_any(price.get("volume24h")) or Decimal("0")
+    recent_trades = int(price.get("tradeCount24h") or 0)
+    if recent_volume <= 0 and recent_trades <= 0:
+        if latest_decimal is not None:
+            timestamp = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            points = [
+                {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "yesPrice": latest,
+                    "noPrice": price.get("latestNoPrice"),
+                },
+            ]
+            return {
+                "marketId": market_id,
+                "localMarketId": market_id,
+                "range": "snapshot",
+                "interval": "snapshot",
+                "kind": "probability",
+                "historyStatus": "snapshot",
+                "points": points,
+            }
+        return {
+            "marketId": market_id,
+            "localMarketId": market_id,
+            "range": range_name,
+            "interval": interval,
+            "kind": "probability",
+            "historyStatus": "missing",
+            "points": [],
+        }
     points: List[Dict[str, Any]] = []
     if not points:
         limit = 400
@@ -960,9 +994,6 @@ def get_market_chart_payload(
             clob_count, clob_distinct_count = _chart_point_stats(clob_points)
             if clob_count > point_count and (clob_distinct_count > distinct_count or distinct_count <= 1):
                 points = clob_points
-    price = price if price is not None else get_market_price_summary(ctx, market_id, market=market)
-    latest = price.get("latestYesPrice") or price.get("latestPrice")
-    latest_decimal = _decimal_from_any(latest)
     if points and latest_decimal is not None:
         last_point = points[-1] or {}
         last_decimal = _decimal_from_any(last_point.get("yesPrice"))
