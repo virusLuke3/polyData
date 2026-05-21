@@ -8,21 +8,22 @@ POLYDATA_CONFIG_DIR="${HOME}/.config/polydata"
 POLYDATA_ENV_FILE="${POLYDATA_CONFIG_DIR}/polydata.env"
 SOURCE_ENV_FILE="${ROOT_DIR}/.env"
 
-CORE_TARGET="polydata-core.target"
-CORE_SERVICES=(
-  "polydata-api.service"
+LOCAL_COLLECTOR_TARGET="polydata-local-collector.target"
+LEGACY_CORE_TARGET="polydata-core.target"
+LOCAL_COLLECTOR_SERVICES=(
   "polydata-market-sync.service"
+  "polydata-trade-sync.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
-  "polydata-new-market-signal.service"
+  "polydata-db-reverse-tunnel.service"
 )
 DATA_SERVICES=(
   "polydata-market-sync.service"
+  "polydata-trade-sync.service"
   "polydata-oracle-sync.service"
   "polydata-analytics-sync.service"
   "polydata-event-market-serving.service"
-  "polydata-new-market-signal.service"
 )
 
 usage() {
@@ -40,17 +41,18 @@ Usage:
 
 Commands:
   install       Install user-level systemd units and a sanitized env file.
-  start         Start Docker dependencies and API + market/oracle/snapshot services.
-  start-data    Start Docker dependencies and market/oracle/snapshot services only.
-  restart       Restart API + market/oracle/snapshot services.
+  start         Start Docker dependencies and local market/orderfilled/oracle collector services.
+  start-data    Start Docker dependencies and local market/orderfilled/oracle services only.
+  restart       Restart local market/orderfilled/oracle collector services.
   restart-data  Restart market/oracle/snapshot services only.
-  stop          Stop API + market/oracle/snapshot services.
+  stop          Stop local collector services.
   status        Show Docker and systemd service status.
   logs          Follow one service log. Default: polydata-market-sync.service.
   doctor        Validate env and PostgreSQL connectivity.
 
-The core target intentionally excludes polydata-trade-sync.service because
-OrderFilled/trade runtime is waiting for the ClickHouse migration.
+The local collector target intentionally excludes polydata-api.service and seed
+watchers. API/runtime panel seed cache belongs on the GCP API host. The same
+repository code is used on both machines; only the systemd target differs.
 EOF
 }
 
@@ -103,6 +105,7 @@ for raw in src.read_text(encoding="utf-8").splitlines():
     values[key] = value
 
 forced = {
+    "POLYDATA_DEPLOY_ROLE": "local-collector",
     "POLYMARKET_DB_BACKEND": "postgres",
     "POLYDATA_POSTGRES_HOST": values.get("POLYDATA_POSTGRES_HOST", "127.0.0.1"),
     "POLYDATA_POSTGRES_PORT": values.get("POLYDATA_POSTGRES_PORT", "45432"),
@@ -112,6 +115,7 @@ forced = {
     "POLYDATA_REDIS_URL": values.get("POLYDATA_REDIS_URL", "redis://127.0.0.1:6379/0"),
     "POLYDATA_REDIS_PREFIX": values.get("POLYDATA_REDIS_PREFIX", "polydata:"),
     "POLYDATA_PYTHON_BIN": values.get("POLYDATA_PYTHON_BIN", python_bin),
+    "POLYDATA_SNAPSHOT_PREWARM": "0",
 }
 values.update(forced)
 
@@ -163,30 +167,15 @@ install_unit_file() {
   rm -f "${dst}.tmp"
 }
 
-install_core_target() {
-  local dst="${SYSTEMD_USER_DIR}/${CORE_TARGET}"
-  {
-    echo "[Unit]"
-    echo "Description=polyData local core services"
-    echo "Wants=${CORE_SERVICES[*]}"
-    echo "After=network-online.target"
-    echo
-    echo "[Install]"
-    echo "WantedBy=default.target"
-  } > "${dst}.tmp"
-  install -m 644 "${dst}.tmp" "${dst}"
-  rm -f "${dst}.tmp"
-}
-
 install_services() {
   mkdir -p "${SYSTEMD_USER_DIR}"
   sanitize_env_file
-  for unit in "${CORE_SERVICES[@]}"; do
+  for unit in "${LOCAL_COLLECTOR_SERVICES[@]}"; do
     install_unit_file "${unit}"
   done
-  install_core_target
+  install_unit_file "${LOCAL_COLLECTOR_TARGET}"
   systemctl --user daemon-reload
-  echo "Installed ${CORE_TARGET} and core services."
+  echo "Installed ${LOCAL_COLLECTOR_TARGET} and local collector services."
   echo "Env file: ${POLYDATA_ENV_FILE}"
 }
 
@@ -218,30 +207,36 @@ start_docker_dependencies() {
   fi
 }
 
-stop_legacy_trade_runtime() {
-  systemctl --user stop polydata-trade-sync.service 2>/dev/null || true
-  systemctl --user disable polydata-trade-sync.service 2>/dev/null || true
+stop_gcp_and_legacy_runtime() {
+  systemctl --user stop polydata-api.service 2>/dev/null || true
+  systemctl --user disable polydata-api.service 2>/dev/null || true
   systemctl --user stop polydata.target 2>/dev/null || true
   systemctl --user disable polydata.target 2>/dev/null || true
+  systemctl --user stop polydata-gcp.target 2>/dev/null || true
+  systemctl --user disable polydata-gcp.target 2>/dev/null || true
+  systemctl --user stop "${LEGACY_CORE_TARGET}" 2>/dev/null || true
+  systemctl --user disable "${LEGACY_CORE_TARGET}" 2>/dev/null || true
+  systemctl --user stop polydata-new-market-signal.service 2>/dev/null || true
+  systemctl --user disable polydata-new-market-signal.service 2>/dev/null || true
 }
 
 ensure_installed() {
-  if [[ ! -f "${SYSTEMD_USER_DIR}/${CORE_TARGET}" ]]; then
+  if [[ ! -f "${SYSTEMD_USER_DIR}/${LOCAL_COLLECTOR_TARGET}" ]]; then
     install_services
   fi
 }
 
 start_services() {
   ensure_installed
-  stop_legacy_trade_runtime
+  stop_gcp_and_legacy_runtime
   start_docker_dependencies
-  systemctl --user start "${CORE_TARGET}"
-  echo "Started ${CORE_TARGET}."
+  systemctl --user start "${LOCAL_COLLECTOR_TARGET}"
+  echo "Started ${LOCAL_COLLECTOR_TARGET}."
 }
 
 start_data_services() {
   ensure_installed
-  stop_legacy_trade_runtime
+  stop_gcp_and_legacy_runtime
   start_docker_dependencies
   systemctl --user start "${DATA_SERVICES[@]}"
   echo "Started data sync services."
@@ -249,23 +244,24 @@ start_data_services() {
 
 restart_services() {
   ensure_installed
-  stop_legacy_trade_runtime
+  stop_gcp_and_legacy_runtime
   start_docker_dependencies
-  systemctl --user restart "${CORE_SERVICES[@]}"
-  echo "Restarted core services."
+  systemctl --user restart "${LOCAL_COLLECTOR_SERVICES[@]}"
+  echo "Restarted local collector services."
 }
 
 restart_data_services() {
   ensure_installed
-  stop_legacy_trade_runtime
+  stop_gcp_and_legacy_runtime
   start_docker_dependencies
   systemctl --user restart "${DATA_SERVICES[@]}"
   echo "Restarted data sync services."
 }
 
 stop_services() {
-  systemctl --user stop "${CORE_TARGET}" "${CORE_SERVICES[@]}" 2>/dev/null || true
-  echo "Stopped core services."
+  systemctl --user stop "${LOCAL_COLLECTOR_TARGET}" "${LOCAL_COLLECTOR_SERVICES[@]}" 2>/dev/null || true
+  systemctl --user stop polydata-api.service 2>/dev/null || true
+  echo "Stopped local collector services."
 }
 
 status_services() {
@@ -280,17 +276,17 @@ status_services() {
   echo
   local units=()
   local unit
-  for unit in "${CORE_TARGET}" "${CORE_SERVICES[@]}"; do
+  for unit in "${LOCAL_COLLECTOR_TARGET}" "${LOCAL_COLLECTOR_SERVICES[@]}"; do
     if systemctl --user cat "${unit}" >/dev/null 2>&1; then
       units+=("${unit}")
     fi
   done
   if [[ "${#units[@]}" -eq 0 ]]; then
-    echo "No installed polyData core units found. Run: make services-install"
+    echo "No installed polyData local collector units found. Run: make services-install"
     return
   fi
-  if [[ ! " ${units[*]} " =~ " ${CORE_TARGET} " ]]; then
-    echo "${CORE_TARGET} is not installed yet. Run: make services-install"
+  if [[ ! " ${units[*]} " =~ " ${LOCAL_COLLECTOR_TARGET} " ]]; then
+    echo "${LOCAL_COLLECTOR_TARGET} is not installed yet. Run: make services-install"
     echo
   fi
   systemctl --user --no-pager --plain status "${units[@]}" 2>&1 | sed -n '1,220p'

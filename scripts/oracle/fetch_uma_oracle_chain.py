@@ -52,6 +52,7 @@ from db import (
     init_schema,
     is_postgres_backend,
 )
+from trade.rpc_utils import build_web3 as build_shared_web3
 
 # 合约地址（Polygon）
 DEFAULT_ORACLE_ADDRESSES = [
@@ -253,28 +254,12 @@ def _call_with_retries(stage: str, func, max_retries: int = MAX_RETRIES):
 
 
 def _build_web3(rpc_url: str) -> Web3:
-    last_error: Optional[Exception] = None
-    for attempt in range(1, RPC_CONNECT_RETRIES + 1):
-        try:
-            w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-            if ExtraDataToPOAMiddleware:
-                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-            if not w3.is_connected():
-                raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
-            return w3
-        except Exception as exc:
-            last_error = exc
-            if attempt >= RPC_CONNECT_RETRIES:
-                break
-            print(
-                f"[oracle] RPC connect failed ({attempt}/{RPC_CONNECT_RETRIES}): {_format_rpc_error(exc)}. "
-                f"Retrying in {RPC_CONNECT_RETRY_DELAY_SECONDS}s...",
-                file=sys.stderr,
-            )
-            time.sleep(RPC_CONNECT_RETRY_DELAY_SECONDS)
-    if last_error is None:
-        raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
-    raise ConnectionError(f"Cannot connect to RPC: {rpc_url}") from last_error
+    return build_shared_web3(
+        rpc_url,
+        timeout_seconds=60,
+        connect_retries=RPC_CONNECT_RETRIES,
+        connect_retry_delay_seconds=RPC_CONNECT_RETRY_DELAY_SECONDS,
+    )
 
 
 def _compute_watch_error_backoff(interval_seconds: int, consecutive_failures: int) -> int:
@@ -567,22 +552,10 @@ def _parse_date_to_timestamp(s: str) -> int:
 
 
 def _block_at_timestamp(w3: Web3, target_ts: int, high: Optional[int] = None) -> int:
-    low, result = 0, 0
-    if high is None:
-        high = int(_call_with_retries("eth_blockNumber", lambda: w3.eth.block_number))
-    while low <= high:
-        mid = (low + high) // 2
-        try:
-            blk = _call_with_retries(f"eth_getBlockByNumber({mid})", lambda: w3.eth.get_block(mid))
-            ts = blk.get("timestamp") or 0
-            if ts <= target_ts:
-                result = mid
-                low = mid + 1
-            else:
-                high = mid - 1
-        except Exception:
-            high = mid - 1
-    return result
+    raise RuntimeError(
+        "Date/timestamp-to-block conversion is disabled. Pass explicit "
+        "--oracle-start-block/--adapter-start-block/--end-block instead."
+    )
 
 
 def _address_has_code_at_block(w3: Web3, address: str, block_number: int) -> bool:
@@ -651,16 +624,9 @@ def resolve_auto_start_block(
     neg_risk_operator_addresses: List[str],
 ) -> int:
     start_candidates: List[int] = []
-    earliest_market_created_at = _get_earliest_market_created_at(db_path) if db_path and _db_target_available(db_path) else None
-    if earliest_market_created_at:
-        earliest_dt = _parse_any_datetime(earliest_market_created_at)
-        if earliest_dt is not None:
-            market_start_block = _block_at_timestamp(w3, int(earliest_dt.timestamp()), high=end_block)
-            start_candidates.append(market_start_block)
-            print(
-                f"[oracle] earliest market created_at={earliest_market_created_at} -> block {market_start_block}",
-                file=sys.stderr,
-            )
+    # Do not infer a start block from market.created_at. That requires chain
+    # timestamp binary search via eth_getBlockByNumber and can unexpectedly
+    # consume RPC/proxy traffic on service restarts.
     contract_start_block = _resolve_contract_family_start_block(
         w3,
         adapter_addresses,
@@ -681,45 +647,16 @@ def resolve_auto_start_block(
     return resolved
 
 
-def get_block_timestamp(w3: Web3, block_number: int, max_retries: int = 3) -> Optional[str]:
-    hex_block = hex(block_number)
-    for attempt in range(max_retries):
-        try:
-            block = _call_with_retries(
-                f"eth_getBlockByNumber({block_number})",
-                lambda: w3.eth.get_block(block_number),
-                max_retries=max_retries,
-            )
-            if block and block.get("timestamp") is not None:
-                return datetime.fromtimestamp(block["timestamp"], tz=timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M:%S.000 UTC"
-                )
-        except Exception:
-            try:
-                maker = getattr(w3, "provider", None) or getattr(w3, "manager", None)
-                if maker and hasattr(maker, "make_request"):
-                    raw = maker.make_request("eth_getBlockByNumber", [hex_block, False])
-                    if raw and raw.get("result"):
-                        ts_hex = raw["result"].get("timestamp")
-                        if ts_hex is not None:
-                            ts = int(ts_hex, 16) if isinstance(ts_hex, str) else int(ts_hex)
-                            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(
-                                "%Y-%m-%d %H:%M:%S.000 UTC"
-                            )
-            except Exception:
-                pass
-        if attempt < max_retries - 1:
-            time.sleep(RETRY_DELAY_BASE ** (attempt + 1))
-    return None
-
-
 def _block_ts(w3: Web3, block_number: int, cache: Optional[Dict[int, str]] = None) -> str:
-    if cache is not None and block_number in cache:
-        return cache[block_number] or ""
-    ts = get_block_timestamp(w3, block_number)
+    """Return no event_time without issuing per-block timestamp RPC calls.
+
+    Oracle rows keep block_number/log_index/tx_hash as the canonical chain
+    ordering. Hydrating block timestamps requires eth_getBlockByNumber per
+    unique block and is intentionally disabled for live/backfill sync traffic.
+    """
     if cache is not None:
-        cache[block_number] = ts or ""
-    return ts or ""
+        cache.setdefault(block_number, "")
+    return ""
 
 
 def fetch_logs_with_retry(
@@ -1674,15 +1611,10 @@ def run(
 
     # 日期转区块
     if start_date or end_date:
-        if not start_date or not end_date:
-            raise ValueError("--start 和 --end 必须同时指定")
-        ts_start = _parse_date_to_timestamp(start_date)
-        _end = end_date.strip()
-        ts_end = _parse_date_to_timestamp(_end + " 23:59:59" if len(_end) == 10 else _end)
-        latest = w3.eth.block_number
-        oracle_start_block = _block_at_timestamp(w3, ts_start - 1, high=latest) + 1
-        end_block = _block_at_timestamp(w3, ts_end, high=latest)
-        print(f"日期 {start_date} ~ {end_date} -> 区块 {oracle_start_block} ~ {end_block}", file=sys.stderr)
+        raise ValueError(
+            "--start/--end date conversion is disabled because it requires "
+            "eth_getBlockByNumber timestamp lookups. Use explicit block ranges."
+        )
     if end_block is None:
         end_block = w3.eth.block_number
     if continue_sync and oracle_start_block is None:
@@ -1861,28 +1793,9 @@ def run(
     )
     _live("oracle_logs_fetched", progress_block=end_block, logs_scanned=len(logs))
 
-    # ================= 核心优化 1：高并发预取所有独立区块的时间戳 =================
-    unique_blocks = list(set(log["blockNumber"] for log in logs if "blockNumber" in log))
     block_ts_cache: Dict[int, str] = {}
-    if unique_blocks:
-        nw = max_workers
-        print(f"  ... 准备预取 {len(unique_blocks)} 个独立区块的时间戳 ({nw}线程并发)...", file=sys.stderr)
 
-        def _fetch_ts(b_num):
-            return b_num, get_block_timestamp(w3, b_num)
-
-        with ThreadPoolExecutor(max_workers=nw) as executor:
-            future_to_block = {executor.submit(_fetch_ts, b): b for b in unique_blocks}
-            completed = 0
-            for future in as_completed(future_to_block):
-                b_num, ts = future.result()
-                block_ts_cache[b_num] = ts or ""
-                completed += 1
-                if completed % max(1, len(unique_blocks) // 10) == 0 or completed == len(unique_blocks):
-                    progress = (completed / len(unique_blocks)) * 100
-                    print(f"  ---> 区块时间预取进度: {completed}/{len(unique_blocks)} ({progress:.1f}%)", file=sys.stderr)
-
-    # ================= 解析日志 (此时查 cache 秒出，不再卡顿) =================
+    # ================= 解析日志：不再预取链上 block timestamp =================
     print(f"  ... 开始解析 {len(logs)} 条日志...", file=sys.stderr)
     rows: List[Dict] = []
     for log in logs:
@@ -1897,32 +1810,9 @@ def run(
         if d:
             rows.append(d)
 
-    # ================= 核心优化 2：高并发预取 Request 交易的发起者 =================
-    request_txs = list(set(r["tx_hash"] for r in rows if r["label"] == "request" and r.get("tx_hash")))
+    # 不再为 Request 事件额外预取交易发送者。该字段只是辅助展示，
+    # 但会对每笔 request 额外触发 eth_getTransactionByHash。
     tx_sender_cache: Dict[str, str] = {}
-    if request_txs:
-        nw = max_workers
-        print(f"  ... 准备预取 {len(request_txs)} 笔 Request 交易的发起者 ({nw}线程并发)...", file=sys.stderr)
-
-        def _fetch_tx_sender(tx_hash):
-            for attempt in range(3):
-                try:
-                    tx = w3.eth.get_transaction(tx_hash)
-                    return tx_hash, tx.get("from") if tx else None
-                except Exception:
-                    time.sleep(1)
-            return tx_hash, None
-
-        with ThreadPoolExecutor(max_workers=nw) as executor:
-            future_to_tx = {executor.submit(_fetch_tx_sender, tx): tx for tx in request_txs}
-            completed = 0
-            for future in as_completed(future_to_tx):
-                tx_h, sender = future.result()
-                tx_sender_cache[tx_h] = sender or ""
-                completed += 1
-                if completed % max(1, len(request_txs) // 10) == 0 or completed == len(request_txs):
-                    progress = (completed / len(request_txs)) * 100
-                    print(f"  ---> 交易 Sender 预取进度: {completed}/{len(request_txs)} ({progress:.1f}%)", file=sys.stderr)
 
     def _fast_fill_requester(tx_hash: str) -> Optional[str]:
         return tx_sender_cache.get(tx_hash) or None

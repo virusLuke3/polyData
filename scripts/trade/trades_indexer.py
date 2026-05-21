@@ -42,7 +42,7 @@ except ImportError:
             from web3.middleware.geth_poa import geth_poa_middleware
         except ImportError:
             geth_poa_middleware = None
-            print("Warning: POA middleware not found; will use raw RPC for block timestamp.", file=sys.stderr)
+            print("Warning: POA middleware not found; continuing without POA middleware.", file=sys.stderr)
 
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, get_backend, get_connection, init_schema, dict_from_row, DEFAULT_DB_PATH
 from db.db import table_exists
@@ -70,6 +70,7 @@ from trade.orderfilled_raw import (
     insert_orderfilled_raw_batch,
     orderfilled_raw_row,
 )
+from trade.rpc_utils import build_web3 as build_shared_web3
 from config import get_rpc_url
 
 USDC_DIVISOR = 10**6
@@ -105,28 +106,12 @@ def iter_chunks(items: List[Any], chunk_size: int) -> Iterable[Tuple[int, List[A
 
 
 def _build_web3(rpc_url: str) -> Web3:
-    last_error: Optional[Exception] = None
-    for attempt in range(1, RPC_CONNECT_RETRIES + 1):
-        try:
-            w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-            if geth_poa_middleware is not None:
-                w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-            if not w3.is_connected():
-                raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
-            return w3
-        except Exception as exc:
-            last_error = exc
-            if attempt >= RPC_CONNECT_RETRIES:
-                break
-            print(
-                f"[trade] RPC connect failed ({attempt}/{RPC_CONNECT_RETRIES}): {exc}. "
-                f"Retrying in {RPC_CONNECT_RETRY_DELAY_SECONDS}s...",
-                file=sys.stderr,
-            )
-            time.sleep(RPC_CONNECT_RETRY_DELAY_SECONDS)
-    if last_error is None:
-        raise ConnectionError(f"Cannot connect to RPC: {rpc_url}")
-    raise ConnectionError(f"Cannot connect to RPC: {rpc_url}") from last_error
+    return build_shared_web3(
+        rpc_url,
+        timeout_seconds=60,
+        connect_retries=RPC_CONNECT_RETRIES,
+        connect_retry_delay_seconds=RPC_CONNECT_RETRY_DELAY_SECONDS,
+    )
 
 
 def _get_thread_local_web3(rpc_url: str) -> Web3:
@@ -373,143 +358,6 @@ def fetch_logs_parallel_with_retry(
     return logs
 
 
-def get_block_timestamp(w3: Web3, block_number: int, max_retries: int = 3) -> Optional[str]:
-    """查询区块时间戳，带重试。POA 链解析失败时用原始 RPC 只取 timestamp。"""
-    hex_block = hex(block_number)
-    for attempt in range(max_retries):
-        try:
-            block = w3.eth.get_block(block_number)
-            if block is None:
-                if attempt < max_retries - 1:
-                    time.sleep(RETRY_DELAY_BASE ** (attempt + 1))
-                continue
-            ts = block.get("timestamp")
-            if ts is not None:
-                return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
-        except Exception:
-            # POA 链 extraData 解析失败时，用原始 RPC 只取 timestamp，绕过区块对象校验
-            try:
-                # 优先用 provider，部分版本为 manager
-                maker = getattr(w3, "provider", None) or getattr(w3, "manager", None)
-                if maker and hasattr(maker, "make_request"):
-                    raw = maker.make_request("eth_getBlockByNumber", [hex_block, False])
-                else:
-                    raw = None
-                if raw and raw.get("result"):
-                    ts_hex = raw["result"].get("timestamp")
-                    if ts_hex is not None:
-                        ts = int(ts_hex, 16) if isinstance(ts_hex, str) else int(ts_hex)
-                        return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
-            except Exception:
-                pass
-            if attempt < max_retries - 1:
-                time.sleep(RETRY_DELAY_BASE ** (attempt + 1))
-            else:
-                pass  # 已尝试 raw RPC，不再刷屏
-    return None
-
-
-def prefetch_block_timestamps(
-    conn,
-    rpc_url: str,
-    logs: List[Dict],
-    block_ts_cache: Dict[int, str],
-    max_workers: int = MAX_WORKERS,
-) -> None:
-    unique_blocks = list({log["blockNumber"] for log in logs if "blockNumber" in log and log["blockNumber"] not in block_ts_cache})
-    if not unique_blocks:
-        return
-
-    cursor = conn.cursor()
-    for chunk_start in range(0, len(unique_blocks), SQLITE_IN_MAX_VARS):
-        block_chunk = unique_blocks[chunk_start:chunk_start + SQLITE_IN_MAX_VARS]
-        placeholders = ",".join("?" for _ in block_chunk)
-        cursor.execute(
-            f"SELECT block_number, timestamp FROM block_timestamps WHERE block_number IN ({placeholders})",
-            block_chunk,
-        )
-        cached_rows = cursor.fetchall()
-        for row in cached_rows:
-            block_ts_cache[int(row["block_number"])] = row["timestamp"]
-
-    missing_blocks = [block for block in unique_blocks if block not in block_ts_cache]
-    if not missing_blocks:
-        print(
-            f"  ... 区块时间戳全部命中本地缓存 ({len(unique_blocks)} 个区块)...",
-            file=sys.stderr,
-        )
-        return
-
-    print(
-        f"  ... 准备预取 {len(missing_blocks)} 个独立区块的时间戳 ({len(unique_blocks) - len(missing_blocks)} 个命中本地缓存, {max_workers}线程并发)...",
-        file=sys.stderr,
-    )
-
-    def _fetch_ts(block_number: int):
-        recovery_attempt = 0
-        while True:
-            try:
-                w3 = _get_thread_local_web3(rpc_url)
-                ts = get_block_timestamp(w3, block_number)
-                if ts:
-                    return block_number, ts
-                return block_number, None
-            except Exception as exc:
-                _invalidate_thread_local_web3(rpc_url)
-                if not _is_transient_rpc_error(exc):
-                    print(
-                        f"  [trade] block timestamp fetch failed for {block_number}: {_format_rpc_error(exc)}",
-                        file=sys.stderr,
-                    )
-                    return block_number, None
-                recovery_attempt += 1
-                _sleep_for_rpc_recovery(f"timestamp block {block_number}", recovery_attempt, exc)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_block = {executor.submit(_fetch_ts, b): b for b in missing_blocks}
-        completed = 0
-        rows_to_persist = []
-        for future in as_completed(future_to_block):
-            try:
-                block_number, ts = future.result()
-            except Exception as exc:
-                block_number = future_to_block[future]
-                print(
-                    f"  [trade] unexpected timestamp future failure for block {block_number}: {_format_rpc_error(exc)}",
-                    file=sys.stderr,
-                )
-                ts = None
-            block_ts_cache[block_number] = ts or ""
-            if ts:
-                rows_to_persist.append((block_number, ts))
-            completed += 1
-            if completed % max(1, len(missing_blocks) // 10) == 0 or completed == len(missing_blocks):
-                progress = (completed / len(missing_blocks)) * 100
-                print(
-                    f"  ---> 区块时间预取进度: {completed}/{len(missing_blocks)} ({progress:.1f}%)",
-                    file=sys.stderr,
-                )
-
-    if rows_to_persist:
-        for attempt in range(1, DB_WRITE_MAX_RETRIES + 1):
-            try:
-                cursor.executemany(
-                    "INSERT OR REPLACE INTO block_timestamps (block_number, timestamp) VALUES (?, ?)",
-                    rows_to_persist,
-                )
-                conn.commit()
-                break
-            except Exception as exc:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                if attempt < DB_WRITE_MAX_RETRIES and _is_retryable_db_write_error(exc):
-                    _sleep_for_db_write_retry(f"persist_block_timestamps[{len(rows_to_persist)} rows]", attempt, exc)
-                    continue
-                raise
-
-
 def build_trade_key(tx_hash: Any, log_index: Any) -> Tuple[str, int]:
     if hasattr(tx_hash, "hex"):
         tx_hash_text = tx_hash.hex()
@@ -700,7 +548,11 @@ def resolve_market_by_token_id(
 
 
 def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: Dict[int, str]) -> Optional[Dict]:
-    """解码日志并补充 block_number、timestamp、size"""
+    """解码日志并补充 block_number、size。
+
+    不再通过 eth_getBlockByNumber 补链上 block timestamp；同步吞吐优先，
+    前端/分析按 block_number + log_index 排序即可。
+    """
     decoded = decode_order_filled_log(log, w3=w3, event_decoder=event_decoder)
     if not decoded:
         return None
@@ -708,9 +560,7 @@ def decode_and_enrich(log: Dict, w3: Web3, event_decoder: Any, block_ts_cache: D
     block_num = log.get("blockNumber")
     if block_num is not None:
         decoded["block_number"] = block_num
-        if block_num not in block_ts_cache:
-            block_ts_cache[block_num] = get_block_timestamp(w3, block_num)
-        decoded["timestamp"] = block_ts_cache.get(block_num)
+        decoded["timestamp"] = ""
     
     # size = 成交的头寸代币数量（实际单位，除以1e6）
     tid = str(decoded.get("tokenId", ""))
@@ -906,9 +756,6 @@ def run_indexer(
                         file=sys.stderr,
                     )
 
-            if logs:
-                prefetch_block_timestamps(conn, rpc_url, logs, block_ts_cache, max_workers=max_workers)
-
             print(f"  ... 开始解析并写入当前窗口 {len(logs)} 条日志...", file=sys.stderr)
             progress_step = max(1, len(logs) // 100)
             next_progress_mark = progress_step
@@ -1076,11 +923,7 @@ def get_last_synced_block(
 
 
 def _resolve_sync_range(args, rpc_url: str) -> Tuple[int, int]:
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    if geth_poa_middleware is not None:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)  # Polygon 为 POA 链
-    if not w3.is_connected():
-        raise ConnectionError("Cannot connect to RPC")
+    w3 = _build_web3(rpc_url)
 
     to_block = args.to_block
     if to_block is None:

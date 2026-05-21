@@ -37,12 +37,26 @@ curl http://127.0.0.1:18500/bootstrap
 
 Public systemd templates live in `deploy/systemd/`.
 
-Typical commands:
+The same codebase is used on the local collector host and on GCP. Select the
+role by target:
+
+- `polydata-local-collector.target`: local market/orderfilled/oracle collectors.
+- `polydata-gcp.target`: GCP API and seed-cache watchers.
+
+Local collector commands:
+
+```bash
+make services-install
+make services-start
+make services-status
+```
+
+GCP manual target commands:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now polydata.target
-systemctl --user status polydata-api polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync
+systemctl --user enable --now polydata-gcp.target
+systemctl --user status polydata-gcp.target polydata-api
 journalctl --user-unit polydata-api -f
 ```
 

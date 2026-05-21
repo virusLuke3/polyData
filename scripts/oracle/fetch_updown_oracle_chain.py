@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -35,7 +33,6 @@ from oracle.fetch_uma_oracle_chain import (
     _format_rpc_error,
     _parse_any_datetime,
     fetch_logs_many_addresses,
-    get_block_timestamp,
     get_last_oracle_synced_block,
     save_oracle_synced_block,
 )
@@ -44,8 +41,6 @@ from oracle.fetch_uma_oracle_chain import (
 DEFAULT_UPDOWN_SYNC_STATE_KEY = "oracle_backfill_updown"
 DEFAULT_CURRENT_CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 DEFAULT_LEGACY_CTF_ADDRESS = "0xC59b0e4De5F1248C1140964E0fF287B192407E0C"
-USER_OPERATION_EVENT_SIG = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-ENTRY_POINT_ADDRESS = "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108"
 CTF_EVENT_SIGNATURES = {
     "request": "ConditionPreparation(bytes32,address,bytes32,uint256)",
     "settle": "ConditionResolution(bytes32,address,bytes32,uint256,uint256[])",
@@ -114,18 +109,10 @@ def resolve_updown_start_block(
     db_path: Optional[str],
     end_block: int,
 ) -> int:
-    earliest_created_at = _get_earliest_updown_market_created_at(db_path)
-    if not earliest_created_at:
-        return max(0, end_block - 500_000)
-    dt = _parse_any_datetime(earliest_created_at)
-    if dt is None:
-        return max(0, end_block - 500_000)
-    start_block = _block_at_timestamp(w3, int(dt.timestamp()), high=end_block)
-    print(
-        f"[updown-oracle] earliest updown created_at={earliest_created_at} -> block {start_block}",
-        file=sys.stderr,
-    )
-    return start_block
+    # Do not map market.created_at to a block. That binary search issues
+    # eth_getBlockByNumber timestamp calls and can silently burn proxy/RPC
+    # traffic when a service restarts without a checkpoint.
+    return max(0, end_block - 500_000)
 
 
 def _build_updown_market_indices(db_path: Optional[str]) -> Dict[str, Dict[str, Any]]:
@@ -231,45 +218,6 @@ def _decode_ctf_event(w3: Web3, log: Dict[str, Any]) -> Optional[Dict[str, Any]]
     return None
 
 
-def _extract_userop_sender(receipt) -> str:
-    for log in receipt.get("logs", []):
-        topics = log.get("topics") or []
-        if not topics:
-            continue
-        topic0 = topics[0].hex() if hasattr(topics[0], "hex") else str(topics[0])
-        if topic0.lower() != USER_OPERATION_EVENT_SIG.lower():
-            continue
-        if len(topics) < 3:
-            continue
-        raw = topics[2].hex() if hasattr(topics[2], "hex") else str(topics[2])
-        return "0x" + raw[-40:].lower()
-    return ""
-
-
-def _get_tx_context(
-    w3: Web3,
-    tx_hash: str,
-    cache: Dict[str, Dict[str, Any]],
-) -> Dict[str, Any]:
-    cached = cache.get(tx_hash)
-    if cached is not None:
-        return cached
-    tx = _call_with_retries(
-        f"eth_getTransactionByHash({tx_hash})",
-        lambda: w3.eth.get_transaction(tx_hash),
-    )
-    tx_from = _lower_or_empty(tx.get("from") if tx else "")
-    tx_to = _lower_or_empty(tx.get("to") if tx and tx.get("to") else "")
-    context = {
-        "tx_from": tx_from,
-        "tx_to": tx_to,
-        "actor": tx_from,
-        "log_addresses": [],
-    }
-    cache[tx_hash] = context
-    return context
-
-
 def _build_string_raw(market: Dict[str, Any], decoded: Dict[str, Any]) -> str:
     parts = [f"title: {market.get('title') or market.get('slug') or ''}"]
     description = str(market.get("description") or "").strip()
@@ -364,7 +312,6 @@ def run_updown_oracle_backfill(
     )
 
     writer = _OracleDbWriter(str(Path(db_path or "").expanduser().resolve()))
-    block_time_cache: Dict[int, str] = {}
     stats = {
         "logs_scanned": len(logs),
         "matched_events": 0,
@@ -384,40 +331,14 @@ def run_updown_oracle_backfill(
         tx_hash = log["transactionHash"].hex() if hasattr(log["transactionHash"], "hex") else str(log["transactionHash"])
         matched_entries.append((log, decoded, market, tx_hash))
 
-    tx_hashes = sorted({entry[3] for entry in matched_entries})
-    tx_cache: Dict[str, Dict[str, Any]] = {}
-    if tx_hashes:
-        worker_count = max(1, min(max_workers, len(tx_hashes)))
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            future_to_tx = {
-                executor.submit(_get_tx_context, w3, tx_hash, {}): tx_hash
-                for tx_hash in tx_hashes
-            }
-            completed = 0
-            total = len(future_to_tx)
-            for future in as_completed(future_to_tx):
-                tx_hash = future_to_tx[future]
-                tx_cache[tx_hash] = future.result()
-                completed += 1
-                if completed % max(1, total // 20) == 0 or completed == total:
-                    progress = (completed / total) * 100
-                    print(
-                        f"[updown-oracle] tx context progress: {completed}/{total} ({progress:.1f}%)",
-                        file=sys.stderr,
-                    )
+    tx_context = {"tx_from": "", "tx_to": "", "actor": "", "log_addresses": []}
 
     for log, decoded, market, tx_hash in matched_entries:
-        tx_context = tx_cache.get(tx_hash) or {"tx_from": "", "tx_to": "", "actor": "", "log_addresses": []}
-        block_number = int(log.get("blockNumber", 0) or 0)
-        event_time = block_time_cache.get(block_number)
-        if event_time is None:
-            event_time = get_block_timestamp(w3, block_number) or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.000 UTC")
-            block_time_cache[block_number] = event_time
         record = _build_record(
             market,
             decoded,
             log,
-            event_time,
+            "",
             tx_context,
             _lower_or_empty(log.get("_source_address") or log.get("address") or ""),
         )

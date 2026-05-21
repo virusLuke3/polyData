@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List, Tuple
 SECRET_MARKERS = ("PASSWORD", "SECRET", "TOKEN", "KEY", "NODE_URL", "RPC")
 
 REMOTE_REQUIRED = {
+    "POLYDATA_DEPLOY_ROLE": "gcp-api",
     "POLYMARKET_DB_BACKEND": "postgres",
     "POLYDATA_POSTGRES_HOST": "127.0.0.1",
     "POLYDATA_POSTGRES_PORT": "45432",
@@ -23,6 +24,7 @@ REMOTE_REQUIRED = {
     "POLYDATA_REDIS_URL": "redis://127.0.0.1:6379/0",
     "POLYDATA_REDIS_PREFIX": "polydata:",
     "POLYDATA_SNAPSHOT_SQLITE_PATH": "/opt/polyData/data/panel_snapshots.sqlite3",
+    "POLYDATA_SNAPSHOT_PREWARM": "1",
     "POLYDATA_GUNICORN_WORKERS": "3",
     "POLYDATA_GUNICORN_THREADS": "4",
     "POLYDATA_GUNICORN_MAX_REQUESTS": "300",
@@ -32,9 +34,11 @@ REMOTE_REQUIRED = {
 }
 
 LOCAL_REQUIRED = {
+    "POLYDATA_DEPLOY_ROLE": "local-collector",
     "POLYMARKET_DB_BACKEND": "postgres",
     "POLYDATA_POSTGRES_HOST": "127.0.0.1",
     "POLYDATA_POSTGRES_DATABASE": "poly_data_core",
+    "POLYDATA_SNAPSHOT_PREWARM": "0",
 }
 
 REMOTE_UNNEEDED_PREFIXES = ("VITE_",)
@@ -42,6 +46,9 @@ REMOTE_UNNEEDED_KEYS = {
     "POLYDATA_PUBLIC_WEB_URL",
     "POLYMARKET_RPC_URL",
     "NODE_URL",
+    "POLYDATA_GCP_SSH_TARGET",
+    "POLYDATA_LOCAL_POSTGRES_PORT",
+    "POLYDATA_REMOTE_POSTGRES_PORT",
 }
 
 
@@ -94,6 +101,8 @@ def check_local(values: Dict[str, str]) -> tuple[List[str], List[str]]:
         errors.append("POLYDATA_POSTGRES_PASSWORD: expected <set>, got <missing>")
     if values.get("POLYDATA_API_READONLY") == "1":
         warnings.append("POLYDATA_API_READONLY=1: local env is usually for sync/write/development, not readonly API")
+    if values.get("POLYDATA_SNAPSHOT_PREWARM") not in {None, "", "0", "false", "False", "off", "OFF"}:
+        warnings.append("POLYDATA_SNAPSHOT_PREWARM: local collector should not run API/runtime prewarm loops")
     for key in sorted(values):
         if key.startswith("POLYMARKET_MYSQL_"):
             warnings.append(f"{key}: legacy MySQL variable is ignored by the PostgreSQL runtime")

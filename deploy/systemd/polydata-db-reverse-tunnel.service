@@ -13,4 +13,4 @@ Restart=always
 RestartSec=8
 
 [Install]
-WantedBy=default.target
+WantedBy=polydata-local-collector.target

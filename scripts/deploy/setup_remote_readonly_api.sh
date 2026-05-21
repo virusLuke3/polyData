@@ -61,6 +61,7 @@ trap 'rm -f "${LOCAL_ENV_FILE}" "${LOCAL_TUNNEL_SERVICE}" "${LOCAL_API_SERVICE}"
 
 cat > "${LOCAL_ENV_FILE}" <<EOF
 POLYMARKET_DB_BACKEND=postgres
+POLYDATA_DEPLOY_ROLE=gcp-api
 POLYDATA_POSTGRES_HOST=127.0.0.1
 POLYDATA_POSTGRES_PORT=${REMOTE_DB_TUNNEL_PORT}
 POLYDATA_POSTGRES_USER=${POSTGRES_USER}
@@ -72,6 +73,7 @@ POLYDATA_PYTHON_BIN=${PYTHON_BIN}
 POLYDATA_API_READONLY=1
 POLYDATA_API_HOST=127.0.0.1
 POLYDATA_API_PORT=${API_PORT}
+POLYDATA_SNAPSHOT_PREWARM=1
 POLYDATA_GUNICORN_WORKERS=${GUNICORN_WORKERS}
 POLYDATA_GUNICORN_THREADS=${GUNICORN_THREADS}
 POLYDATA_GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS}
@@ -97,7 +99,7 @@ Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=default.target
+WantedBy=polydata-gcp.target
 EOF
 
 cat > "${LOCAL_API_SERVICE}" <<EOF
@@ -117,7 +119,7 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=polydata-gcp.target
 EOF
 
 cat > "${LOCAL_NGINX_CONF}" <<EOF
@@ -170,6 +172,42 @@ install -m 600 /tmp/polydata.env "${HOME}/.config/polydata/polydata.env"
 install -m 644 /tmp/polydata-db-tunnel.service "${HOME}/.config/systemd/user/polydata-db-tunnel.service"
 install -m 644 /tmp/polydata-api.service "${HOME}/.config/systemd/user/polydata-api.service"
 
+GCP_UNITS=(
+  polydata-gcp.target
+  polydata.target
+  polydata-alpha-signal-seed.service
+  polydata-bootstrap-seed.service
+  polydata-cpi-release-calendar-seed.service
+  polydata-crypto-funding-seed.service
+  polydata-energy-gasoline-shock-seed.service
+  polydata-f1-seed.service
+  polydata-finance-external-sources-seed.service
+  polydata-food-retail-basket-seed.service
+  polydata-geo-sanctions-shock.service
+  polydata-global-weather-map-seed.service
+  polydata-grid-esports-seed.service
+  polydata-inflation-nowcast-seed.service
+  polydata-jin10-seed.service
+  polydata-macro-cpi-panels-seed.service
+  polydata-macro-cpi-registry-seed.service
+  polydata-market-group-seed.service
+  polydata-nba-seed.service
+  polydata-new-market-signal.service
+  polydata-polymarket-macro-map-seed.service
+  polydata-sports-odds-seed.service
+  polydata-suspicious-trades-seed.service
+  polydata-weather-news-seed.service
+  polydata-whale-trades-seed.service
+)
+for unit in "${GCP_UNITS[@]}"; do
+  src="${REMOTE_REPO_ROOT}/deploy/systemd/${unit}"
+  if [[ ! -f "${src}" ]]; then
+    echo "Missing GCP unit template: ${src}" >&2
+    exit 1
+  fi
+  sed "s|/__POLYDATA_REPO_ROOT__|${REMOTE_REPO_ROOT}|g" "${src}" > "${HOME}/.config/systemd/user/${unit}"
+done
+
 if [[ ! -x "${REMOTE_REPO_ROOT}/.venv/bin/python" ]]; then
   python3 -m venv "${REMOTE_REPO_ROOT}/.venv"
 fi
@@ -187,10 +225,29 @@ sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydat
 sudo nginx -t
 
 systemctl --user daemon-reload
-systemctl --user disable polydata.target >/dev/null 2>&1 || true
-systemctl --user stop polydata.target polydata-market-sync polydata-trade-sync polydata-oracle-sync polydata-analytics-sync >/dev/null 2>&1 || true
-systemctl --user enable --now polydata-db-tunnel.service
-systemctl --user enable --now polydata-api.service
+systemctl --user disable polydata-core.target polydata-local-collector.target >/dev/null 2>&1 || true
+systemctl --user stop \
+  polydata-core.target \
+  polydata-local-collector.target \
+  polydata-market-sync.service \
+  polydata-trade-sync.service \
+  polydata-oracle-sync.service \
+  polydata-analytics-sync.service \
+  polydata-event-market-serving.service \
+  polydata-new-market-signal.service \
+  polydata-db-reverse-tunnel.service \
+  >/dev/null 2>&1 || true
+systemctl --user disable \
+  polydata-local-collector.target \
+  polydata-market-sync.service \
+  polydata-trade-sync.service \
+  polydata-oracle-sync.service \
+  polydata-analytics-sync.service \
+  polydata-event-market-serving.service \
+  polydata-new-market-signal.service \
+  polydata-db-reverse-tunnel.service \
+  >/dev/null 2>&1 || true
+systemctl --user enable --now polydata-gcp.target
 
 sudo systemctl enable --now redis-server
 sudo systemctl enable --now nginx
@@ -223,7 +280,8 @@ echo "[5/7] Verifying Nginx proxy ..."
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "curl -fsS http://127.0.0.1/wm-api/health && echo"
 
 echo "[6/7] Remote service status ..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-db-tunnel.service polydata-api.service | sed -n '1,160p'"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service | sed -n '1,180p'"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-market-sync.service polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target; do state=\$(systemctl --user is-active \"\$unit\" 2>/dev/null || true); printf '%s %s\n' \"\$unit\" \"\$state\"; test \"\$state\" != active; done"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
 echo "[7/7] Done."
