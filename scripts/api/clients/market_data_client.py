@@ -108,12 +108,16 @@ def get_yahoo_market_snapshot(
 
 
 def _fetch_clob_prices_history(ctx: dict, token_id: str, *, start_ts: int, end_ts: int, fidelity_minutes: int) -> List[Dict[str, Any]]:
+    fidelity = int(max(1, fidelity_minutes))
+    bucket_seconds = max(300, min(3600, fidelity * 60))
+    bucketed_end_ts = int(end_ts) - (int(end_ts) % bucket_seconds)
+    bucketed_start_ts = int(start_ts) - (int(start_ts) % bucket_seconds)
     cache_key = json.dumps(
         {
             "tokenId": str(token_id),
-            "startTs": int(start_ts),
-            "endTs": int(end_ts),
-            "fidelity": int(fidelity_minutes),
+            "startTs": bucketed_start_ts,
+            "endTs": bucketed_end_ts,
+            "fidelity": fidelity,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -130,9 +134,9 @@ def _fetch_clob_prices_history(ctx: dict, token_id: str, *, start_ts: int, end_t
         f"{ctx['CLOB_API_BASE']}/prices-history",
         params={
             "market": str(token_id),
-            "startTs": int(start_ts),
-            "endTs": int(end_ts),
-            "fidelity": int(max(1, fidelity_minutes)),
+            "startTs": bucketed_start_ts,
+            "endTs": bucketed_end_ts,
+            "fidelity": fidelity,
         },
         timeout=ctx["CLOB_TIMEOUT_SECONDS"],
     )
@@ -148,7 +152,7 @@ def _fetch_clob_prices_history(ctx: dict, token_id: str, *, start_ts: int, end_t
             price = Decimal(str(item.get("p")))
         except (TypeError, ValueError, InvalidOperation):
             continue
-        if timestamp < start_ts or timestamp > end_ts:
+        if timestamp < bucketed_start_ts or timestamp > bucketed_end_ts:
             continue
         normalized[timestamp] = price
     rows = [{"timestamp": timestamp, "price": normalized[timestamp]} for timestamp in sorted(normalized)]

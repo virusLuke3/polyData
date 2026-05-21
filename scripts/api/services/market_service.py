@@ -771,9 +771,23 @@ def get_market_price_summary(
     market_id: int,
     market: Optional[dict] = None,
     *,
-    include_runtime_price: bool = True,
-    include_recent_stats: bool = True,
+    include_runtime_price: bool = False,
+    include_recent_stats: bool = False,
 ) -> Dict[str, Any]:
+    if market is None and not include_runtime_price and not include_recent_stats:
+        cache_key = json.dumps({"marketId": int(market_id), "v": 3}, sort_keys=True, ensure_ascii=True)
+        return ctx["get_snapshot_payload"](
+            "snapshot:market_price_summary",
+            cache_key,
+            lambda: get_market_price_summary(
+                ctx,
+                market_id,
+                market=get_market_by_id(ctx, market_id),
+                include_runtime_price=False,
+                include_recent_stats=False,
+            ),
+            ttl_seconds=90,
+        )
     market = market if market is not None else get_market_by_id(ctx, market_id)
     summary_row = ctx["query_one"](
         """
@@ -883,6 +897,32 @@ def get_market_chart_payload(
     price: Optional[Dict[str, Any]] = None,
     include_runtime_series: bool = True,
 ) -> Dict[str, Any]:
+    if market is None and price is None:
+        cache_key = json.dumps(
+            {
+                "marketId": int(market_id),
+                "range": str(range_name or "1d").strip().lower(),
+                "interval": str(interval or "5m").strip().lower(),
+                "includeRuntimeSeries": bool(include_runtime_series),
+                "v": 4,
+            },
+            sort_keys=True,
+            ensure_ascii=True,
+        )
+        return ctx["get_snapshot_payload"](
+            "snapshot:market_chart",
+            cache_key,
+            lambda: get_market_chart_payload(
+                ctx,
+                market_id,
+                range_name=range_name,
+                interval=interval,
+                market=get_market_by_id(ctx, market_id),
+                price=None,
+                include_runtime_series=include_runtime_series,
+            ),
+            ttl_seconds=180,
+        )
     market = market if market is not None else get_market_by_id(ctx, market_id)
     chart_context = _extract_market_chart_context(ctx, market, range_name)
     if chart_context:
@@ -1704,10 +1744,10 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             include_runtime_price=False,
             include_recent_stats=False,
         )
-        chart = get_market_chart_payload(ctx, market_id, market=market, price=price, include_runtime_series=True)
+        chart = get_market_chart_payload(ctx, market_id, market=market, price=price, include_runtime_series=False)
         oracle_payload = get_market_oracle_payload(ctx, market_id, market=market)
         oracle_events = oracle_payload.get("timeline", [])
-        trades = get_trades_by_market_id(ctx, market_id, limit=48, offset=0)
+        trades: List[Dict[str, Any]] = []
         normalized_market = ctx["normalize_market"](market)
         identity = _workspace_identity(market_id, market)
         diagnostics = _workspace_diagnostics(

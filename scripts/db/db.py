@@ -1104,7 +1104,31 @@ def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
           )
         """
     )
+    _ensure_postgres_trade_indexes(conn)
     _ensure_postgres_oracle_indexes(conn)
+
+
+def _ensure_postgres_trade_indexes(conn: PostgresConnectionWrapper) -> None:
+    for table in ("core.trades_v2", "core.trades"):
+        row = conn.execute("SELECT to_regclass(?)", (table,)).fetchone()
+        if not row or not row[0]:
+            continue
+        columns = get_table_columns(conn, table)
+        table_suffix = table.rsplit(".", 1)[-1]
+        if "market_id" in columns and "block_time" in columns:
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{table_suffix}_market_time_desc
+                  ON {table} (market_id, block_time DESC NULLS LAST, block_number DESC NULLS LAST, log_index DESC NULLS LAST)
+                """
+            )
+        if "market_id" in columns and "timestamp" in columns:
+            conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_{table_suffix}_market_timestamp_desc
+                  ON {table} (market_id, timestamp DESC NULLS LAST, block_number DESC NULLS LAST, log_index DESC NULLS LAST)
+                """
+            )
 
 
 def _ensure_postgres_oracle_indexes(conn: PostgresConnectionWrapper) -> None:
