@@ -840,8 +840,6 @@ def _get_market_chart_serving_payload(ctx: dict, market_id: int, range_name: str
         return None
     points = _json_payload(row.get("points"), list) or []
     history_status = str(row.get("history_status") or ("ok" if points else "missing"))
-    if not points and history_status == "missing":
-        return None
     return {
         "marketId": market_id,
         "localMarketId": market_id,

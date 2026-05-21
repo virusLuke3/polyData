@@ -188,6 +188,7 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
             (
               COALESCE(mss.is_final, FALSE) = FALSE
               OR COALESCE(mls.volume_24h, 0) > 0
+              OR ec.market_id IS NOT NULL
               OR m.created_at >= now() - interval '45 days'
             )
             """
@@ -196,6 +197,17 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
     params.append(int(max_markets))
     rows = conn.execute(
         f"""
+        WITH event_candidates AS (
+          SELECT
+            default_market_id AS market_id,
+            MAX(volume_24h) AS group_volume_24h,
+            MAX(trade_count_24h) AS group_trade_count_24h,
+            MAX(last_activity_at) AS group_last_activity_at,
+            MAX(active_rank) AS group_active_rank
+          FROM core.event_market_serving
+          WHERE default_market_id IS NOT NULL
+          GROUP BY default_market_id
+        )
         SELECT
           m.id,
           m.gamma_market_id,
@@ -231,20 +243,23 @@ def _load_candidate_markets(conn, *, max_markets: int, market_ids: Sequence[int]
           COALESCE(mlp.latest_yes_price, mls.latest_price) AS latest_yes_price,
           mlp.latest_no_price,
           COALESCE(mlp.latest_price, mls.latest_price) AS latest_price,
-          COALESCE(mlp.latest_trade_at, mls.latest_trade_at, mls.last_trade_at) AS latest_trade_at,
+          COALESCE(mlp.latest_trade_at, mls.latest_trade_at, mls.last_trade_at, ec.group_last_activity_at) AS latest_trade_at,
           mls.price_24h_ago,
-          COALESCE(mls.volume_24h, 0) AS volume_24h,
-          COALESCE(mls.trade_count_24h, 0) AS trade_count_24h,
-          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, m.created_at) AS last_activity_at
+          GREATEST(COALESCE(mls.volume_24h, 0), COALESCE(ec.group_volume_24h, 0)) AS volume_24h,
+          GREATEST(COALESCE(mls.trade_count_24h, 0), COALESCE(ec.group_trade_count_24h, 0)) AS trade_count_24h,
+          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, ec.group_last_activity_at, m.created_at) AS last_activity_at,
+          COALESCE(ec.group_active_rank, 0) AS group_active_rank
         FROM core.markets m
         LEFT JOIN core.market_status_snapshot mss ON mss.market_id = m.id
         LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
         LEFT JOIN core.market_list_serving mls ON mls.market_id = m.id
+        LEFT JOIN event_candidates ec ON ec.market_id = m.id
         {where_sql}
         ORDER BY
-          COALESCE(mls.volume_24h, 0) DESC,
-          COALESCE(mls.trade_count_24h, 0) DESC,
-          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, m.created_at) DESC NULLS LAST,
+          COALESCE(ec.group_active_rank, 0) DESC,
+          GREATEST(COALESCE(mls.volume_24h, 0), COALESCE(ec.group_volume_24h, 0)) DESC,
+          GREATEST(COALESCE(mls.trade_count_24h, 0), COALESCE(ec.group_trade_count_24h, 0)) DESC,
+          COALESCE(mls.last_trade_at, mls.latest_trade_at, mlp.latest_trade_at, ec.group_last_activity_at, m.created_at) DESC NULLS LAST,
           m.id DESC
         LIMIT ?
         """,
