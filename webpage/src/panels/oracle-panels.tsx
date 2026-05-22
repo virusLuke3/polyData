@@ -7,10 +7,21 @@ import { formatRelative, shortHash } from './shared/formatters';
 import { globalOracle } from './shared/selectors';
 
 function focusedOraclePayload(ctx: PanelRenderContext): OraclePayload | null {
-  if (ctx.selectedMarketId && ctx.bundle?.oracle) return ctx.bundle.oracle;
-  const selectedGroup = ctx.selectedMarketGroupDetail || ctx.selectedMarketGroup;
+  if (ctx.selectedMarketId && ctx.bundle?.oracle) {
+    const oracleMarketId = Number(ctx.bundle.oracle.localMarketId ?? ctx.bundle.oracle.marketId);
+    if (Number.isFinite(oracleMarketId) && oracleMarketId === Number(ctx.selectedMarketId)) {
+      return ctx.bundle.oracle;
+    }
+  }
+  const selectedGroup = ctx.selectedMarketGroupDetail || ctx.bundle?.group || ctx.selectedMarketGroup;
   const selectedOutcome = (
-    (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    ctx.bundle?.selectedOutcome && ctx.selectedMarketId != null && Number(ctx.bundle.selectedOutcome.marketId) === ctx.selectedMarketId
+      ? ctx.bundle.selectedOutcome
+      : null
+  ) || (
+    (selectedGroup?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+    || (selectedGroup?.topOutcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+    || (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || (selectedGroup?.topOutcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || null
   );
@@ -34,7 +45,7 @@ function focusedOraclePayload(ctx: PanelRenderContext): OraclePayload | null {
 }
 
 function focusedOracleStatus(ctx: PanelRenderContext, payload: OraclePayload) {
-  const marketTitle = ctx.selectedMarket?.title || ctx.bundle?.market?.title || ctx.selectedMarketGroupDetail?.title || ctx.selectedMarketGroup?.title || 'Selected market';
+  const marketTitle = ctx.bundle?.market?.title || ctx.selectedMarket?.title || ctx.bundle?.group?.title || ctx.selectedMarketGroupDetail?.title || ctx.selectedMarketGroup?.title || 'Selected market';
   const status = payload.completionStatus || (payload.isFinal ? 'SETTLED' : payload.isTradingClosed ? 'CLOSED' : 'OPEN');
   const outcome = payload.settlementOutcome && payload.settlementOutcome !== 'UNKNOWN' ? payload.settlementOutcome : 'Awaiting oracle';
   const bookStatus = String(ctx.bundle?.lob?.bookStatus || '').toLowerCase();

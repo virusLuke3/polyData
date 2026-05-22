@@ -590,12 +590,17 @@ function renderDetailChart(chart: ChartPayload | null) {
 
 export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const { renderPanelSlot, ...ctx } = props;
-  const focusedMarket = ctx.selectedMarket;
-  const selectedGroup = ctx.selectedMarketGroup;
-  const detail = ctx.selectedMarketGroupDetail;
+  const focusedMarket = (
+    ctx.bundle?.market?.id != null && ctx.selectedMarketId != null && Number(ctx.bundle.market.id) === Number(ctx.selectedMarketId)
+      ? ctx.bundle.market
+      : ctx.selectedMarket
+  );
+  const selectedGroup = ctx.bundle?.group || ctx.selectedMarketGroup;
+  const detail = ctx.selectedMarketGroupDetail || ctx.bundle?.group || null;
   const eventChart = ctx.selectedMarketGroupChart;
   const selectedOutcome = (
-    (detail?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+    (ctx.bundle?.selectedOutcome && ctx.selectedMarketId != null && Number(ctx.bundle.selectedOutcome.marketId) === ctx.selectedMarketId ? ctx.bundle.selectedOutcome : null)
+    || (detail?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
     || (selectedGroup?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
     || (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)

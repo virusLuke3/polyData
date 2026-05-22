@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
+from api.services import market_group_service
 from market.market_identity import MarketIdentity, oracle_event_lookup_clause, oracle_event_lookup_terms
 
 ACTIVE_MARKETS_SNAPSHOT_NAMESPACE = "snapshot:markets_active_v9"
@@ -240,12 +241,88 @@ def _workspace_identity(market_id: int, market: Dict[str, Any]) -> Dict[str, Any
         "localMarketId": market_id,
         "marketId": market_id,
         "gammaMarketId": market.get("gamma_market_id"),
+        "eventId": market.get("event_id"),
+        "eventSlug": market.get("event_slug"),
         "slug": market.get("slug"),
         "conditionId": market.get("condition_id"),
         "questionId": market.get("question_id"),
         "oracle": market.get("oracle"),
         "yesTokenId": market.get("yes_token_id"),
         "noTokenId": market.get("no_token_id"),
+    }
+
+
+def _workspace_selected_outcome(group: Optional[Dict[str, Any]], market_id: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(group, dict):
+        return None
+    outcomes = list(group.get("outcomes") or []) + list(group.get("topOutcomes") or [])
+    for outcome in outcomes:
+        if not isinstance(outcome, dict) or outcome.get("marketId") is None:
+            continue
+        try:
+            outcome_market_id = int(outcome.get("marketId") or 0)
+        except (TypeError, ValueError):
+            continue
+        if outcome_market_id == int(market_id):
+            return outcome
+    return None
+
+
+def _workspace_health(
+    *,
+    market_id: int,
+    identity: Dict[str, Any],
+    price: Optional[Dict[str, Any]],
+    chart: Optional[Dict[str, Any]],
+    oracle_payload: Optional[Dict[str, Any]],
+    diagnostics: Optional[Dict[str, Any]],
+    group: Optional[Dict[str, Any]],
+    selected_outcome: Optional[Dict[str, Any]],
+    serving_source: Optional[str],
+) -> Dict[str, Any]:
+    chart_status = str((chart or {}).get("historyStatus") or (diagnostics or {}).get("chartStatus") or "missing")
+    timeline = (oracle_payload or {}).get("timeline") or []
+    if not isinstance(timeline, list):
+        timeline = []
+    has_identity = bool(identity.get("conditionId") or identity.get("questionId") or identity.get("oracle"))
+    oracle_market_id = (oracle_payload or {}).get("localMarketId") or (oracle_payload or {}).get("marketId")
+    try:
+        oracle_matches = oracle_market_id in (None, "") or int(oracle_market_id or 0) == int(market_id)
+    except (TypeError, ValueError):
+        oracle_matches = str(oracle_market_id or "") == str(market_id)
+    if not oracle_matches:
+        oracle_status = "mismatch"
+    elif timeline:
+        oracle_status = "bound"
+    elif has_identity:
+        oracle_status = "open-no-events"
+    else:
+        oracle_status = "unbound"
+    price_status = "ok" if price and (price.get("latestYesPrice") not in (None, "") or price.get("latestPrice") not in (None, "")) else "missing"
+    if chart_status == "missing" and price_status == "ok":
+        chart_status = "snapshot" if (chart or {}).get("points") else "missing-local-history"
+    if group and selected_outcome is None:
+        group_status = "outcome-missing"
+    elif group:
+        group_status = "ok"
+    else:
+        group_status = "single-market"
+    serving_status = "ok" if serving_source == "postgres" else "fallback"
+    issues = list((diagnostics or {}).get("issues") or [])
+    if oracle_status == "mismatch":
+        issues.append("oracle-market-id-mismatch")
+    if group_status == "outcome-missing":
+        issues.append("group-selected-outcome-missing")
+    return {
+        "marketId": market_id,
+        "priceStatus": price_status,
+        "chartStatus": chart_status,
+        "oracleStatus": oracle_status,
+        "lobStatus": "not-loaded",
+        "servingStatus": serving_status,
+        "groupStatus": group_status,
+        "issues": issues,
+        "level": "critical" if any("mismatch" in issue for issue in issues) else ("warn" if issues else "ok"),
     }
 
 
@@ -1925,3 +2002,72 @@ def get_market_detail_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         build_payload,
         ttl_seconds=90,
     )
+
+
+def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
+    market = get_market_by_id(ctx, market_id)
+    if not market:
+        return {"error": "Market not found", "marketId": market_id, "_status": 404}
+
+    detail_payload = get_market_detail_payload(ctx, market_id)
+    if detail_payload.get("_status") == 404:
+        return detail_payload
+
+    identity = dict(detail_payload.get("identity") or _workspace_identity(market_id, market))
+    identity.setdefault("eventId", market.get("event_id"))
+    identity.setdefault("eventSlug", market.get("event_slug"))
+
+    group = None
+    event_id = str(market.get("event_id") or identity.get("eventId") or "").strip()
+    if event_id:
+        try:
+            group = market_group_service.get_market_group_detail_payload(ctx, event_id)
+        except Exception:
+            ctx["app"].logger.exception("market workspace group load failed market_id=%s event_id=%s", market_id, event_id)
+            group = None
+    selected_outcome = _workspace_selected_outcome(group, market_id)
+    if selected_outcome and selected_outcome.get("outcomeKey"):
+        identity["selectedOutcomeKey"] = selected_outcome.get("outcomeKey")
+
+    price = detail_payload.get("price") or get_market_price_summary(ctx, market_id, market=market)
+    chart = detail_payload.get("chart") or get_market_chart_payload(
+        ctx,
+        market_id,
+        range_name="1d",
+        interval="5m",
+        market=market,
+        price=price,
+        include_runtime_series=False,
+    )
+    oracle_payload = detail_payload.get("oracle") or get_market_oracle_payload(ctx, market_id, market=market)
+    diagnostics = dict(detail_payload.get("diagnostics") or {})
+    if diagnostics:
+        diagnostics["workspaceContract"] = "v1"
+    health = _workspace_health(
+        market_id=market_id,
+        identity=identity,
+        price=price,
+        chart=chart,
+        oracle_payload=oracle_payload,
+        diagnostics=diagnostics,
+        group=group,
+        selected_outcome=selected_outcome,
+        serving_source=detail_payload.get("servingSource"),
+    )
+    return {
+        "market": detail_payload.get("market") or ctx["normalize_market"](market),
+        "identity": identity,
+        "diagnostics": diagnostics,
+        "health": health,
+        "group": group,
+        "selectedOutcome": selected_outcome,
+        "price": price,
+        "chart": chart,
+        "trades": [],
+        "oracle": oracle_payload,
+        "content": detail_payload.get("content"),
+        "lob": None,
+        "servingSource": detail_payload.get("servingSource") or "fallback",
+        "servingUpdatedAt": detail_payload.get("servingUpdatedAt"),
+        "generatedAt": ctx["utc_now_iso"](),
+    }

@@ -68,6 +68,12 @@ def create_markets_blueprint(helpers: dict) -> Blueprint:
         status_code = int(payload.pop("_status", 200))
         return jsonify(payload), status_code
 
+    @bp.route("/markets/<int:market_id>/workspace", methods=["GET"])
+    def api_market_workspace_by_id(market_id: int):
+        payload = helpers["get_market_workspace_payload"](market_id)
+        status_code = int(payload.pop("_status", 200))
+        return jsonify(payload), status_code
+
     @bp.route("/markets/<slug>", methods=["GET"])
     def api_market_detail(slug: str):
         slug = slug.strip()

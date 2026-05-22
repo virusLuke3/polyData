@@ -10,8 +10,10 @@ import type {
   MarketSummary,
   MarketGroupChartPayload,
   MarketGroupDetail,
+  MarketGroupOutcome,
   MarketGroupsPayload,
   MarketsPayload,
+  MarketWorkspaceHealth,
   OraclePayload,
   PriceSummary,
   RuntimeMarketGroup,
@@ -379,6 +381,9 @@ type MarketDetailBundlePayload = {
   market?: MarketSummary | null;
   identity?: WorkspaceIdentity | null;
   diagnostics?: WorkspaceDiagnostics | null;
+  health?: MarketWorkspaceHealth | null;
+  group?: MarketGroupDetail | null;
+  selectedOutcome?: MarketGroupOutcome | null;
   price?: PriceSummary | null;
   chart?: ChartPayload | null;
   priceSeries?: ChartPayload['points'];
@@ -386,10 +391,12 @@ type MarketDetailBundlePayload = {
   oracle?: OraclePayload | null;
   oracleEvents?: OraclePayload['timeline'];
   content?: ContentPayload | null;
+  servingSource?: string | null;
+  servingUpdatedAt?: string | null;
+  generatedAt?: string | null;
 };
 
-export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
-  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs);
+function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, marketId: number): WorkspaceBundle {
   const chart = payload.chart || (
     payload.priceSeries
       ? {
@@ -406,6 +413,9 @@ export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500
     market: payload.market || null,
     identity: payload.identity || null,
     diagnostics: payload.diagnostics || null,
+    health: payload.health || null,
+    group: payload.group || null,
+    selectedOutcome: payload.selectedOutcome || null,
     price: payload.price || null,
     chart,
     trades: payload.trades || [],
@@ -421,6 +431,16 @@ export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500
     content: payload.content || null,
     lob: null,
   };
+}
+
+export async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs);
+  return normalizeMarketBundlePayload(payload, marketId);
+}
+
+export async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500): Promise<WorkspaceBundle> {
+  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/workspace`, timeoutMs);
+  return normalizeMarketBundlePayload(payload, marketId);
 }
 
 export function fetchMarketPrice(marketId: number, timeoutMs = 5000) {
@@ -488,6 +508,9 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     market: primary.market || secondary.market,
     identity: primary.identity || secondary.identity,
     diagnostics: primary.diagnostics || secondary.diagnostics,
+    health: primary.health || secondary.health,
+    group: primary.group || secondary.group,
+    selectedOutcome: primary.selectedOutcome || secondary.selectedOutcome,
     price: primary.price || secondary.price,
     chart: primary.chart?.points?.length ? primary.chart : secondary.chart,
     trades: primary.trades?.length ? primary.trades : secondary.trades,
@@ -518,7 +541,12 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
   if (inflight) return inflight;
 
   const request = (async () => {
-    const detailBundle = await fetchMarketDetailBundle(marketId, 6500);
+    let detailBundle: WorkspaceBundle;
+    try {
+      detailBundle = await fetchMarketWorkspaceBundle(marketId, 6500);
+    } catch {
+      detailBundle = await fetchMarketDetailBundle(marketId, 6500);
+    }
     const contentPromise = includeContent
       ? (
           detailBundle.content?.items?.length
@@ -532,6 +560,9 @@ export async function fetchWorkspaceBundle(marketId: number, options: { includeC
       market: null,
       identity: null,
       diagnostics: null,
+      health: null,
+      group: null,
+      selectedOutcome: null,
       price: null,
       chart: null,
       trades: [],

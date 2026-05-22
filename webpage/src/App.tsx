@@ -357,6 +357,18 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
       category: market.category,
       tags: market.tags,
     },
+    identity: {
+      localMarketId: market.id,
+      marketId: market.id,
+      gammaMarketId: market.gammaMarketId,
+      slug: market.slug,
+      conditionId: market.conditionId,
+      questionId: market.questionId,
+    },
+    diagnostics: null,
+    health: null,
+    group: null,
+    selectedOutcome: null,
     trades: [],
     oracle: null,
     price: {
@@ -389,6 +401,11 @@ function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
 function emptyWorkspaceBundle(): WorkspaceBundle {
   return {
     market: null,
+    identity: null,
+    diagnostics: null,
+    health: null,
+    group: null,
+    selectedOutcome: null,
     trades: [],
     oracle: null,
     price: null,
@@ -444,6 +461,7 @@ function bundleMatchesMarket(bundle: WorkspaceBundle | null, marketId: number) {
     bundle.content?.marketId,
     bundle.lob?.localMarketId,
     bundle.lob?.marketId,
+    bundle.selectedOutcome?.marketId,
   ];
   return ids.some((id) => Number(id) === Number(marketId));
 }
@@ -454,6 +472,9 @@ function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: WorkspaceBund
     market: patch.market || current.market,
     identity: patch.identity || current.identity,
     diagnostics: patch.diagnostics || current.diagnostics,
+    health: patch.health || current.health,
+    group: patch.group || current.group,
+    selectedOutcome: patch.selectedOutcome || current.selectedOutcome,
     price: patch.price || current.price,
     chart: chooseWorkspaceChart(current.chart, patch.chart),
     trades: patch.trades?.length ? patch.trades : current.trades,
@@ -1331,6 +1352,20 @@ export function App() {
     function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
       if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
+      const loadedGroup = loadedBundle.group || null;
+      const loadedEventId = loadedGroup?.eventId ?? loadedBundle.identity?.eventId ?? null;
+      if (loadedGroup && loadedEventId != null) {
+        const eventId = String(loadedEventId);
+        selectedMarketGroupIdRef.current = eventId;
+        setSelectedMarketGroupId(eventId);
+        setSelectedMarketGroupDetail(loadedGroup);
+        const nextOutcomeKey = loadedBundle.selectedOutcome?.outcomeKey
+          || loadedBundle.identity?.selectedOutcomeKey
+          || outcomeKeyForGroupMarket(loadedGroup, currentMarketId, loadedGroup.defaultOutcomeKey || null);
+        if (nextOutcomeKey) {
+          setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
+        }
+      }
       setBundle((previous) => {
         const base = previous || bundleCacheRef.current.get(currentMarketId) || initialBundle;
         const next = mergeWorkspaceBundle(base, loadedBundle);

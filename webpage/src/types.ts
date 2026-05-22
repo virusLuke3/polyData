@@ -139,6 +139,7 @@ export type MarketListItem = {
   title: string;
   conditionId?: string | null;
   questionId?: string | null;
+  gammaMarketId?: string | number | null;
   endDate?: string | null;
   createdAt?: string | null;
   latestPrice?: string | number | null;
@@ -328,6 +329,9 @@ export type WorkspaceIdentity = {
   localMarketId?: number | null;
   marketId?: number | null;
   gammaMarketId?: string | number | null;
+  eventId?: string | number | null;
+  eventSlug?: string | null;
+  selectedOutcomeKey?: string | null;
   slug?: string | null;
   conditionId?: string | null;
   questionId?: string | null;
@@ -349,10 +353,25 @@ export type WorkspaceDiagnostics = {
   level?: 'ok' | 'warn' | 'critical' | string;
 };
 
+export type MarketWorkspaceHealth = {
+  marketId?: number | null;
+  priceStatus?: 'ok' | 'missing' | 'stale' | string;
+  chartStatus?: 'ok' | 'short' | 'flat' | 'snapshot' | 'missing' | 'missing-local-history' | string;
+  oracleStatus?: 'bound' | 'open-no-events' | 'unbound' | 'mismatch' | string;
+  lobStatus?: 'ok' | 'no-book' | 'missing' | 'not-loaded' | string;
+  servingStatus?: 'ok' | 'partial' | 'missing' | 'fallback' | string;
+  groupStatus?: 'ok' | 'single-market' | 'outcome-missing' | string;
+  issues?: string[];
+  level?: 'ok' | 'warn' | 'critical' | string;
+};
+
 export type WorkspaceBundle = {
   market: MarketSummary | null;
   identity?: WorkspaceIdentity | null;
   diagnostics?: WorkspaceDiagnostics | null;
+  health?: MarketWorkspaceHealth | null;
+  group?: MarketGroupDetail | null;
+  selectedOutcome?: MarketGroupOutcome | null;
   trades: TradeRow[];
   oracle: OraclePayload | null;
   price: PriceSummary | null;

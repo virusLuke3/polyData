@@ -274,6 +274,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_market_chart_payload": get_market_chart_payload,
         "get_gamma_active_market_filter": lambda: market_data_client.get_gamma_active_market_filter(build_service_context()),
         "get_market_detail_payload": lambda market_id: market_service.get_market_detail_payload(build_service_context(), market_id),
+        "get_market_workspace_payload": lambda market_id: market_service.get_market_workspace_payload(build_service_context(), market_id),
         "get_market_group_snapshot": get_market_group_snapshot,
         "get_market_groups_payload": lambda query="", page=1, page_size=80, sort="active": market_group_service.get_market_groups_payload(
             build_service_context(),

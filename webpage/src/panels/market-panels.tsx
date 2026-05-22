@@ -442,6 +442,7 @@ function ActiveMarketsPanel({
 
 function resolveFocusedMarketContext(ctx: PanelRenderContext) {
   const selectedGroup = ctx.selectedMarketGroupDetail
+    || ctx.bundle?.group
     || ctx.marketGroups.find((group) => {
       const eventId = group.eventId != null ? String(group.eventId) : null;
       const groupOutcomeMarketIds = [...(group.outcomes || []), ...(group.topOutcomes || [])]
@@ -451,14 +452,19 @@ function resolveFocusedMarketContext(ctx: PanelRenderContext) {
         || (ctx.selectedMarketId != null && (Number(group.defaultMarketId) === ctx.selectedMarketId || groupOutcomeMarketIds.includes(ctx.selectedMarketId)));
     })
     || null;
-  const selectedOutcome = selectedGroup
-    ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
+  const bundleOutcomeMatches = ctx.bundle?.selectedOutcome && ctx.selectedMarketId != null
+    && Number(ctx.bundle.selectedOutcome.marketId) === ctx.selectedMarketId;
+  const selectedOutcome = bundleOutcomeMatches
+    ? ctx.bundle?.selectedOutcome || null
+    : selectedGroup
+      ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
         ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId
       )) || ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
         ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey
       )) || null
-    : null;
-  const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;
+      : null;
+  const bundleMarketMatches = ctx.bundle?.market?.id != null && ctx.selectedMarketId != null && Number(ctx.bundle.market.id) === Number(ctx.selectedMarketId);
+  const selected = (bundleMarketMatches ? ctx.bundle?.market : null) || ctx.selectedMarket || ctx.bootstrap?.featuredMarket || null;
   const listMarket = globalMarkets(ctx).find((market) => market.id === ctx.selectedMarketId) || null;
   const price = ctx.bundle?.price || ctx.bootstrap?.pricePreview || null;
   return { selectedGroup, selectedOutcome, selected, listMarket, price };
