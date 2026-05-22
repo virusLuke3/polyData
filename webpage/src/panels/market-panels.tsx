@@ -453,8 +453,9 @@ function resolveFocusedMarketContext(ctx: PanelRenderContext) {
     || null;
   const selectedOutcome = selectedGroup
     ? ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
-        (ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
-        || (ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+        ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId
+      )) || ((selectedGroup.outcomes?.length ? selectedGroup.outcomes : selectedGroup.topOutcomes) || []).find((outcome) => (
+        ctx.selectedMarketGroupOutcomeKey && outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey
       )) || null
     : null;
   const selected = ctx.selectedMarket || ctx.bundle?.market || ctx.bootstrap?.featuredMarket || null;

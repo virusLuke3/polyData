@@ -297,6 +297,16 @@ function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null
   return groups.find((group) => (group.outcomes || []).some((outcome) => Number(outcome.marketId) === marketId)) || null;
 }
 
+function outcomeKeyForGroupMarket(group: MarketGroupItem, marketId?: number | null, fallbackKey?: string | null) {
+  const numericMarketId = marketId != null ? Number(marketId) : null;
+  if (numericMarketId != null && Number.isFinite(numericMarketId)) {
+    const matchedOutcome = [...(group.outcomes || []), ...(group.topOutcomes || [])]
+      .find((outcome) => Number(outcome.marketId) === numericMarketId);
+    if (matchedOutcome?.outcomeKey) return matchedOutcome.outcomeKey;
+  }
+  return fallbackKey || group.defaultOutcomeKey || null;
+}
+
 type RuntimePanelRefreshOptions = {
   bootstrapPayload?: BootstrapPayload | null;
   activePanelIds?: string[];
@@ -843,10 +853,11 @@ export function App() {
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
     const eventId = group.eventId != null ? String(group.eventId) : null;
     const nextMarketId = marketId != null ? Number(marketId) : null;
+    const nextOutcomeKey = outcomeKeyForGroupMarket(group, nextMarketId, outcomeKey);
     selectedMarketGroupIdRef.current = eventId;
     selectedMarketIdRef.current = nextMarketId;
     setSelectedMarketGroupId(eventId);
-    setSelectedMarketGroupOutcomeKey(outcomeKey || group.defaultOutcomeKey || null);
+    setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
     setSelectedMarketId(nextMarketId);
   };
 

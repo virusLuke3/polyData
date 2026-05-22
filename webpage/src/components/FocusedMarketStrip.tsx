@@ -592,13 +592,16 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const detail = ctx.selectedMarketGroupDetail;
   const eventChart = ctx.selectedMarketGroupChart;
   const selectedOutcome = (
-    (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    (detail?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+    || (selectedGroup?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
+    || (detail?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || (selectedGroup?.outcomes || []).find((outcome) => outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
     || null
   );
   const bundleMarketId = ctx.bundle?.market?.id ?? ctx.bundle?.identity?.localMarketId ?? ctx.bundle?.identity?.marketId ?? ctx.bundle?.price?.marketId ?? ctx.bundle?.chart?.marketId ?? ctx.bundle?.lob?.marketId ?? null;
   const bundleMatchesSelected = ctx.selectedMarketId != null && bundleMarketId != null && Number(bundleMarketId) === Number(ctx.selectedMarketId);
   const selectedOutcomeMatches = selectedOutcome?.marketId != null && Number(selectedOutcome.marketId) === ctx.selectedMarketId;
+  const activeOutcomeKey = selectedOutcome?.outcomeKey || ctx.selectedMarketGroupOutcomeKey || null;
   const selectedTokenId = String(selectedOutcome?.yesTokenId || '').trim();
   const selectedNoTokenId = String(selectedOutcome?.noTokenId || '').trim();
   const selectedTokenKey = selectedTokenId ? `${selectedTokenId}:${selectedNoTokenId}` : '';
@@ -641,15 +644,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const chartPointCount = chart?.points?.length || 0;
   const chartRenderable = Boolean(
     chart
-      && chartPointCount > 2
-      && chartStatus !== 'snapshot'
+      && chartPointCount >= 2
       && chartStatus !== 'missing',
   );
   const displayChart = chartRenderable ? chart : null;
   const chartPoints = displayChart?.points || [];
   const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
   const hasSelectedEventHistory = Boolean((eventChart?.series || []).some((entry) => (
-    (!ctx.selectedMarketGroupOutcomeKey || entry.outcomeKey === ctx.selectedMarketGroupOutcomeKey)
+    (!activeOutcomeKey || entry.outcomeKey === activeOutcomeKey)
       && (entry.points || []).length > 1
   )));
   const hasFocusedMarketHistory = Boolean(chartPoints.length);
@@ -749,7 +751,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <span>24h <strong>{formatCompact(displayedTrades)}</strong></span>
                 </div>
               </div>
-              {detail ? eventChartLegend(detail, eventChart, ctx.selectedMarketGroupOutcomeKey, (outcome) => {
+              {detail ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
                 ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
                 if (outcome.marketId != null) {
                   ctx.setSelectedMarketId(Number(outcome.marketId));
@@ -762,7 +764,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   {detail
                     ? (
                         hasEventHistory
-                          ? renderEventDetailChart(eventChart, ctx.selectedMarketGroupOutcomeKey)
+                          ? renderEventDetailChart(eventChart, activeOutcomeKey)
                           : showFocusedOutcomeFallback
                             ? renderDetailChart(displayChart)
                             : emptyState('No event price history is available for this market yet.')
@@ -775,7 +777,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                       ? eventOutcomes.map((outcome: EventOutcomeCard) => (
                           <button
                             type="button"
-                            className={`wm-focus-outcome-card event ${outcome.outcomeKey === ctx.selectedMarketGroupOutcomeKey ? 'active' : ''} ${outcome.marketId == null ? 'pending' : ''}`}
+                            className={`wm-focus-outcome-card event ${outcome.outcomeKey === activeOutcomeKey ? 'active' : ''} ${outcome.marketId == null ? 'pending' : ''}`}
                             key={outcome.outcomeKey || outcome.label || outcome.gammaMarketId || outcome.marketId}
                             onClick={() => {
                               ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
