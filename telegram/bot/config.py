@@ -7,7 +7,6 @@ from typing import Iterable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DOCUMENTED_GCP_API_BASE = "http://34.143.254.155/wm-api"
 
 
 def _load_dotenv_files() -> None:
@@ -114,12 +113,11 @@ def load_settings() -> BotSettings:
             _get_str("POLYDATA_REMOTE_API_BASE", ""),
             _get_str("POLYDATA_PUBLIC_API_BASE", ""),
             _get_str("VITE_POLYDATA_API_BASE_URL", ""),
-            DOCUMENTED_GCP_API_BASE,
             "http://127.0.0.1:18500",
             local_api_base,
         )
     )
-    polydata_api_base = polydata_api_candidates[0] if polydata_api_candidates else DOCUMENTED_GCP_API_BASE
+    polydata_api_base = polydata_api_candidates[0] if polydata_api_candidates else local_api_base
     return BotSettings(
         bot_token=_get_first(("POLYDATA_TELEGRAM_BOT_TOKEN", "POLYDATA_TELEGRAM_TOKEN"), ""),
         telegram_api_base=_get_first(("POLYDATA_TELEGRAM_BOT_API_BASE", "POLYDATA_TELEGRAM_API_BASE"), "https://api.telegram.org"),

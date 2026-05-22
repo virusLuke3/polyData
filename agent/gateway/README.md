@@ -10,7 +10,7 @@ python -m agent.gateway.app
 Expose it to GCP with a reverse SSH tunnel:
 
 ```bash
-ssh -N -R 127.0.0.1:18700:127.0.0.1:18700 jhuaiyu3@34.143.254.155
+ssh -N -R 127.0.0.1:18700:127.0.0.1:18700 "${POLYDATA_AGENT_GATEWAY_REMOTE}"
 ```
 
 On GCP, configure:

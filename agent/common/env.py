@@ -6,7 +6,6 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_AGENT_ENV = Path("/home/jiahuaiyu/develop/agents/.env")
 _LOADED_ENV_FILES: set[Path] = set()
 
 
@@ -15,7 +14,6 @@ def _candidate_env_files() -> Iterable[Path]:
     if explicit:
         yield Path(explicit).expanduser()
     yield REPO_ROOT / ".env"
-    yield DEFAULT_AGENT_ENV
 
 
 def load_agent_env() -> None:
@@ -67,4 +65,3 @@ def get_bool_env(name: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
-

@@ -5,8 +5,8 @@ set -euo pipefail
 # One-shot helper to configure a remote GCP VM as a readonly polyData API host.
 # Run this from the current machine after SSH key access to the remote host works.
 
-REMOTE_USER="${REMOTE_USER:-jhuaiyu3}"
-REMOTE_HOST="${REMOTE_HOST:-34.143.254.155}"
+REMOTE_USER="${REMOTE_USER:-}"
+REMOTE_HOST="${REMOTE_HOST:-}"
 REMOTE_REPO_ROOT="${REMOTE_REPO_ROOT:-/opt/polyData}"
 REMOTE_WEB_ROOT="${REMOTE_WEB_ROOT:-/var/www/polydata}"
 
@@ -28,6 +28,9 @@ SERVER_NAME="${SERVER_NAME:-${REMOTE_HOST}}"
 PYTHON_BIN="${PYTHON_BIN:-${REMOTE_REPO_ROOT}/.venv/bin/python}"
 SNAPSHOT_SQLITE_PATH="${SNAPSHOT_SQLITE_PATH:-${REMOTE_REPO_ROOT}/data/panel_snapshots.sqlite3}"
 REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+
+: "${REMOTE_USER:?Set REMOTE_USER to the SSH user for the remote API host}"
+: "${REMOTE_HOST:?Set REMOTE_HOST to the remote API host}"
 GUNICORN_WORKERS="${GUNICORN_WORKERS:-3}"
 GUNICORN_THREADS="${GUNICORN_THREADS:-4}"
 GUNICORN_MAX_REQUESTS="${GUNICORN_MAX_REQUESTS:-300}"
