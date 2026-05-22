@@ -569,13 +569,13 @@ artifacts/panel-screenshots/{panel_id}/gcp-narrow.png
 公网验收必须使用真实线上地址：
 
 ```text
-http://34.143.254.155/
+http://<gcp-host>/
 ```
 
 同时验证公网 runtime endpoint：
 
 ```bash
-curl -sS "http://34.143.254.155{runtime_route}?limit=5"
+curl -sS "http://<gcp-host>{runtime_route}?limit=5"
 ```
 
 只有当公网截图、DOM 检查、runtime endpoint 都通过，才算视觉验收完成。
@@ -613,7 +613,7 @@ git push origin HEAD
 
 远端 GCP：
 
-- 机器：`jhuaiyu3@34.143.254.155`
+- 机器：`<ssh-user>@<gcp-host>`
 - 项目目录：`/opt/polyData`
 
 拉取并更新：
@@ -621,25 +621,25 @@ git push origin HEAD
 ```bash
 LOCAL_BRANCH="$(git branch --show-current)"
 LOCAL_COMMIT="$(git rev-parse --short HEAD)"
-ssh jhuaiyu3@34.143.254.155 "cd /opt/polyData && git fetch origin && git pull --ff-only origin ${LOCAL_BRANCH} && git rev-parse --short HEAD"
+ssh <ssh-user>@<gcp-host> "cd /opt/polyData && git fetch origin && git pull --ff-only origin ${LOCAL_BRANCH} && git rev-parse --short HEAD"
 ```
 
 远端验证：
 
 ```bash
-ssh jhuaiyu3@34.143.254.155 'cd /opt/polyData && .venv/bin/python -m pytest tests/test_runtime_panel_registry.py tests/test_{panel_name}.py'
-ssh jhuaiyu3@34.143.254.155 'cd /opt/polyData/webpage && npm run build'
-ssh jhuaiyu3@34.143.254.155 'sudo rsync -a --delete /opt/polyData/webpage/dist/ /var/www/polydata/'
-ssh jhuaiyu3@34.143.254.155 'systemctl --user restart polydata-api.service'
-ssh jhuaiyu3@34.143.254.155 'sudo nginx -t && sudo systemctl reload nginx'
+ssh <ssh-user>@<gcp-host> 'cd /opt/polyData && .venv/bin/python -m pytest tests/test_runtime_panel_registry.py tests/test_{panel_name}.py'
+ssh <ssh-user>@<gcp-host> 'cd /opt/polyData/webpage && npm run build'
+ssh <ssh-user>@<gcp-host> 'sudo rsync -a --delete /opt/polyData/webpage/dist/ /var/www/polydata/'
+ssh <ssh-user>@<gcp-host> 'systemctl --user restart polydata-api.service'
+ssh <ssh-user>@<gcp-host> 'sudo nginx -t && sudo systemctl reload nginx'
 ```
 
 公网验收：
 
 ```bash
-curl -sS http://34.143.254.155/wm-api/health
-curl -sS "http://34.143.254.155{runtime_route}?limit=5"
-curl -I http://34.143.254.155/
+curl -sS http://<gcp-host>/wm-api/health
+curl -sS "http://<gcp-host>{runtime_route}?limit=5"
+curl -I http://<gcp-host>/
 ```
 
 公网验收还必须执行第 7 节的 GCP 公网截图验收。
