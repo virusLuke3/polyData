@@ -7,9 +7,10 @@ from typing import Any
 
 from flask import Flask, jsonify, request
 
+from agent.common.budget import claim_agent_live_call
 from agent.common.env import get_env
-from agent.market_insight import build_market_insight
-from agent.market_wide import build_market_wide_insight
+from agent.market_insight import build_market_insight, build_market_insight_fallback
+from agent.market_wide import build_market_wide_fallback, build_market_wide_insight
 
 
 def _agent_enabled() -> bool:
@@ -90,8 +91,16 @@ def create_app() -> Flask:
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
+        allowed, budget = claim_agent_live_call("gateway:market")
+        if not allowed:
+            result = build_market_insight_fallback(payload)
+            result["servedBy"] = "agent-gateway"
+            result["cacheStatus"] = "budget-fallback"
+            result["dailyBudget"] = budget
+            return jsonify(result)
         result = build_market_insight(payload)
         result["servedBy"] = "agent-gateway"
+        result["dailyBudget"] = budget
         return jsonify(result)
 
     @app.post("/agent/market-wide-insights")
@@ -107,8 +116,16 @@ def create_app() -> Flask:
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
+        allowed, budget = claim_agent_live_call("gateway:market-wide")
+        if not allowed:
+            result = build_market_wide_fallback(payload, reason="budget-fallback")
+            result["servedBy"] = "agent-gateway"
+            result["cacheStatus"] = "budget-fallback"
+            result["dailyBudget"] = budget
+            return jsonify(result)
         result = build_market_wide_insight(payload)
         result["servedBy"] = "agent-gateway"
+        result["dailyBudget"] = budget
         return jsonify(result)
 
     return app

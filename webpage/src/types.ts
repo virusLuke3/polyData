@@ -443,6 +443,17 @@ export type MarketWideAiInsightResponse = MarketAiInsightResponse & {
   viaGateway?: boolean;
   servedBy?: string;
   gatewayFallback?: boolean;
+  source?: string;
+  snapshotGeneratedAt?: string;
+  snapshotExpiresAt?: string;
+  snapshotLiveAttempted?: boolean;
+  dailyBudget?: {
+    enabled?: boolean;
+    limit?: number | null;
+    used?: number | null;
+    remaining?: number | null;
+    kind?: string;
+  };
 };
 
 export type SparkPoint = {

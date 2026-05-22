@@ -5,7 +5,7 @@ import type {
   LobPayload,
   MarketAiInsightPayload,
   MarketAiInsightResponse,
-  MarketWideAiInsightPayload,
+  MarketWideAiInsightLens,
   MarketWideAiInsightResponse,
   MarketSummary,
   MarketGroupChartPayload,
@@ -503,8 +503,11 @@ export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs
   return apiPostAgentOnce<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
 }
 
-export function fetchMarketWideAiInsights(payload: MarketWideAiInsightPayload, timeoutMs = 24000) {
-  return apiPostAgentOnce<MarketWideAiInsightResponse>('/agent/market-wide-insights', payload, timeoutMs);
+export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeoutMs = 8000) {
+  return apiGetWithTimeout<MarketWideAiInsightResponse>(
+    `/runtime/agent/market-wide-insights/${encodeURIComponent(lens)}`,
+    timeoutMs,
+  );
 }
 
 export async function fetchWorkspaceBundle(marketId: number, options: { includeContent?: boolean; includeLob?: boolean } = {}): Promise<WorkspaceBundle> {

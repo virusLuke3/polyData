@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 
+from agent.common.budget import claim_agent_live_call
 from agent.common.gateway_client import call_market_insight_gateway, call_market_wide_insight_gateway, gateway_configured
 from agent.market_insight import build_market_insight, build_market_insight_fallback
 from agent.market_wide import build_market_wide_fallback, build_market_wide_insight
@@ -290,11 +291,20 @@ def _serve_agent_with_cache(
         return fallback
 
     try:
+        allowed, budget = claim_agent_live_call(kind)
+        if not allowed:
+            fallback = fallback_builder()
+            fallback["cacheStatus"] = "budget-fallback"
+            fallback["cacheKey"] = cache_key
+            fallback["dailyBudget"] = budget
+            _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+            return fallback
         response = live_builder()
         if isinstance(response, dict) and response.get("brief") and isinstance(response.get("focus"), list):
             ttl = _agent_cache_ttl() if response.get("status") == "live" else _fallback_cache_ttl()
             response["cacheStatus"] = "miss"
             response["cacheKey"] = cache_key
+            response["dailyBudget"] = budget
             _store_response(helpers, cache_key, response, ttl)
             return response
         fallback = fallback_builder()

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { fetchMarketWideAiInsights } from '@/services/api';
+import { fetchMarketWideAiSnapshot } from '@/services/api';
 import type {
   MarketGroupItem,
   MarketListItem,
@@ -258,6 +258,8 @@ function severityClass(severity?: string | null) {
 }
 
 function sourceStatus(insight: MarketWideAiInsightResponse) {
+  if (insight.source === 'agent-snapshot' && insight.cacheStatus === 'stale-snapshot') return 'AI SNAPSHOT';
+  if (insight.source === 'agent-snapshot' || insight.cacheStatus === 'snapshot') return 'AI SNAPSHOT';
   if (insight.viaGateway) return 'AI LIVE';
   if (insight.cacheStatus === 'hit') return 'CACHED';
   return 'LOCAL';
@@ -298,7 +300,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
     let cancelled = false;
     const load = () => {
       setLoading(true);
-      fetchMarketWideAiInsights(payload)
+      fetchMarketWideAiSnapshot(lens)
         .then((response) => {
           if (cancelled) return;
           setInsight(response);
@@ -315,7 +317,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
     return () => {
       cancelled = true;
     };
-  }, [fallback, payload, signature]);
+  }, [fallback, lens, signature]);
 
   const focus = insight.focus?.length ? insight.focus : fallback.focus;
   const specialMarkets = insight.specialMarkets?.length ? insight.specialMarkets : (fallback.specialMarkets || []);
@@ -323,6 +325,7 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   const watchlist = insight.watchlist?.length ? insight.watchlist : (fallback.watchlist || []);
   const evidence = insight.evidence?.length ? insight.evidence : (fallback.evidence || []);
   const live = insight.status === 'live';
+  const snapshot = insight.source === 'agent-snapshot' || insight.cacheStatus === 'snapshot' || insight.cacheStatus === 'stale-snapshot';
   const warming = insight.cacheStatus === 'warming' || insight.cacheStatus === 'warming-in-progress' || insight.status === 'cache-warming';
   const copy = PANEL_COPY[lens];
   const themeLimit = lens === 'trend' ? 4 : 3;
@@ -335,8 +338,8 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
   return (
     <Panel
       title={title}
-      badge={warming ? 'WARMING' : (loading && insight.cacheStatus !== 'hit' ? 'THINKING' : (live ? badge : 'LOCAL'))}
-      status={live ? 'live' : 'muted'}
+      badge={warming ? 'WARMING' : (loading && !snapshot ? 'LOADING' : (snapshot ? badge : (live ? badge : 'LOCAL')))}
+      status={snapshot || live ? 'live' : 'muted'}
       count={panelCount}
       className={`wm-market-panel wm-ai-market-panel wm-ai-market-wide-panel wm-ai-${lens}`}
     >
