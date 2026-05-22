@@ -9,9 +9,9 @@
 - `market` 和 `oracle` 继续使用 PostgreSQL，作为项目的关系型核心库。
 - `OrderFilled / trades_v2` 不迁入 PostgreSQL，后续单独设计 ClickHouse。
 - MySQL 只作为旧数据源、回滚源和临时交易库，不再作为 market/oracle 的目标架构。
-- 新盘 `/data2/jiahuaiyu` 是后续数据库数据目录的目标位置：
-  - PostgreSQL：`/data2/jiahuaiyu/postgres`
-  - ClickHouse：`/data2/jiahuaiyu/clickhouse`
+- 新盘数据目录由部署环境决定，建议通过环境变量或运维文档中的私有配置指定：
+  - PostgreSQL：`<data-root>/postgres`
+  - ClickHouse：`<data-root>/clickhouse`
 
 ## 2. 当前数据库分层
 

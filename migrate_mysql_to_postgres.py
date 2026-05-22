@@ -125,7 +125,7 @@ DEFAULT_PG_DATABASE = env_first(
 DEFAULT_BAD_ROWS_DIR = Path(
     os.environ.get(
         "POLYDATA_MIGRATION_BAD_ROWS_DIR",
-        "/data2/jiahuaiyu/postgres/backups/migration_bad_rows",
+        "data/postgres/backups/migration_bad_rows",
     )
 )
 

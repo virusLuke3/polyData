@@ -24,7 +24,7 @@ The checked-in template uses placeholders instead of private values:
 Example upstream value:
 
 ```text
-http://100.88.66.12:18500
+http://<tailscale-ip>:18500
 ```
 
 ## Typical install flow
