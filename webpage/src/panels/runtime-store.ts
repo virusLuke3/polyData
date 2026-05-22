@@ -84,7 +84,7 @@ export function mergeRuntimeData(current: PanelRuntimeData, patch: PanelRuntimeD
   const next = { ...current };
   for (const [panelId, value] of Object.entries(patch)) {
     const previous = current[panelId];
-    if (panelId === 'global-temperature-monitor' && hasItems(previous) && isEmptyWarming(value)) {
+    if (hasItems(previous) && isEmptyWarming(value)) {
       continue;
     }
     next[panelId] = value;

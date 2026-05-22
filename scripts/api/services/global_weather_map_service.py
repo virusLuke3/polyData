@@ -1250,6 +1250,81 @@ def build_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+_WEATHER_CARRY_FORWARD_FIELDS = (
+    "currentTemp",
+    "condition",
+    "weatherCode",
+    "todayHigh",
+    "todayLow",
+    "forecastHigh",
+    "hourly",
+    "daily",
+    "weatherUpdatedAt",
+)
+
+
+def _is_missing_weather_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, (list, dict)) and not value:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Keep usable Open-Meteo series when a fresh build only has market/METAR data."""
+    if not isinstance(payload, dict) or not isinstance(previous, dict):
+        return payload
+    previous_items = {
+        str(item.get("cityId") or ""): item
+        for item in (previous.get("items") or [])
+        if isinstance(item, dict) and item.get("cityId")
+    }
+    if not previous_items:
+        return payload
+    changed = False
+    next_items: List[Dict[str, Any]] = []
+    for item in payload.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        previous_item = previous_items.get(str(item.get("cityId") or ""))
+        if not previous_item:
+            next_items.append(item)
+            continue
+        next_item = dict(item)
+        carried_fields: List[str] = []
+        for field in _WEATHER_CARRY_FORWARD_FIELDS:
+            if _is_missing_weather_value(next_item.get(field)) and not _is_missing_weather_value(previous_item.get(field)):
+                next_item[field] = previous_item.get(field)
+                carried_fields.append(field)
+        if carried_fields:
+            source_states = dict(next_item.get("sourceStates") or {})
+            if source_states.get("openMeteo") == "error":
+                source_states["openMeteo"] = "stale"
+            next_item["sourceStates"] = source_states
+            next_item["weatherCarryForward"] = True
+            next_item["weatherCarryForwardFields"] = carried_fields
+            changed = True
+        next_items.append(next_item)
+    if not changed:
+        return payload
+    next_payload = {**payload, "items": next_items}
+    next_payload["summary"] = build_summary(next_items)
+    previous_summary = previous.get("summary") if isinstance(previous.get("summary"), dict) else {}
+    if isinstance(previous_summary, dict):
+        next_payload["summary"]["marketFamilyCounts"] = (payload.get("summary") or {}).get("marketFamilyCounts") or previous_summary.get("marketFamilyCounts") or {}
+        next_payload["summary"]["unmappedMarketCount"] = (payload.get("summary") or {}).get("unmappedMarketCount") or previous_summary.get("unmappedMarketCount") or 0
+    sources = dict(next_payload.get("sources") or {})
+    if sources.get("openMeteo") == "error":
+        sources["openMeteo"] = "stale"
+    next_payload["sources"] = sources
+    if next_payload.get("status") == "warming" and next_payload["summary"].get("mappedCount"):
+        next_payload["status"] = "degraded" if any(value in {"error", "partial", "stale"} for value in sources.values()) else "ok"
+    return next_payload
+
+
 def build_global_weather_map_payload(ctx: dict, *, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
     sources: Dict[str, str] = {}
@@ -1418,8 +1493,10 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
 
     def refresh() -> None:
         logger = getattr(ctx.get("app"), "logger", None)
+        previous = _read_seeded_snapshot(ctx, ttl_seconds=ttl_seconds)
         try:
             payload = _with_cache_mode(build_global_weather_map_payload(ctx, limit=limit), "live-build")
+            payload = merge_weather_series_from_previous(payload, previous)
             if payload.get("items"):
                 _store_live(ctx, payload, ttl_seconds=ttl_seconds)
                 if logger is not None and hasattr(logger, "info"):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
 
 from api.services import global_weather_map_service, weather_news_service
 from runtime import global_weather_map_watcher, weather_news_watcher
+from runtime.snapshot_store import SnapshotStore
 from weather.cities import WEATHER_CITIES
 
 
@@ -651,6 +653,74 @@ def test_weather_news_filters_sports_storm_false_positives():
     assert all("Eels v Storm" not in title for title in titles)
     assert all("Storm snap losing streak" not in title for title in titles)
     assert all("property bloodbath" not in title for title in titles)
+
+
+def test_snapshot_store_keeps_expired_payload_for_stale_fallback(tmp_path):
+    payload = {"items": [{"id": "weather-seed"}], "status": "ok"}
+    store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
+    store.set("snapshot:test", "weather", payload, 60)
+    with sqlite3.connect(str(tmp_path / "snapshots.sqlite3")) as conn:
+        conn.execute("UPDATE panel_snapshots SET expires_at = 0 WHERE namespace = ? AND cache_key = ?", ("snapshot:test", "weather"))
+        conn.commit()
+
+    assert store.get("snapshot:test", "weather") is None
+    assert store.get_stale("snapshot:test", "weather") == payload
+
+
+def test_global_weather_map_carries_forward_weather_series_when_open_meteo_fails(monkeypatch):
+    previous_map = {
+        "items": [
+            {
+                "cityId": "new-york",
+                "city": "New York",
+                "currentTemp": 74,
+                "condition": "Clear",
+                "todayHigh": 91,
+                "todayLow": 69,
+                "forecastHigh": 98,
+                "hourly": [{"time": "2026-05-22T00:00:00Z", "temp": 74}],
+                "daily": [{"date": "2026-05-22", "high": 91, "low": 69}],
+                "sourceStates": {"openMeteo": "ok", "metar": "ok", "polymarket": "ok"},
+            }
+        ],
+        "summary": {"mappedCount": 1, "marketFamilyCounts": {"highest_temperature": 1}},
+        "sources": {"openMeteo": "ok"},
+        "status": "ok",
+    }
+    fresh_partial = {
+        "items": [
+            {
+                "cityId": "new-york",
+                "city": "New York",
+                "metarTemp": 59,
+                "quoteCoverage": "11/11",
+                "eventSlug": "weather-new-york",
+                "sourceStates": {"openMeteo": "error", "metar": "ok", "polymarket": "ok"},
+            }
+        ],
+        "summary": {"mappedCount": 1, "marketFamilyCounts": {"highest_temperature": 1}},
+        "sources": {"openMeteo": "error", "aviationWeather": "ok", "gamma": "ok", "clob": "ok"},
+        "status": "degraded",
+    }
+    map_watcher = global_weather_map_watcher.GlobalWeatherMapWatcher.__new__(global_weather_map_watcher.GlobalWeatherMapWatcher)
+    map_watcher.previous = lambda: previous_map
+    map_watcher.context = lambda: {}
+    stored = {}
+    map_watcher.store_payload = lambda payload: stored.setdefault("payload", payload)
+    map_watcher.store_meta = lambda **kwargs: stored.setdefault("meta", kwargs)
+    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: fresh_partial)
+
+    result = map_watcher.run_once()
+
+    assert result["status"] == "stored"
+    item = stored["payload"]["items"][0]
+    assert item["hourly"] == previous_map["items"][0]["hourly"]
+    assert item["daily"] == previous_map["items"][0]["daily"]
+    assert item["currentTemp"] == 74
+    assert item["metarTemp"] == 59
+    assert item["quoteCoverage"] == "11/11"
+    assert item["sourceStates"]["openMeteo"] == "stale"
+    assert stored["payload"]["sources"]["openMeteo"] == "stale"
 
 
 def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):

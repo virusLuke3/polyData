@@ -67,11 +67,6 @@ class SnapshotStore:
             if row is None:
                 return None
             if int(row["expires_at"] or 0) <= now:
-                conn.execute(
-                    "DELETE FROM panel_snapshots WHERE namespace = ? AND cache_key = ?",
-                    (namespace, cache_key),
-                )
-                conn.commit()
                 return None
             return json.loads(str(row["payload_json"]))
         finally:

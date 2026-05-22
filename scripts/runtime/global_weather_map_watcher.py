@@ -179,6 +179,7 @@ class GlobalWeatherMapWatcher:
             self.store_payload(previous)
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather map payload lost live weather values", preserve=True)
             return {"status": "preserved", "payload": previous}
+        payload = global_weather_map_service.merge_weather_series_from_previous(payload, previous)
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")
