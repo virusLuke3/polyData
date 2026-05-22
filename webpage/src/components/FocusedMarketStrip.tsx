@@ -32,12 +32,14 @@ const CHART_RANGE_TABS: Array<{ label: string; value: MarketGroupChartRange }> =
 ];
 const FOCUS_CHART = {
   width: 520,
-  height: 258,
+  height: 276,
   top: 18,
   right: 58,
-  bottom: 34,
-  left: 12,
+  bottom: 48,
+  left: 10,
 };
+
+const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
 function tradeNotional(trade: TradeRow) {
   const size = Number(trade.size);
@@ -169,6 +171,11 @@ function compactDateLabel(value: number) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function compactMonthLabel(value: number) {
+  if (!Number.isFinite(value)) return '';
+  return new Date(value).toLocaleDateString('en-US', { month: 'short' });
+}
+
 function chartTimeTicks(points: Array<{ timestamp: string }>, count = 4) {
   const stamps = points
     .map((point) => new Date(point.timestamp).getTime())
@@ -276,6 +283,18 @@ function buildHorizontalTicks(min: number, max: number, count = 4) {
   });
 }
 
+function polymarketProbabilityScale(values: number[]) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  const rawMax = finite.length ? Math.max(...finite) : 1;
+  let max = 1;
+  if (rawMax <= 0.15) max = 0.15;
+  else if (rawMax <= 0.3) max = 0.3;
+  else if (rawMax <= 0.45) max = 0.45;
+  else if (rawMax <= 0.6) max = 0.6;
+  else if (rawMax <= 0.75) max = 0.75;
+  return { min: 0, max };
+}
+
 function outcomeCards(price: PriceSummary | null) {
   const yesPrice = Number(price?.latestYesPrice);
   const noPrice = Number(price?.latestNoPrice);
@@ -327,20 +346,16 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
   const allValues = series.flatMap((entry) => (entry.points || []).map((point) => Number(point.price)).filter((value) => Number.isFinite(value)));
   if (!allValues.length) return emptyState('No event probability history loaded yet.');
-  const rawMin = Math.min(...allValues);
-  const rawMax = Math.max(...allValues);
-  const padding = Math.max((rawMax - rawMin) * 0.16, 0.025);
-  const min = Math.max(0, rawMin - padding);
-  const max = Math.min(1, rawMax + padding);
+  const { min, max } = polymarketProbabilityScale(allValues);
   const span = max - min || 1;
   const plotHeight = height - top - bottom;
   const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
-  const ticks = buildHorizontalTicks(min, max, 4);
+  const ticks = buildHorizontalTicks(min, max, 5);
   const selectedSeries = series.find((entry) => entry.outcomeKey === selectedOutcomeKey) || series[0];
-  const selectedLast = selectedSeries?.points?.length ? Number(selectedSeries.points[selectedSeries.points.length - 1]?.price) : null;
   const cleanSeries = series
-    .map((entry) => ({
+    .map((entry, index) => ({
       entry,
+      color: entry.color || POLYMARKET_SERIES_COLORS[index % POLYMARKET_SERIES_COLORS.length],
       points: (entry.points || [])
         .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
         .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
@@ -350,10 +365,7 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
   const selectedPath = selectedClean
     ? buildTimedLinePath(selectedClean.points, { width, height, left, right, top, bottom, min, max })
     : '';
-  const selectedAreaPath = selectedPath ? buildAreaPath(selectedPath, { width, height, left, right, bottom }) : '';
-  const selectedColor = selectedSeries?.color || '#ffbc6c';
-  const selectedLabel = selectedSeries?.label || 'Selected';
-  const compactLabel = selectedLabel.length > 28 ? `${selectedLabel.slice(0, 25)}...` : selectedLabel;
+  const selectedColor = selectedClean?.color || selectedSeries?.color || '#4377ff';
   const lastPoint = selectedClean?.points?.[selectedClean.points.length - 1] || null;
   const lastPointX = lastPoint && selectedClean
     ? (() => {
@@ -363,60 +375,51 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
         return left + ((new Date(lastPoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * (width - left - right);
       })()
     : null;
-  const timeTicks = chartTimeTicks(cleanSeries.flatMap((entry) => entry.points), 4);
+  const timeTicks = chartTimeTicks(cleanSeries.flatMap((entry) => entry.points), 5);
+  const plotWidth = width - left - right;
 
   return (
-    <div className="wm-focus-chart-shell wm-focus-event-chart-shell">
-      {selectedSeries && selectedLast != null && Number.isFinite(selectedLast) ? (
-        <div
-          className="wm-focus-chart-overlay-label current"
-          style={{ top: `${projectY(selectedLast)}px`, color: selectedColor }}
-        >
-          <span>{compactLabel}</span>
-          <strong>{formatPercent(selectedLast)}</strong>
-        </div>
-      ) : null}
+    <div className="wm-focus-chart-shell wm-focus-event-chart-shell wm-polymarket-prob-chart">
       <div className="wm-focus-chart-watermark" aria-hidden="true">Polymarket</div>
       <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="wm-event-selected-area" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={selectedColor} stopOpacity="0.24" />
-            <stop offset="72%" stopColor={selectedColor} stopOpacity="0.03" />
-            <stop offset="100%" stopColor={selectedColor} stopOpacity="0" />
-          </linearGradient>
-        </defs>
         {ticks.map((tick) => {
           const y = projectY(tick);
           return (
             <g key={tick}>
               <line x1={left} y1={y} x2={width - right} y2={y} className="wm-focus-chart-grid h" />
-              <text x={width - right + 8} y={y + 4} className="wm-focus-chart-axis-text">{`${Math.round(tick * 100)}.0%`}</text>
+              <text x={width - right + 8} y={y + 4} className="wm-focus-chart-axis-text">{`${Math.round(tick * 100)}%`}</text>
             </g>
           );
         })}
-        {Array.from({ length: 4 }, (_, index) => {
-          const x = left + ((width - left - right) / 3) * index;
-          return <line key={index} x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />;
-        })}
         {timeTicks.map((tick) => {
-          const x = left + tick.ratio * (width - left - right);
+          const x = left + tick.ratio * plotWidth;
           return (
-            <text key={`${tick.ts}-${tick.label}`} x={x} y={height - 9} className="wm-focus-chart-time-text">
-              {tick.label}
-            </text>
+            <g key={`${tick.ts}-${tick.label}`}>
+              <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
+              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactMonthLabel(tick.ts)}</text>
+            </g>
           );
         })}
-        {selectedAreaPath ? <path d={selectedAreaPath} className="wm-focus-chart-area event-selected" /> : null}
-        {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points }) => {
+        <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
+        {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points, color }) => {
           const path = buildTimedLinePath(points, { width, height, left, right, top, bottom, min, max });
           if (!path) return null;
+          const endpoint = points[points.length - 1];
+          const endpointX = endpoint
+            ? (() => {
+                const stamped = points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
+                const minTs = stamped[0] ?? 0;
+                const maxTs = stamped[stamped.length - 1] ?? minTs;
+                return left + ((new Date(endpoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * plotWidth;
+              })()
+            : null;
           return (
-            <path
-              key={entry.outcomeKey || entry.label || path}
-              d={path}
-              className="wm-focus-chart-line event-series muted"
-              style={{ stroke: entry.color || '#7cb6ff' }}
-            />
+            <g key={entry.outcomeKey || entry.label || path}>
+              <path d={path} className="wm-focus-chart-line event-series muted" style={{ stroke: color }} />
+              {endpoint && endpointX != null ? (
+                <circle cx={endpointX} cy={projectY(endpoint.price)} r="3.7" className="wm-focus-chart-endpoint" style={{ fill: color }} />
+              ) : null}
+            </g>
           );
         })}
         {selectedPath ? (
@@ -427,7 +430,7 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
           />
         ) : null}
         {lastPoint && lastPointX != null ? (
-          <circle cx={lastPointX} cy={projectY(lastPoint.price)} r="4" className="wm-focus-chart-endpoint" style={{ fill: selectedColor }} />
+          <circle cx={lastPointX} cy={projectY(lastPoint.price)} r="4.6" className="wm-focus-chart-endpoint selected" style={{ fill: selectedColor }} />
         ) : null}
       </svg>
     </div>
@@ -445,11 +448,11 @@ function eventChartLegend(
   const visible = outcomes
     .slice()
     .sort((left, right) => Number(right.yesPrice || 0) - Number(left.yesPrice || 0))
-    .slice(0, 12);
+    .slice(0, 6);
   if (!visible.length) return null;
   return (
     <div className="wm-focus-event-legend" aria-label="event outcomes legend">
-      {visible.map((outcome) => {
+      {visible.map((outcome, index) => {
         const key = outcome.outcomeKey || '';
         const active = key === selectedOutcomeKey;
         return (
@@ -461,7 +464,7 @@ function eventChartLegend(
           >
             <span
               className="wm-focus-event-legend-dot"
-              style={{ background: seriesColorMap.get(key) || '#7cb6ff' }}
+              style={{ background: seriesColorMap.get(key) || POLYMARKET_SERIES_COLORS[index % POLYMARKET_SERIES_COLORS.length] }}
               aria-hidden="true"
             />
             <span className="wm-focus-event-legend-label">{outcome.label || 'Outcome'}</span>
@@ -485,29 +488,21 @@ function renderDetailChart(chart: ChartPayload | null) {
     const no = points.map((point) => Number(point.noPrice)).filter((value) => Number.isFinite(value));
     if (yes.length < 2) return emptyState('No probability history loaded yet.');
     const merged = [...yes, ...(no.length === yes.length ? no : [])];
-    const rawMin = Math.min(...merged);
-    const rawMax = Math.max(...merged);
-    const rawSpan = rawMax - rawMin;
-    const padding = Math.max(rawSpan * 0.16, 0.025);
-    const min = Math.max(0, rawMin - padding);
-    const max = Math.min(1, rawMax + padding);
+    const { min, max } = polymarketProbabilityScale(merged);
     const yesPath = buildLinePath(yes, { width, height, left, right, top, bottom, min, max });
     const noPath = buildLinePath(no.length === yes.length ? no : yes.map((value) => 1 - value), { width, height, left, right, top, bottom, min, max });
-    const ticks = buildHorizontalTicks(min, max, 4);
+    const ticks = buildHorizontalTicks(min, max, 5);
     const lastYes = yes[yes.length - 1] ?? 0;
     const lastNo = (no.length === yes.length ? no[no.length - 1] : 1 - lastYes) ?? 0;
     const span = max - min || 1;
     const plotHeight = height - top - bottom;
     const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
+    const timeTicks = chartTimeTicks(points.map((point) => ({ timestamp: String(point.timestamp || '') })), 5);
+    const plotWidth = width - left - right;
 
     return (
-      <div className="wm-focus-chart-shell">
-        <div className="wm-focus-chart-overlay-label yes" style={{ top: `${projectY(lastYes)}px` }}>
-          YES {formatPercent(lastYes)}
-        </div>
-        <div className="wm-focus-chart-overlay-label no" style={{ top: `${projectY(lastNo)}px` }}>
-          NO {formatPercent(lastNo)}
-        </div>
+      <div className="wm-focus-chart-shell wm-polymarket-prob-chart">
+        <div className="wm-focus-chart-watermark" aria-hidden="true">Polymarket</div>
         <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
           {ticks.map((tick) => {
             const y = projectY(tick);
@@ -518,12 +513,20 @@ function renderDetailChart(chart: ChartPayload | null) {
               </g>
             );
           })}
-          {Array.from({ length: 4 }, (_, index) => {
-            const x = left + ((width - left - right) / 3) * index;
-            return <line key={index} x1={x} y1={top} x2={x} y2={height - bottom} className="wm-focus-chart-grid v" />;
+          {timeTicks.map((tick) => {
+            const x = left + tick.ratio * plotWidth;
+            return (
+              <g key={`${tick.ts}-${tick.label}`}>
+                <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
+                <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactMonthLabel(tick.ts)}</text>
+              </g>
+            );
           })}
+          <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
           <path d={yesPath} className="wm-focus-chart-line yes" />
           {no.length === yes.length ? <path d={noPath} className="wm-focus-chart-line no" /> : null}
+          <circle cx={width - right} cy={projectY(lastYes)} r="4.4" className="wm-focus-chart-endpoint selected" style={{ fill: '#4377ff' }} />
+          {no.length === yes.length ? <circle cx={width - right} cy={projectY(lastNo)} r="3.8" className="wm-focus-chart-endpoint no-dot" /> : null}
         </svg>
       </div>
     );
