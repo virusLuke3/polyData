@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
 import os
 import threading
+import time
 from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
@@ -17,6 +20,9 @@ AGENT_CACHE_NAMESPACE = "agent:insights"
 AGENT_CACHE_VERSION = "v2"
 _REFRESH_LOCK = threading.Lock()
 _REFRESHING_KEYS: set[str] = set()
+_RATE_LOCK = threading.Lock()
+_RATE_WINDOW_SECONDS = 60
+_RATE_BUCKETS: dict[str, list[float]] = {}
 
 
 def _agent_enabled() -> bool:
@@ -25,6 +31,107 @@ def _agent_enabled() -> bool:
 
 def _agent_disabled_response():
     return jsonify({"error": "agent-disabled", "status": "disabled"}), 404
+
+
+def _agent_forbidden_response():
+    return jsonify({"error": "agent-forbidden", "status": "forbidden"}), 403
+
+
+def _agent_rate_limited_response(retry_after_seconds: int):
+    response = jsonify({"error": "agent-rate-limited", "status": "rate-limited", "retryAfterSeconds": retry_after_seconds})
+    response.status_code = 429
+    response.headers["Retry-After"] = str(retry_after_seconds)
+    return response
+
+
+def _truthy_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _agent_local_only() -> bool:
+    return _truthy_env("POLYDATA_AGENT_LOCAL_ONLY", True)
+
+
+def _agent_rate_limit_per_minute() -> int:
+    try:
+        return max(1, int(os.environ.get("POLYDATA_AGENT_RATE_LIMIT_PER_MINUTE", "6")))
+    except ValueError:
+        return 6
+
+
+def _normalize_ip(raw: str | None) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    if "," in value:
+        value = value.split(",", 1)[0].strip()
+    if value.startswith("[") and "]" in value:
+        return value[1:value.index("]")]
+    if value.count(":") == 0 and ":" in value:
+        return value
+    if value.count(":") == 1 and "." in value:
+        host, _port = value.rsplit(":", 1)
+        return host
+    return value
+
+
+def _is_loopback(raw: str | None) -> bool:
+    value = _normalize_ip(raw)
+    if value in {"localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def _agent_token_authorized() -> bool:
+    expected = os.environ.get("POLYDATA_AGENT_SERVER_TOKEN", "").strip()
+    if not expected:
+        return False
+    token = request.headers.get("X-PolyData-Agent-Token", "").strip()
+    bearer = request.headers.get("Authorization", "").strip()
+    if bearer.lower().startswith("bearer "):
+        token = bearer.split(None, 1)[1].strip()
+    return hmac.compare_digest(token, expected)
+
+
+def _agent_access_allowed() -> bool:
+    if not _agent_local_only():
+        expected = os.environ.get("POLYDATA_AGENT_SERVER_TOKEN", "").strip()
+        return _agent_token_authorized() if expected else True
+
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    real_ip = request.headers.get("X-Real-IP")
+    if forwarded_for and not _is_loopback(forwarded_for):
+        return False
+    if real_ip and not _is_loopback(real_ip):
+        return False
+    return _is_loopback(request.remote_addr)
+
+
+def _agent_rate_key() -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    return _normalize_ip(forwarded_for) or _normalize_ip(request.remote_addr) or "unknown"
+
+
+def _check_agent_rate_limit() -> int | None:
+    limit = _agent_rate_limit_per_minute()
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW_SECONDS
+    key = _agent_rate_key()
+    with _RATE_LOCK:
+        bucket = [ts for ts in _RATE_BUCKETS.get(key, []) if ts >= cutoff]
+        if len(bucket) >= limit:
+            _RATE_BUCKETS[key] = bucket
+            oldest = min(bucket) if bucket else now
+            return max(1, int(_RATE_WINDOW_SECONDS - (now - oldest)))
+        bucket.append(now)
+        _RATE_BUCKETS[key] = bucket
+    return None
 
 
 def _agent_cache_ttl() -> int:
@@ -150,28 +257,17 @@ def _log_exception(helpers: dict, message: str, *args: Any) -> None:
         logger.exception(message, *args)
 
 
-def _schedule_refresh(helpers: dict, cache_key: str, builder: Callable[[], dict[str, Any]]) -> bool:
+def _enter_singleflight(cache_key: str) -> bool:
     with _REFRESH_LOCK:
         if cache_key in _REFRESHING_KEYS:
             return False
         _REFRESHING_KEYS.add(cache_key)
+        return True
 
-    def refresh() -> None:
-        try:
-            response = builder()
-            if isinstance(response, dict) and response.get("brief") and isinstance(response.get("focus"), list):
-                ttl = _agent_cache_ttl() if response.get("status") == "live" else _fallback_cache_ttl()
-                response["cacheRefreshedAt"] = response.get("generatedAt")
-                _store_response(helpers, cache_key, response, ttl)
-        except Exception:
-            _log_exception(helpers, "agent-cache refresh failed key=%s", cache_key)
-        finally:
-            with _REFRESH_LOCK:
-                _REFRESHING_KEYS.discard(cache_key)
 
-    thread = threading.Thread(target=refresh, name=f"agent-cache:{cache_key[:20]}", daemon=True)
-    thread.start()
-    return True
+def _leave_singleflight(cache_key: str) -> None:
+    with _REFRESH_LOCK:
+        _REFRESHING_KEYS.discard(cache_key)
 
 
 def _serve_agent_with_cache(
@@ -185,16 +281,36 @@ def _serve_agent_with_cache(
     cache_key = _cache_key(kind, payload)
     cached = _cached_response(helpers, cache_key)
     if cached is not None:
-        if cached.get("status") != "live":
-            _schedule_refresh(helpers, cache_key, live_builder)
         return cached
 
-    scheduled = _schedule_refresh(helpers, cache_key, live_builder)
-    fallback = fallback_builder()
-    fallback["cacheStatus"] = "warming" if scheduled else "warming-in-progress"
-    fallback["cacheKey"] = cache_key
-    _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
-    return fallback
+    if not _enter_singleflight(cache_key):
+        fallback = fallback_builder()
+        fallback["cacheStatus"] = "in-flight"
+        fallback["cacheKey"] = cache_key
+        return fallback
+
+    try:
+        response = live_builder()
+        if isinstance(response, dict) and response.get("brief") and isinstance(response.get("focus"), list):
+            ttl = _agent_cache_ttl() if response.get("status") == "live" else _fallback_cache_ttl()
+            response["cacheStatus"] = "miss"
+            response["cacheKey"] = cache_key
+            _store_response(helpers, cache_key, response, ttl)
+            return response
+        fallback = fallback_builder()
+        fallback["cacheStatus"] = "fallback"
+        fallback["cacheKey"] = cache_key
+        _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+        return fallback
+    except Exception:
+        _log_exception(helpers, "agent-cache live call failed key=%s", cache_key)
+        fallback = fallback_builder()
+        fallback["cacheStatus"] = "error-fallback"
+        fallback["cacheKey"] = cache_key
+        _store_response(helpers, cache_key, fallback, _fallback_cache_ttl())
+        return fallback
+    finally:
+        _leave_singleflight(cache_key)
 
 
 def create_agent_blueprint(helpers: dict) -> Blueprint:
@@ -204,7 +320,14 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
     def api_market_insights():
         if not _agent_enabled():
             return _agent_disabled_response()
-        payload = request.get_json(silent=True) or {}
+        if not _agent_access_allowed():
+            return _agent_forbidden_response()
+        retry_after = _check_agent_rate_limit()
+        if retry_after is not None:
+            return _agent_rate_limited_response(retry_after)
+        payload = request.get_json(silent=True)
+        if payload is None:
+            payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":
@@ -221,7 +344,14 @@ def create_agent_blueprint(helpers: dict) -> Blueprint:
     def api_market_wide_insights():
         if not _agent_enabled():
             return _agent_disabled_response()
-        payload = request.get_json(silent=True) or {}
+        if not _agent_access_allowed():
+            return _agent_forbidden_response()
+        retry_after = _check_agent_rate_limit()
+        if retry_after is not None:
+            return _agent_rate_limited_response(retry_after)
+        payload = request.get_json(silent=True)
+        if payload is None:
+            payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "JSON object required"}), 400
         if request.headers.get("X-PolyData-Agent-Gateway-Attempt") == "1":

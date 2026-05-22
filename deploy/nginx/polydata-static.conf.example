@@ -9,6 +9,8 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Agent endpoints call paid LLM APIs. Keep them out of the public web
+    # surface; use the loopback API or an authenticated private tunnel instead.
     location ^~ /wm-api/agent/ {
         return 403;
     }

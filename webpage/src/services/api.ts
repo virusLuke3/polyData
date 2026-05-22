@@ -50,6 +50,15 @@ const RAW_BASE = import.meta.env.DEV
   ? '/wm-api'
   : (import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api');
 const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
+const AGENT_RESPONSE_TTL_MS = 5 * 60 * 1000;
+
+type AgentCacheEntry<T> = {
+  expiresAt: number;
+  data: T;
+};
+
+const agentResponseCache = new Map<string, AgentCacheEntry<unknown>>();
+const agentInflight = new Map<string, Promise<unknown>>();
 
 async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000): Promise<T> {
   const controller = new AbortController();
@@ -84,6 +93,34 @@ async function apiPostWithTimeout<T>(path: string, body: unknown, timeoutMs = 18
     throw new Error(`API ${response.status} for ${path}`);
   }
   return response.json() as Promise<T>;
+}
+
+function agentRequestKey(path: string, body: unknown) {
+  return `${path}:${JSON.stringify(body)}`;
+}
+
+async function apiPostAgentOnce<T>(path: string, body: unknown, timeoutMs = 18000): Promise<T> {
+  const key = agentRequestKey(path, body);
+  const now = Date.now();
+  const cached = agentResponseCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.data as T;
+  }
+  const inflight = agentInflight.get(key);
+  if (inflight) {
+    return inflight as Promise<T>;
+  }
+
+  const request = apiPostWithTimeout<T>(path, body, timeoutMs)
+    .then((data) => {
+      agentResponseCache.set(key, { data, expiresAt: Date.now() + AGENT_RESPONSE_TTL_MS });
+      return data;
+    })
+    .finally(() => {
+      agentInflight.delete(key);
+    });
+  agentInflight.set(key, request);
+  return request;
 }
 
 export function fetchBootstrap() {
@@ -463,11 +500,11 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
 const workspaceBundleInflight = new Map<string, Promise<WorkspaceBundle>>();
 
 export function fetchMarketAiInsights(payload: MarketAiInsightPayload, timeoutMs = 20000) {
-  return apiPostWithTimeout<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
+  return apiPostAgentOnce<MarketAiInsightResponse>('/agent/market-insights', payload, timeoutMs);
 }
 
 export function fetchMarketWideAiInsights(payload: MarketWideAiInsightPayload, timeoutMs = 24000) {
-  return apiPostWithTimeout<MarketWideAiInsightResponse>('/agent/market-wide-insights', payload, timeoutMs);
+  return apiPostAgentOnce<MarketWideAiInsightResponse>('/agent/market-wide-insights', payload, timeoutMs);
 }
 
 export async function fetchWorkspaceBundle(marketId: number, options: { includeContent?: boolean; includeLob?: boolean } = {}): Promise<WorkspaceBundle> {

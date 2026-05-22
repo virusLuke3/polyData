@@ -296,19 +296,12 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
 
   useEffect(() => {
     let cancelled = false;
-    let retryTimer: number | undefined;
-    const load = (attempt = 0) => {
+    const load = () => {
       setLoading(true);
       fetchMarketWideAiInsights(payload)
         .then((response) => {
           if (cancelled) return;
           setInsight(response);
-          const warming = response.cacheStatus === 'warming'
-            || response.cacheStatus === 'warming-in-progress'
-            || response.status === 'cache-warming';
-          if (warming && attempt < 4) {
-            retryTimer = window.setTimeout(() => load(attempt + 1), 8000 + attempt * 2500);
-          }
         })
         .catch(() => {
           if (!cancelled) setInsight(fallback);
@@ -321,7 +314,6 @@ export function AiMarketWidePanel({ ctx, lens, title, badge }: AiMarketWidePanel
     load();
     return () => {
       cancelled = true;
-      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [fallback, payload, signature]);
 
