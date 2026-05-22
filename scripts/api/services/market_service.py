@@ -1095,7 +1095,7 @@ def get_market_chart_payload(
             ttl_seconds=180,
         )
     market = market if market is not None else get_market_by_id(ctx, market_id)
-    chart_context = _extract_market_chart_context(ctx, market, range_name)
+    chart_context = _extract_market_chart_context(ctx, market, range_name) if include_runtime_series else None
     if chart_context:
         return {
             "marketId": market_id,
@@ -2030,15 +2030,22 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         identity["selectedOutcomeKey"] = selected_outcome.get("outcomeKey")
 
     price = detail_payload.get("price") or get_market_price_summary(ctx, market_id, market=market)
-    chart = detail_payload.get("chart") or get_market_chart_payload(
-        ctx,
-        market_id,
-        range_name="1d",
-        interval="5m",
-        market=market,
-        price=price,
-        include_runtime_series=False,
-    )
+    if not (price or {}).get("latestYesPrice") and not (price or {}).get("latestPrice"):
+        price = get_market_price_summary(ctx, market_id, market=market)
+
+    detail_chart = detail_payload.get("chart") if isinstance(detail_payload.get("chart"), dict) else None
+    detail_chart_points = detail_chart.get("points") if isinstance(detail_chart, dict) else []
+    chart = detail_chart if isinstance(detail_chart_points, list) and detail_chart_points else None
+    if chart is None:
+        chart = get_market_chart_payload(
+            ctx,
+            market_id,
+            range_name="1d",
+            interval="5m",
+            market=market,
+            price=price,
+            include_runtime_series=False,
+        )
     oracle_payload = detail_payload.get("oracle") or get_market_oracle_payload(ctx, market_id, market=market)
     diagnostics = dict(detail_payload.get("diagnostics") or {})
     if diagnostics:
