@@ -118,6 +118,7 @@ def _get_csv(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class ApiSettings:
+    deploy_role: str
     host: str
     port: int
     allowed_origins: tuple[str, ...]
@@ -225,7 +226,10 @@ class ApiSettings:
 def load_api_settings() -> ApiSettings:
     _load_dotenv_files()
     snapshot_default = str((PROJECT_ROOT / "data" / "panel_snapshots.sqlite3").resolve())
+    deploy_role = _get_str("POLYDATA_DEPLOY_ROLE", "local-data").strip().lower()
+    snapshot_prewarm_default = deploy_role in {"gcp-api", "remote-api", "production-api"}
     return ApiSettings(
+        deploy_role=deploy_role,
         host=_get_str("POLYDATA_API_HOST", "127.0.0.1"),
         port=_get_int("POLYDATA_API_PORT", 18500),
         allowed_origins=_get_csv("POLYDATA_ALLOWED_ORIGINS", ()),
@@ -239,7 +243,7 @@ def load_api_settings() -> ApiSettings:
         redis_url=_get_str("POLYDATA_REDIS_URL", ""),
         redis_prefix=_get_str("POLYDATA_REDIS_PREFIX", "polydata:"),
         snapshot_sqlite_path=_get_str("POLYDATA_SNAPSHOT_SQLITE_PATH", snapshot_default),
-        snapshot_prewarm_enabled=_get_bool("POLYDATA_SNAPSHOT_PREWARM", True),
+        snapshot_prewarm_enabled=_get_bool("POLYDATA_SNAPSHOT_PREWARM", snapshot_prewarm_default),
         gamma_api_base=_get_str("POLYDATA_GAMMA_API_BASE", POLYMARKET_GAMMA_API_BASE),
         clob_api_base=_get_str("POLYDATA_CLOB_API_BASE", POLYMARKET_CLOB_API_BASE),
         polymarket_macro_map_source_url=_get_str(

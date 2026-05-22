@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import time
+import os
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
@@ -85,6 +86,12 @@ class LOBRuntimeManager:
         self._cache: Dict[int, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._session = requests.Session()
+        self._session.trust_env = str(os.environ.get("POLYDATA_CLOB_TRUST_ENV_PROXY") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self._session.headers.update(
             {
                 "Accept": "application/json",

@@ -87,6 +87,7 @@ from api.services import address_service, bootstrap_service, content_service, cp
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
+DEPLOY_ROLE = SETTINGS.deploy_role
 DB_PATH = SETTINGS.db_path
 ALLOWED_ORIGINS = set(SETTINGS.allowed_origins)
 DASHBOARD_CACHE_TTL_SECONDS = SETTINGS.dashboard_cache_ttl_seconds
@@ -347,6 +348,7 @@ def build_service_context() -> Dict[str, Any]:
         "CRYPTO_SYMBOLS": CRYPTO_SYMBOLS,
         "DB_PATH": DB_PATH,
         "DASHBOARD_CACHE_TTL_SECONDS": DASHBOARD_CACHE_TTL_SECONDS,
+        "DEPLOY_ROLE": DEPLOY_ROLE,
         "FINANCE_RUNTIME_TTL_SECONDS": FINANCE_RUNTIME_TTL_SECONDS,
         "LEGACY_TRADES_TABLE": LEGACY_TRADES_TABLE,
         "LOB_RUNTIME_MANAGER": LOB_RUNTIME_MANAGER,
@@ -652,6 +654,12 @@ def get_clob_session():
         if _clob_session is not None:
             return _clob_session
         session = requests.Session()
+        session.trust_env = str(os.environ.get("POLYDATA_CLOB_TRUST_ENV_PROXY") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         session.headers.update(
             {
                 "Accept": "application/json",
@@ -1720,9 +1728,9 @@ def initialize_runtime(
         if log_startup:
             app.logger.info("Starting API server at http://%s:%s", host or SETTINGS.host, port or SETTINGS.port)
             app.logger.info("Database: %s", describe_db_target())
-        if _claim_startup_prewarm_slot():
+        if SNAPSHOT_PREWARM_ENABLED and _claim_startup_prewarm_slot():
             prewarm_critical_payloads()
-        if _claim_snapshot_prewarm_owner():
+        if SNAPSHOT_PREWARM_ENABLED and _claim_snapshot_prewarm_owner():
             start_snapshot_prewarm_thread()
         _runtime_initialized = True
         return app

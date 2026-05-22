@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -722,6 +723,14 @@ def get_bootstrap_payload_cached(ctx: dict) -> Dict[str, Any]:
 
 def prewarm_snapshot_payloads(ctx: dict) -> None:
     def _prewarm_active_market_group_charts() -> None:
+        enabled = str(os.environ.get("POLYDATA_PREWARM_MARKET_GROUP_CHARTS") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not enabled:
+            return
         payload = ctx["get_market_groups_payload"](query="", page=1, page_size=80, sort="active")
         for group in (payload.get("items") or [])[:8]:
             event_id = group.get("eventId")
