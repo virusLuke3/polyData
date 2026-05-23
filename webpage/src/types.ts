@@ -1201,6 +1201,11 @@ export type RuntimeMacroRegistryItem = {
   tone?: string | null;
   source?: string | null;
   sourceUrl?: string | null;
+  sourceLabel?: string | null;
+  domainTag?: string | null;
+  severityLabel?: string | null;
+  ageLabel?: string | null;
+  rank?: number | string | null;
   implication?: string | null;
 };
 
@@ -1216,6 +1221,10 @@ export type RuntimeMacroRegistrySummary = {
   coverage?: number | string | null;
   sourceCount?: number | string | null;
   topMover?: RuntimeMacroRegistryItem | null;
+  topLabel?: string | null;
+  topValueLabel?: string | null;
+  topChangeLabel?: string | null;
+  sourceLabel?: string | null;
 };
 
 export type RuntimeMacroRegistryPayload = {

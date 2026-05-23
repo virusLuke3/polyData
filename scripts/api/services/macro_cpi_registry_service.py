@@ -106,6 +106,93 @@ def _value_label(value: Any, unit: Any = None) -> str:
     return f"{number:.2f}" if abs(number) < 100 else f"{number:.1f}"
 
 
+def _source_label(source: Any) -> str:
+    text = str(source or "").strip()
+    lowered = text.lower()
+    if not text:
+        return "SOURCE"
+    if "cleveland" in lowered:
+        return "NOWCAST"
+    if "federal reserve" in lowered or lowered == "fed":
+        return "FED"
+    if "federal register" in lowered:
+        return "FEDREG"
+    if "fred" in lowered and "bls" in lowered:
+        return "FRED/BLS"
+    if "fred" in lowered:
+        return "FRED"
+    if "bls" in lowered:
+        return "BLS"
+    if "eia" in lowered:
+        return "EIA"
+    if "dol" in lowered:
+        return "DOL"
+    if "treasury" in lowered:
+        return "UST"
+    if "/" in text:
+        return "/".join(part.strip()[:4].upper() for part in text.split("/")[:2] if part.strip()) or "SOURCE"
+    return text.split()[0][:10].upper()
+
+
+def _domain_tag(group: Any, row_type: Any, label: Any) -> str:
+    text = f"{group or ''} {row_type or ''} {label or ''}".lower()
+    if any(term in text for term in ("nfp", "job", "wage", "labor", "unemployment", "claim")):
+        return "LABOR"
+    if any(term in text for term in ("fed", "fomc", "sofr", "funds", "treasury", "rate")):
+        return "FED"
+    if any(term in text for term in ("oil", "wti", "gasoline", "energy", "eia")):
+        return "ENERGY"
+    if any(term in text for term in ("food", "retail", "egg", "meat")):
+        return "FOOD"
+    if any(term in text for term in ("rent", "shelter", "oer", "housing")):
+        return "SHELTER"
+    if any(term in text for term in ("tariff", "import", "supply", "goods", "producer")):
+        return "GOODS"
+    if any(term in text for term in ("cpi", "pce", "inflation", "nowcast")):
+        return "CPI"
+    if any(term in text for term in ("gdp", "growth", "demand", "recession")):
+        return "GROWTH"
+    return str(group or row_type or "MACRO").upper()[:12]
+
+
+def _severity_label(tone: Any) -> str:
+    normalized = _status_tone(tone)
+    if normalized == "hot":
+        return "ALERT"
+    if normalized == "cool":
+        return "COOL"
+    if normalized == "watch":
+        return "WATCH"
+    return "INFO"
+
+
+def _age_label(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "--"
+    parsed_text = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(parsed_text)
+    except ValueError:
+        return text[:10]
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    diff_seconds = max(0, int((now - parsed.astimezone(timezone.utc)).total_seconds()))
+    minutes = diff_seconds // 60
+    hours = diff_seconds // 3600
+    days = diff_seconds // 86400
+    if minutes < 1:
+        return "NOW"
+    if minutes < 60:
+        return f"{minutes}M"
+    if hours < 24:
+        return f"{hours}H"
+    if days < 30:
+        return f"{days}D"
+    return parsed.date().isoformat()
+
+
 def _row(
     *,
     key: str,
@@ -122,6 +209,9 @@ def _row(
     source_url: str = "",
     implication: str = "",
 ) -> Dict[str, Any]:
+    normalized_tone = _status_tone(tone)
+    value_label = _value_label(value, unit)
+    delta_label = change_label or _signed(change)
     return {
         "key": key,
         "type": row_type,
@@ -129,15 +219,51 @@ def _row(
         "label": label,
         "value": value,
         "unit": unit,
-        "valueLabel": _value_label(value, unit),
+        "valueLabel": value_label,
         "change": change,
-        "changeLabel": change_label or _signed(change),
+        "changeLabel": delta_label,
         "date": date,
-        "tone": _status_tone(tone),
+        "tone": normalized_tone,
         "source": source,
         "sourceUrl": source_url,
+        "sourceLabel": _source_label(source),
+        "domainTag": _domain_tag(group, row_type, label),
+        "severityLabel": _severity_label(normalized_tone),
+        "ageLabel": _age_label(date),
         "implication": implication,
     }
+
+
+def _sort_key(row: Dict[str, Any]) -> tuple[int, float, str]:
+    tone_rank = {"hot": 0, "watch": 1, "cool": 2, "neutral": 3}.get(str(row.get("tone") or "neutral"), 4)
+    if str(row.get("type") or "").lower() == "release":
+        tone_rank = -1
+    magnitude = abs(_float(row.get("change")) or 0.0)
+    return (tone_rank, -magnitude, str(row.get("label") or ""))
+
+
+def _rank_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ranked = sorted(rows, key=_sort_key)
+    for index, row in enumerate(ranked, start=1):
+        row["rank"] = index
+    return ranked
+
+
+def _enrich_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    tone = _status_tone(row.get("tone"))
+    source = row.get("source")
+    group = row.get("group")
+    row_type = row.get("type")
+    label = row.get("label")
+    enriched = dict(row)
+    enriched["tone"] = tone
+    enriched["valueLabel"] = str(row.get("valueLabel") or _value_label(row.get("value"), row.get("unit")))
+    enriched["changeLabel"] = str(row.get("changeLabel") or _signed(row.get("change")))
+    enriched["sourceLabel"] = str(row.get("sourceLabel") or _source_label(source))
+    enriched["domainTag"] = str(row.get("domainTag") or _domain_tag(group, row_type, label))
+    enriched["severityLabel"] = str(row.get("severityLabel") or _severity_label(tone))
+    enriched["ageLabel"] = str(row.get("ageLabel") or _age_label(row.get("date")))
+    return enriched
 
 
 def _snapshot_status(payload: Dict[str, Any]) -> str:
@@ -330,7 +456,7 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
         signal = str(config.get("emptySignal") or "REGISTRY WARMING")
         bias = "unknown"
     top = None
-    numeric = [row for row in rows if _float(row.get("change")) is not None]
+    numeric = [row for row in rows if _float(row.get("change")) is not None and str(row.get("type") or "").lower() != "release"]
     if numeric:
         top = max(numeric, key=lambda row: abs(_float(row.get("change")) or 0.0))
     return {
@@ -345,12 +471,16 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
         "coverage": sum(1 for value in sources.values() if str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"}),
         "sourceCount": len(sources),
         "topMover": top,
+        "topLabel": top.get("label") if top else None,
+        "topValueLabel": top.get("valueLabel") if top else None,
+        "topChangeLabel": top.get("changeLabel") if top else None,
+        "sourceLabel": config.get("source"),
     }
 
 
 def _payload(ctx: dict, panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str], *, limit: int) -> Dict[str, Any]:
     config = PANEL_CONFIGS[panel_id]
-    capped = rows[: _limit(limit)]
+    capped = _rank_rows(rows)[: _limit(limit)]
     status = "ok" if capped and any(str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
     return {
         "generatedAt": _utc_now_iso(ctx),
@@ -519,13 +649,13 @@ def normalize_macro_cpi_registry_payload(payload: Any, *, ctx: dict, panel_id: s
     if not isinstance(payload, dict):
         payload = {}
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
-    rows = [row for row in (result.get("items") or []) if isinstance(row, dict)]
-    result["items"] = rows[: _limit(limit)]
+    rows = [_enrich_row(row) for row in (result.get("items") or []) if isinstance(row, dict)]
+    result["items"] = _rank_rows(rows)[: _limit(limit)]
     result["generatedAt"] = str(result.get("generatedAt") or _utc_now_iso(ctx))
     result["panelId"] = str(result.get("panelId") or panel_id)
     result["status"] = str(result.get("status") or ("ok" if rows else "warming"))
     result["cacheMode"] = str(result.get("cacheMode") or "composed-seed")
     result["source"] = str(result.get("source") or PANEL_CONFIGS.get(panel_id, {}).get("source") or "Public macro sources")
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
-    result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
+    result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
     return result

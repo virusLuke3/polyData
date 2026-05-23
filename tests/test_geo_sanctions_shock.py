@@ -88,7 +88,13 @@ class FakeResponse:
 
 
 class FakeRequests:
+    def __init__(self) -> None:
+        self.last_get_headers: Dict[str, str] | None = None
+        self.last_get_url: str | None = None
+
     def get(self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
+        self.last_get_url = url
+        self.last_get_headers = headers
         if url == "sdn-url":
             return FakeResponse(SDN_XML)
         if url == "cons-url":
@@ -300,15 +306,27 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("GDELT", payload["conflictProvider"])
 
     def test_seed_builder_uses_ucdp_before_gdelt_when_token_is_present(self):
-        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="", acled_enabled=False, ucdp_enabled=True)
+        requests_lib = FakeRequests()
+        ctx = self.make_context(requests_lib=requests_lib, conflict_url="", acled_enabled=False, ucdp_enabled=True)
+
+        payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
+
+        self.assertEqual("ok", payload["sources"]["conflictFeed"])
+        self.assertEqual("UCDP", payload["conflictProvider"])
+        self.assertEqual("ucdp-api-url", requests_lib.last_get_url)
+        self.assertEqual("ucdp-token", (requests_lib.last_get_headers or {}).get("x-ucdp-access-token"))
+        self.assertTrue(any(item.get("source") == "UCDP" for item in payload["items"]))
+        ucdp_items = [item for item in payload["items"] if item.get("source") == "UCDP"]
+        self.assertTrue(any("UKRAINE" in (item.get("targetLabels") or []) for item in ucdp_items))
+
+    def test_seed_builder_prefers_ucdp_over_acled_when_both_tokens_are_present(self):
+        ctx = self.make_context(requests_lib=FakeRequests(), conflict_url="", acled_enabled=True, ucdp_enabled=True)
 
         payload = geo_sanctions_shock_service.build_geo_sanctions_shock_seed_payload(ctx, previous={})
 
         self.assertEqual("ok", payload["sources"]["conflictFeed"])
         self.assertEqual("UCDP", payload["conflictProvider"])
         self.assertTrue(any(item.get("source") == "UCDP" for item in payload["items"]))
-        ucdp_items = [item for item in payload["items"] if item.get("source") == "UCDP"]
-        self.assertTrue(any("UKRAINE" in (item.get("targetLabels") or []) for item in ucdp_items))
 
     def test_seed_builder_marks_gdelt_rate_limited_and_preserves_previous_conflict_items(self):
         def rate_limited_http_json_get(url, params=None, timeout=12, headers=None):

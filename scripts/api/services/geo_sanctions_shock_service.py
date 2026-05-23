@@ -1041,14 +1041,28 @@ def _successful_conflict_snapshot(snapshot: Dict[str, Any]) -> bool:
     return str(snapshot.get("state") or "").lower() in {"ok", "empty"}
 
 
+def _conflict_snapshot_has_items(snapshot: Dict[str, Any]) -> bool:
+    return str(snapshot.get("state") or "").lower() == "ok" and bool(snapshot.get("items"))
+
+
+def _has_ucdp_token(settings: Any) -> bool:
+    return bool(str(getattr(settings, "geo_shock_ucdp_access_token", "") or "").strip())
+
+
 def _fetch_conflict_snapshot(ctx: dict, *, previous: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     url = ctx["SETTINGS"].geo_shock_conflict_api_url
     if not url:
+        ucdp_snapshot: Dict[str, Any] = {"state": "auth-missing", "provider": "UCDP", "items": [], "targetScores": {}, "hotspotCount": 0}
+        if _has_ucdp_token(ctx["SETTINGS"]):
+            ucdp_snapshot = _fetch_ucdp_conflict_snapshot(ctx)
+            if _conflict_snapshot_has_items(ucdp_snapshot):
+                return ucdp_snapshot
         if _has_acled_credentials(ctx["SETTINGS"]):
             acled_snapshot = _fetch_acled_conflict_snapshot(ctx)
-            if _successful_conflict_snapshot(acled_snapshot):
+            if _conflict_snapshot_has_items(acled_snapshot):
                 return acled_snapshot
-        ucdp_snapshot = _fetch_ucdp_conflict_snapshot(ctx)
+            if _successful_conflict_snapshot(acled_snapshot) and not _successful_conflict_snapshot(ucdp_snapshot):
+                return acled_snapshot
         if _successful_conflict_snapshot(ucdp_snapshot):
             return ucdp_snapshot
         gdelt_snapshot = _fetch_gdelt_conflict_snapshot(ctx)

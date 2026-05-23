@@ -1,9 +1,10 @@
+import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGeoSanctionsShock } from '@/services/api';
 import type { RuntimeGeoSanctionsShockPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { PanelGlyph, signalToneClass } from '../macro-intel';
+import { PanelGlyph, SourceStack, signalToneClass } from '../macro-intel';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -85,9 +86,16 @@ function geoSignalTone(payload?: RuntimeGeoSanctionsShockPayload | null) {
   return signalToneClass('quiet');
 }
 
+function sourceCoverage(payload?: RuntimeGeoSanctionsShockPayload | null) {
+  const sources = Object.values(payload?.sources || {});
+  const live = sources.filter((state) => /^(ok|redis-seed|sqlite-seed|stale-seed|seeded)$/i.test(String(state || ''))).length;
+  return `${live}/${sources.length || 0}`;
+}
+
 function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
+  const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
   const items = payload?.items || [];
   const signal = geoSignalLabel(payload);
@@ -95,9 +103,26 @@ function GeoShockPanel({ payload }: {
   return (
     <Panel
       title="GEO / SANCTIONS SHOCK"
+      titleControls={(
+        <button
+          type="button"
+          className="wm-panel-help-button"
+          aria-label="Explain GEO / SANCTIONS SHOCK"
+          aria-expanded={showHelp}
+          onClick={() => setShowHelp((current) => !current)}
+        >
+          ?
+        </button>
+      )}
       badge={badgeLabel(payload?.status)}
       status={panelTone(payload?.status)}
       count={items.length || undefined}
+      headerOverlay={showHelp ? (
+        <div className="wm-panel-help-popover">
+          <strong>Geo shock registry</strong>
+          <p>Composes OFAC, Federal Register, and conflict feeds into tradeable geopolitical macro-risk signals.</p>
+        </div>
+      ) : null}
       className="wm-market-panel wm-geo-shock-panel"
       dataPanelId="geo-sanctions-shock"
     >
@@ -112,13 +137,28 @@ function GeoShockPanel({ payload }: {
           </div>
           <em>{`${summary?.newSanctionsCount ?? 0} sanctions / ${summary?.hotspotCount ?? 0} hotspots`}</em>
         </div>
+        <div className="wm-geo-shock-scanbar">
+          <div>
+            <span>TARGETS</span>
+            <strong>{upperMetric(summary?.targetSummary || summary?.targetLabels?.[0] || 'MONITORING')}</strong>
+          </div>
+          <div>
+            <span>NUCLEAR</span>
+            <strong>{upperMetric(summary?.nuclearRisk || 'guarded')}</strong>
+          </div>
+          <div>
+            <span>SOURCES</span>
+            <strong>{sourceCoverage(payload)}</strong>
+          </div>
+        </div>
+        <SourceStack sources={payload?.sources} labels={{ ofacSdn: 'OFAC', ofacConsolidated: 'OFAC-C', federalRegister: 'FEDREG', conflictFeed: payload?.conflictProvider || 'CONFLICT' }} />
 
         <section className="wm-geo-shock-section compact">
           <header className="wm-geo-shock-section-header">
             <span>LATEST SHOCKS</span>
           </header>
           <div className="wm-geo-shock-feed">
-            {items.length ? items.slice(0, 3).map((item) => {
+            {items.length ? items.slice(0, 6).map((item) => {
               const sevClass = severityClass(item.severity);
               const targetLabel = upperMetric(item.targetLabels?.[0] || item.country || '');
               return (
@@ -127,7 +167,8 @@ function GeoShockPanel({ payload }: {
                   <div className="wm-geo-shock-row-main">
                     <div className="wm-geo-shock-row-top">
                       <span className={`wm-geo-shock-kind ${sevClass}`}>{severityLabel(item.severity)}</span>
-                      <span className="wm-geo-shock-source">{kindLabel(item.kind)} / {upperMetric(item.source || 'SOURCE')}</span>
+                      <span className="wm-geo-shock-domain">{kindLabel(item.kind)}</span>
+                      <span className="wm-geo-shock-source">{upperMetric(item.source || 'SOURCE')}</span>
                       <span className="wm-geo-shock-time">{formatAge(item.occurredAt)}</span>
                     </div>
                     <div className="wm-geo-shock-headline">{item.headline || 'Monitoring update'}</div>

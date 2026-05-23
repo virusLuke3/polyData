@@ -387,9 +387,12 @@ def load_api_settings() -> ApiSettings:
         ),
         geo_shock_ucdp_api_url=_get_str(
             "POLYDATA_GEO_SHOCK_UCDP_API_URL",
-            GEO_SHOCK_UCDP_API_URL or "https://ucdpapi.pcr.uu.se/api/gedevents/26.0.3",
+            _get_str("UCDP_API_URL", GEO_SHOCK_UCDP_API_URL or "https://ucdpapi.pcr.uu.se/api/gedevents/25.1"),
         ),
-        geo_shock_ucdp_access_token=_get_str("POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN", GEO_SHOCK_UCDP_ACCESS_TOKEN),
+        geo_shock_ucdp_access_token=_get_str(
+            "POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN",
+            _get_str("UCDP_API_TOKEN", _get_str("UCDP_API_Token", GEO_SHOCK_UCDP_ACCESS_TOKEN)),
+        ),
         geo_shock_acled_token_url=_get_str(
             "POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL",
             GEO_SHOCK_ACLED_TOKEN_URL or "https://acleddata.com/oauth/token",
