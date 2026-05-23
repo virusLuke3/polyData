@@ -4,7 +4,7 @@ import { fetchRuntimeDefiTokenWatch } from '@/services/api';
 import type { RuntimeDefiTokenRow, RuntimeDefiTokenWatchPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '../helpers';
-import { formatMoney, formatPercent, StatusDots, TinySparkline, toneFromValue } from '../market-monitor-kit';
+import { formatMoney, formatPercent, StatusDots, toneFromValue } from '../market-monitor-kit';
 
 function TokenRow({ item }: { item: RuntimeDefiTokenRow }) {
   const dayTone = toneFromValue(item.change24h);
@@ -15,7 +15,6 @@ function TokenRow({ item }: { item: RuntimeDefiTokenRow }) {
         <strong>{item.name || item.symbol || 'DeFi token'}</strong>
         <span>{item.symbol || '--'}</span>
       </div>
-      <TinySparkline values={item.sparkline} tone={dayTone} />
       <div className="wm-monitor-values">
         <strong>{formatMoney(item.price)}</strong>
         <span className={`tone-${dayTone}`}>{formatPercent(item.change24h)}</span>

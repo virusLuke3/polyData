@@ -225,6 +225,10 @@
   container-type: inline-size;
 }
 
+.wm-defi-token-panel .wm-monitor-list {
+  padding: 8px 14px 6px;
+}
+
 .wm-monitor-row {
   min-width: 0;
   display: grid;
@@ -238,9 +242,40 @@
 }
 
 .wm-defi-token-row {
-  grid-template-columns: minmax(96px, 1fr) 78px minmax(160px, auto);
-  gap: 13px;
-  min-height: 96px;
+  grid-template-columns: minmax(96px, 1fr) minmax(214px, auto);
+  gap: 12px;
+  min-height: 74px;
+}
+
+.wm-defi-token-panel .wm-monitor-entity {
+  gap: 7px;
+}
+
+.wm-defi-token-panel .wm-monitor-entity strong {
+  font-size: 16px;
+  font-weight: 740;
+  line-height: 1.08;
+}
+
+.wm-defi-token-panel .wm-monitor-entity span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wm-defi-token-panel .wm-monitor-values {
+  grid-template-columns: minmax(78px, auto) minmax(58px, auto) minmax(64px, auto);
+  gap: 9px;
+}
+
+.wm-defi-token-panel .wm-monitor-values strong {
+  font-size: 18px;
+  font-weight: 820;
+}
+
+.wm-defi-token-panel .wm-monitor-values span,
+.wm-defi-token-panel .wm-monitor-values em {
+  font-size: 14px;
+  font-weight: 720;
 }
 
 .wm-monitor-entity {
@@ -404,9 +439,9 @@
 
 @container (max-width: 360px) {
   .wm-defi-token-row {
-    grid-template-columns: minmax(0, 1fr) minmax(82px, auto);
-    gap: 10px;
-    min-height: 88px;
+    grid-template-columns: minmax(0, 1fr) minmax(148px, auto);
+    gap: 8px;
+    min-height: 70px;
   }
 
   .wm-defi-token-row .wm-monitor-sparkline {
@@ -414,17 +449,19 @@
   }
 
   .wm-defi-token-row .wm-monitor-values {
-    grid-template-columns: 1fr;
-    gap: 5px;
+    grid-template-columns: minmax(62px, auto) minmax(42px, auto) minmax(46px, auto);
+    gap: 6px;
   }
 
+  .wm-defi-token-row .wm-monitor-entity strong,
   .wm-defi-token-row .wm-monitor-values strong {
-    font-size: 18px;
+    font-size: 15px;
   }
 
+  .wm-defi-token-row .wm-monitor-entity span,
   .wm-defi-token-row .wm-monitor-values span,
   .wm-defi-token-row .wm-monitor-values em {
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 
