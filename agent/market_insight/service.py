@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from agent.common.env import get_int_env
 from agent.common.json_utils import compact_text, extract_json_object
 from agent.common.llm_client import OpenAICompatibleClient
 from agent.common.tavily_client import TavilySearchClient
@@ -56,6 +57,130 @@ def _build_search_query(payload: dict[str, Any]) -> str:
     category = market.get("category") or ""
     clean_tags = " ".join(str(tag) for tag in tags[:4] if tag)
     return compact_text(f"{title} {category} {clean_tags} latest context", 300)
+
+
+def _compact_market(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "title": compact_text(value.get("title") or value.get("slug") or "Selected market", 140),
+        "category": compact_text(value.get("category"), 40),
+        "volume24h": value.get("volume24h"),
+        "tradeCount24h": value.get("tradeCount24h"),
+        "latestPrice": value.get("latestPrice"),
+        "endDate": value.get("endDate"),
+        "rules": compact_text(value.get("rules") or value.get("description"), 220),
+    }
+
+
+def _compact_group(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    outcomes = value.get("topOutcomes") if isinstance(value.get("topOutcomes"), list) else value.get("outcomes")
+    outcomes = outcomes if isinstance(outcomes, list) else []
+    return {
+        "title": compact_text(value.get("title") or value.get("slug"), 140),
+        "category": compact_text(value.get("category"), 40),
+        "volume24h": value.get("volume24h"),
+        "tradeCount24h": value.get("tradeCount24h"),
+        "outcomes": [
+            {
+                "label": compact_text(outcome.get("label") or outcome.get("title"), 56),
+                "yesPrice": outcome.get("yesPrice"),
+                "volume24h": outcome.get("volume24h"),
+            }
+            for outcome in outcomes[:4]
+            if isinstance(outcome, dict)
+        ],
+    }
+
+
+def _compact_trade(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "outcome": compact_text(value.get("outcome") or value.get("assetName"), 48),
+        "side": compact_text(value.get("side") or value.get("type"), 20),
+        "price": value.get("price"),
+        "size": value.get("size") or value.get("amount"),
+        "timestamp": value.get("timestamp") or value.get("createdAt"),
+    }
+
+
+def _compact_content(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "title": compact_text(value.get("title") or value.get("headline"), 120),
+        "source": compact_text(value.get("source") or value.get("publisher"), 40),
+        "summary": compact_text(value.get("summary") or value.get("content") or value.get("description"), 180),
+        "publishedAt": value.get("publishedAt") or value.get("createdAt"),
+    }
+
+
+def _compact_oracle(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "status": compact_text(value.get("currentStatus") or value.get("status"), 40),
+        "resolution": compact_text(value.get("resolution") or value.get("description") or value.get("summary"), 220),
+        "updatedAt": value.get("updatedAt") or value.get("timestamp"),
+    }
+
+
+def _compact_search_result(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "title": compact_text(value.get("title"), 100),
+        "content": compact_text(value.get("content"), 220),
+        "url": compact_text(value.get("url"), 140),
+    }
+
+
+def _compact_list(values: Any, limit: int, mapper: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    output: list[dict[str, Any]] = []
+    for value in values[:limit]:
+        compacted = mapper(value)
+        if compacted:
+            output.append(compacted)
+    return output
+
+
+def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    if len(json.dumps(context, ensure_ascii=False, default=str)) <= max_chars:
+        return context
+    reduced = dict(context)
+    reduced["trades"] = reduced.get("trades", [])[:4] if isinstance(reduced.get("trades"), list) else []
+    reduced["content"] = reduced.get("content", [])[:3] if isinstance(reduced.get("content"), list) else []
+    reduced["searchResults"] = reduced.get("searchResults", [])[:2] if isinstance(reduced.get("searchResults"), list) else []
+    if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
+        return reduced
+    reduced["trades"] = []
+    reduced["content"] = []
+    reduced["searchResults"] = []
+    return reduced
+
+
+def _build_agent_context(payload: dict[str, Any], search_results: list[dict[str, str]]) -> dict[str, Any]:
+    max_chars = max(3_000, get_int_env("POLYDATA_AGENT_CONTEXT_MAX_CHARS", 16_000))
+    context = {
+        "market": _compact_market(payload.get("market")),
+        "selectedGroup": _compact_group(payload.get("selectedGroup")),
+        "selectedOutcome": compact_text(payload.get("selectedOutcome"), 80),
+        "price": payload.get("price") if isinstance(payload.get("price"), dict) else {},
+        "lob": payload.get("lob") if isinstance(payload.get("lob"), dict) else {},
+        "trades": _compact_list(payload.get("trades"), 6, _compact_trade),
+        "oracle": _compact_oracle(payload.get("oracle")),
+        "content": _compact_list(payload.get("content"), 4, _compact_content),
+        "searchResults": _compact_list(search_results, 3, _compact_search_result),
+    }
+    context = _limit_context_chars(context, max_chars)
+    context["contextChars"] = len(json.dumps(context, ensure_ascii=False, default=str))
+    context["contextMaxChars"] = max_chars
+    return context
 
 
 def _fallback_focus(payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -183,17 +308,7 @@ def build_market_insight(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         search_results = []
 
-    context = {
-        "market": payload.get("market"),
-        "selectedGroup": payload.get("selectedGroup"),
-        "selectedOutcome": payload.get("selectedOutcome"),
-        "price": payload.get("price"),
-        "lob": payload.get("lob"),
-        "trades": (payload.get("trades") or [])[:10] if isinstance(payload.get("trades"), list) else [],
-        "oracle": payload.get("oracle"),
-        "content": (payload.get("content") or [])[:5] if isinstance(payload.get("content"), list) else [],
-        "searchResults": search_results,
-    }
+    context = _build_agent_context(payload, search_results)
     client = OpenAICompatibleClient()
     if not client.configured:
         return _fallback_response(payload, reason="missing-api-key")
@@ -205,9 +320,19 @@ def build_market_insight(payload: dict[str, Any]) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             max_tokens=900,
+            workflow_name="polydata-market-insight",
         )
         raw = extract_json_object(raw_text)
-        return _normalize_model_response(raw, payload, search_results, client.model)
+        response = _normalize_model_response(raw, payload, search_results, client.model)
+        response["agentRuntime"] = client.last_usage.runtime
+        response["usage"] = {
+            "inputTokens": client.last_usage.input_tokens,
+            "outputTokens": client.last_usage.output_tokens,
+            "totalTokens": client.last_usage.total_tokens,
+            "inputChars": client.last_usage.input_chars,
+            "contextChars": context.get("contextChars"),
+        }
+        return response
     except Exception as exc:
         response = _fallback_response(payload, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)

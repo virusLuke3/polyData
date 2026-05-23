@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from agent.common.env import get_int_env
 from agent.common.json_utils import compact_text, extract_json_object
 from agent.common.llm_client import OpenAICompatibleClient
 from agent.common.tavily_client import TavilySearchClient
@@ -129,6 +130,172 @@ def _signal_items(payload: dict[str, Any], key: str) -> list[Any]:
     if isinstance(value, list):
         return value
     return []
+
+
+def _compact_market(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title") or item.get("slug") or "Untitled market", 120),
+        "category": compact_text(item.get("category") or "market", 40),
+        "volume24h": item.get("volume24h"),
+        "tradeCount24h": item.get("tradeCount24h"),
+        "latestPrice": item.get("latestPrice"),
+        "change24h": item.get("change24h"),
+        "endDate": item.get("endDate"),
+    }
+
+
+def _compact_group(group: Any) -> dict[str, Any] | None:
+    if not isinstance(group, dict):
+        return None
+    outcomes = group.get("topOutcomes") if isinstance(group.get("topOutcomes"), list) else group.get("outcomes")
+    outcomes = outcomes if isinstance(outcomes, list) else []
+    return {
+        "title": compact_text(group.get("title") or group.get("slug") or "Untitled event", 120),
+        "category": compact_text(group.get("category") or "market", 40),
+        "volume24h": group.get("volume24h"),
+        "tradeCount24h": group.get("tradeCount24h"),
+        "outcomeCount": group.get("outcomeCount") or len(outcomes),
+        "endDate": group.get("endDate"),
+        "outcomes": [
+            {
+                "label": compact_text(outcome.get("label") or outcome.get("title"), 56),
+                "yesPrice": outcome.get("yesPrice"),
+                "volume24h": outcome.get("volume24h"),
+            }
+            for outcome in outcomes[:3]
+            if isinstance(outcome, dict)
+        ],
+    }
+
+
+def _compact_trade(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "market": compact_text(item.get("marketTitle") or item.get("title") or item.get("conditionId"), 90),
+        "outcome": compact_text(item.get("outcome") or item.get("assetName"), 48),
+        "side": compact_text(item.get("side") or item.get("type"), 20),
+        "price": item.get("price"),
+        "size": item.get("size") or item.get("amount"),
+        "timestamp": item.get("timestamp") or item.get("createdAt"),
+    }
+
+
+def _compact_content(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title") or item.get("headline"), 120),
+        "source": compact_text(item.get("source") or item.get("publisher"), 40),
+        "summary": compact_text(item.get("summary") or item.get("content") or item.get("description"), 180),
+        "publishedAt": item.get("publishedAt") or item.get("createdAt"),
+    }
+
+
+def _compact_signal(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title") or item.get("marketTitle") or item.get("label"), 110),
+        "summary": compact_text(item.get("summary") or item.get("reason") or item.get("description"), 160),
+        "severity": compact_text(item.get("severity") or item.get("level"), 20),
+        "score": item.get("score") or item.get("value"),
+        "timestamp": item.get("timestamp") or item.get("createdAt"),
+    }
+
+
+def _compact_oracle(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title") or item.get("marketTitle") or item.get("question"), 110),
+        "status": compact_text(item.get("currentStatus") or item.get("status"), 40),
+        "summary": compact_text(item.get("summary") or item.get("description") or item.get("resolution"), 160),
+        "updatedAt": item.get("updatedAt") or item.get("timestamp"),
+    }
+
+
+def _compact_search_result(item: Any) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    return {
+        "title": compact_text(item.get("title"), 100),
+        "content": compact_text(item.get("content"), 220),
+        "url": compact_text(item.get("url"), 140),
+    }
+
+
+def _compact_list(values: list[Any], limit: int, mapper: Any) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for value in values[:limit]:
+        compacted = mapper(value)
+        if compacted:
+            output.append(compacted)
+    return output
+
+
+def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    if len(json.dumps(context, ensure_ascii=False, default=str)) <= max_chars:
+        return context
+    reduced = dict(context)
+    for key, limit in (
+        ("marketCandidates", 12),
+        ("markets", 8),
+        ("marketGroups", 6),
+        ("content", 4),
+        ("oracle", 4),
+        ("alphaSignals", 4),
+        ("whaleSignals", 4),
+        ("suspiciousSignals", 4),
+        ("trades", 4),
+        ("searchResults", 2),
+    ):
+        if isinstance(reduced.get(key), list):
+            reduced[key] = reduced[key][:limit]
+    if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
+        return reduced
+    for key in ("trades", "oracle", "alphaSignals", "whaleSignals", "suspiciousSignals", "searchResults"):
+        reduced[key] = []
+    if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
+        return reduced
+    reduced["markets"] = reduced.get("markets", [])[:4] if isinstance(reduced.get("markets"), list) else []
+    reduced["marketGroups"] = reduced.get("marketGroups", [])[:3] if isinstance(reduced.get("marketGroups"), list) else []
+    reduced["marketCandidates"] = reduced.get("marketCandidates", [])[:8] if isinstance(reduced.get("marketCandidates"), list) else []
+    return reduced
+
+
+def _build_agent_context(payload: dict[str, Any], lens: str, search_results: list[dict[str, str]]) -> dict[str, Any]:
+    max_chars = max(4_000, get_int_env("POLYDATA_AGENT_CONTEXT_MAX_CHARS", 24_000))
+    context = {
+        "lens": lens,
+        "metrics": _summary_metrics(payload),
+        "marketCandidates": _compact_list(_market_candidates(payload), 18, lambda item: {
+            "title": compact_text(item.get("title"), 120),
+            "category": compact_text(item.get("category"), 40),
+            "kind": item.get("kind"),
+            "volume24h": item.get("volume24h"),
+            "tradeCount24h": item.get("tradeCount24h"),
+            "latestPrice": item.get("latestPrice"),
+            "change24h": item.get("change24h"),
+            "outcomeCount": item.get("outcomeCount"),
+            "endDate": item.get("endDate"),
+        }),
+        "markets": _compact_list(_items(payload, "markets"), 12, _compact_market),
+        "marketGroups": _compact_list(_items(payload, "marketGroups"), 10, _compact_group),
+        "trades": _compact_list(_items(payload, "trades"), 6, _compact_trade),
+        "oracle": _compact_list(_items(payload, "oracle"), 6, _compact_oracle),
+        "content": _compact_list(_items(payload, "content"), 6, _compact_content),
+        "alphaSignals": _compact_list(_signal_items(payload, "alphaSignals"), 5, _compact_signal),
+        "whaleSignals": _compact_list(_signal_items(payload, "whaleSignals"), 5, _compact_signal),
+        "suspiciousSignals": _compact_list(_signal_items(payload, "suspiciousSignals"), 5, _compact_signal),
+        "searchResults": _compact_list(search_results, 3, _compact_search_result),
+    }
+    context = _limit_context_chars(context, max_chars)
+    context["contextChars"] = len(json.dumps(context, ensure_ascii=False, default=str))
+    context["contextMaxChars"] = max_chars
+    return context
 
 
 def _market_reason(candidate: dict[str, Any]) -> tuple[str, str, str]:
@@ -425,20 +592,7 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
         search_results = TavilySearchClient().search(_search_query(payload, lens))
     except Exception:
         search_results = []
-    context = {
-        "lens": lens,
-        "metrics": _summary_metrics(payload),
-        "marketCandidates": _market_candidates(payload)[:48],
-        "markets": _items(payload, "markets")[:30],
-        "marketGroups": _items(payload, "marketGroups")[:24],
-        "trades": _items(payload, "trades")[:16],
-        "oracle": _items(payload, "oracle")[:16],
-        "content": _items(payload, "content")[:10],
-        "alphaSignals": _signal_items(payload, "alphaSignals")[:8],
-        "whaleSignals": _signal_items(payload, "whaleSignals")[:8],
-        "suspiciousSignals": _signal_items(payload, "suspiciousSignals")[:8],
-        "searchResults": search_results,
-    }
+    context = _build_agent_context(payload, lens, search_results)
     client = OpenAICompatibleClient()
     if not client.configured:
         return _fallback_response(payload, lens, reason="missing-api-key", search_results=search_results)
@@ -450,9 +604,19 @@ def build_market_wide_insight(payload: dict[str, Any]) -> dict[str, Any]:
                 {"role": "user", "content": prompt},
             ],
             max_tokens=950,
+            workflow_name=f"polydata-market-wide-{lens}",
         )
         raw = extract_json_object(raw_text)
-        return _normalize(raw, payload, lens, search_results, client.model)
+        response = _normalize(raw, payload, lens, search_results, client.model)
+        response["agentRuntime"] = client.last_usage.runtime
+        response["usage"] = {
+            "inputTokens": client.last_usage.input_tokens,
+            "outputTokens": client.last_usage.output_tokens,
+            "totalTokens": client.last_usage.total_tokens,
+            "inputChars": client.last_usage.input_chars,
+            "contextChars": context.get("contextChars"),
+        }
+        return response
     except Exception as exc:
         response = _fallback_response(payload, lens, reason="agent-error", search_results=search_results)
         response["error"] = compact_text(str(exc), 180)
