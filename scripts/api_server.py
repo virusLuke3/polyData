@@ -83,7 +83,7 @@ from api import cache as api_cache, db as api_db
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.routes import register_blueprints
-from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, weather_news_service
+from api.services import address_service, bootstrap_service, content_service, cpi_release_calendar_service, crypto_funding_service, defi_token_watch_service, energy_gasoline_shock_service, f1_runtime_service, finance_panels_service, finance_watch_panels_service, food_retail_basket_service, geo_sanctions_shock_service, global_weather_map_service, grid_esports_service, jin10_runtime_service, lob_service, macro_cpi_panels_service, macro_cpi_registry_service, market_group_service, market_service, new_market_signal_service, polymarket_macro_map_service, query_service, runtime_service, signal_service, sports_odds_service, system_service, weather_news_service
 
 app = Flask(__name__)
 SETTINGS = load_api_settings()
@@ -243,6 +243,7 @@ def build_route_helpers() -> Dict[str, Any]:
         "get_dashboard_payload_cached": get_dashboard_payload_cached,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_defi_token_watch_snapshot": lambda limit=10: defi_token_watch_service.get_defi_token_watch_snapshot(build_service_context(), limit=limit),
+        "get_finance_watch_panel_snapshot": lambda panel_id, limit=10: finance_watch_panels_service.get_finance_watch_panel_snapshot(build_service_context(), panel_id, limit=limit),
         "get_cpi_release_calendar_snapshot": get_cpi_release_calendar_snapshot,
         "get_cpi_release_command_center_snapshot": get_cpi_release_command_center_snapshot,
         "get_cpi_components_pressure_registry_snapshot": get_cpi_components_pressure_registry_snapshot,
@@ -412,6 +413,7 @@ def build_service_context() -> Dict[str, Any]:
         "get_cached_runtime_payload": get_cached_runtime_payload,
         "get_crypto_funding_watch_snapshot": lambda limit=16: crypto_funding_service.get_crypto_funding_watch_snapshot(build_service_context(), limit=limit),
         "get_defi_token_watch_snapshot": lambda limit=10: defi_token_watch_service.get_defi_token_watch_snapshot(build_service_context(), limit=limit),
+        "get_finance_watch_panel_snapshot": lambda panel_id, limit=10: finance_watch_panels_service.get_finance_watch_panel_snapshot(build_service_context(), panel_id, limit=limit),
         "get_cpi_release_calendar_snapshot": lambda limit=8: cpi_release_calendar_service.get_cpi_release_calendar_snapshot(build_service_context(), limit=limit),
         "get_cpi_release_command_center_snapshot": lambda limit=36: macro_cpi_registry_service.get_cpi_release_command_center_snapshot(build_service_context(), limit=limit),
         "get_cpi_components_pressure_registry_snapshot": lambda limit=36: macro_cpi_registry_service.get_cpi_components_pressure_registry_snapshot(build_service_context(), limit=limit),
@@ -744,7 +746,7 @@ def http_text_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, st
     if requests is None:
         raise RuntimeError("requests is not installed")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = str(os.environ.get("POLYDATA_API_HTTP_TRUST_ENV_PROXY") or "").strip().lower() in {"1", "true", "yes", "on"}
     try:
         response = session.get(url, timeout=timeout, headers=headers)
         response.raise_for_status()
@@ -757,7 +759,7 @@ def http_bytes_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, s
     if requests is None:
         raise RuntimeError("requests is not installed")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = str(os.environ.get("POLYDATA_API_HTTP_TRUST_ENV_PROXY") or "").strip().lower() in {"1", "true", "yes", "on"}
     try:
         response = session.get(url, timeout=timeout, headers=headers)
         response.raise_for_status()

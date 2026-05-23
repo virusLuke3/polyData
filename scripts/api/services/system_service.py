@@ -89,6 +89,28 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_DEFI_TOKEN_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 120,
     },
+    *[
+        {
+            "panelId": panel_id,
+            "namespace": "seed-meta:finance",
+            "cacheKey": panel_id,
+            "serviceName": "polydata-finance-watch-panels-seed.service",
+            "intervalEnv": "POLYDATA_FINANCE_WATCH_PANELS_INTERVAL_SECONDS",
+            "defaultIntervalSeconds": 600,
+        }
+        for panel_id in (
+            "defi-yield-monitor",
+            "defi-security-watch",
+            "crypto-perp-funding",
+            "tradfi-perp-radar",
+            "ipo-news-watch",
+            "global-index-monitor",
+            "crypto-fear-greed",
+            "crypto-etf-flow",
+            "stablecoin-monitor",
+            "blockchain-policy-news",
+        )
+    ],
     {
         "panelId": "finance-external-sources",
         "namespace": "seed-meta:finance",

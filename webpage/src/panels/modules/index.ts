@@ -16,6 +16,16 @@ import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
 import { panel as cryptoFundingWatch } from './crypto-funding-watch';
 import { panel as defiTokenWatch } from './defi-token-watch';
+import { panel as defiYieldMonitor } from './defi-yield-monitor';
+import { panel as defiSecurityWatch } from './defi-security-watch';
+import { panel as cryptoPerpFunding } from './crypto-perp-funding';
+import { panel as tradfiPerpRadar } from './tradfi-perp-radar';
+import { panel as ipoNewsWatch } from './ipo-news-watch';
+import { panel as globalIndexMonitor } from './global-index-monitor';
+import { panel as cryptoFearGreed } from './crypto-fear-greed';
+import { panel as cryptoEtfFlow } from './crypto-etf-flow';
+import { panel as stablecoinMonitor } from './stablecoin-monitor';
+import { panel as blockchainPolicyNews } from './blockchain-policy-news';
 import { panel as geoSanctionsShock } from './geo-sanctions-shock';
 import { panel as cpiReleaseCommandCenter } from './cpi-release-command-center';
 import { panel as cpiComponentsPressureRegistry } from './cpi-components-pressure-registry';
@@ -68,6 +78,16 @@ export const PANEL_MODULES: PanelModule[] = [
   cryptoWatch,
   cryptoFundingWatch,
   defiTokenWatch,
+  defiYieldMonitor,
+  defiSecurityWatch,
+  cryptoPerpFunding,
+  tradfiPerpRadar,
+  ipoNewsWatch,
+  globalIndexMonitor,
+  cryptoFearGreed,
+  cryptoEtfFlow,
+  stablecoinMonitor,
+  blockchainPolicyNews,
   geoSanctionsShock,
   cpiReleaseCommandCenter,
   cpiComponentsPressureRegistry,

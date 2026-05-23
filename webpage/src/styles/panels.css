@@ -412,6 +412,330 @@
   font-weight: 760;
 }
 
+.wm-finance-watch-panel .wm-panel-body {
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: rgba(11, 12, 12, 0.72);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(92, 101, 120, 0.56) rgba(6, 7, 8, 0.2);
+}
+
+.wm-finance-watch-panel .wm-panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.wm-finance-watch-panel .wm-panel-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(95, 105, 124, 0.62);
+}
+
+.wm-finance-list,
+.wm-finance-feed-list,
+.wm-finance-grid-list {
+  position: relative;
+  min-width: 0;
+  padding: 7px 13px 6px;
+}
+
+.wm-finance-list.compact {
+  padding-top: 4px;
+}
+
+.wm-finance-row {
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(86px, 1fr) minmax(128px, auto);
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.wm-finance-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wm-finance-main strong {
+  overflow: hidden;
+  color: #e8e8e8;
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-main span,
+.wm-finance-row-foot,
+.wm-finance-feed-meta,
+.wm-finance-feed-foot,
+.wm-finance-grid-tile span {
+  color: rgba(235, 235, 235, 0.48);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.wm-finance-value {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(58px, auto) minmax(48px, auto);
+  align-items: baseline;
+  justify-content: end;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wm-finance-value strong {
+  overflow: hidden;
+  color: #e8e8e8;
+  font-size: 14px;
+  font-weight: 780;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-value em {
+  overflow: hidden;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 710;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-row-foot {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: -8px;
+  overflow: hidden;
+}
+
+.wm-finance-tag {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid rgba(75, 84, 92, 0.82);
+  background: rgba(255, 255, 255, 0.035);
+  color: #9da3a0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.wm-finance-tag.tag-alert,
+.wm-finance-tag.tag-hack,
+.wm-finance-tag.tag-exploit,
+.wm-finance-tag.tag-enforce,
+.wm-finance-tag.tag-outflow,
+.wm-finance-tag.tag-watch {
+  border-color: rgba(255, 72, 72, 0.72);
+  color: #ff5c5c;
+}
+
+.wm-finance-tag.tag-inflow,
+.wm-finance-tag.tag-ok,
+.wm-finance-tag.tag-apy {
+  border-color: rgba(36, 242, 132, 0.42);
+  color: #24f284;
+}
+
+.wm-finance-tag.tag-bill,
+.wm-finance-tag.tag-sec,
+.wm-finance-tag.tag-s-1,
+.wm-finance-tag.tag-f-1,
+.wm-finance-tag.tag-risk,
+.wm-finance-tag.tag-basis {
+  border-color: rgba(255, 197, 61, 0.52);
+  color: #ffc53d;
+}
+
+.wm-finance-feed-row {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 10px 0 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  color: inherit;
+  text-decoration: none;
+}
+
+.wm-finance-feed-meta,
+.wm-finance-feed-foot {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.wm-finance-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border: 1px solid #18bde6;
+  border-radius: 2px;
+}
+
+.wm-finance-feed-meta b {
+  min-width: 0;
+  overflow: hidden;
+  color: #69d8f3;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-feed-row > strong {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #e7e7e7;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.22;
+}
+
+.wm-finance-feed-row > em {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: rgba(235, 235, 235, 0.62);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 620;
+  line-height: 1.28;
+}
+
+.wm-finance-feed-foot b {
+  color: #8bdcf4;
+  text-decoration: underline;
+}
+
+.wm-finance-grid-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wm-finance-grid-tile {
+  min-width: 0;
+  min-height: 76px;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.042);
+}
+
+.wm-finance-grid-tile strong {
+  overflow: hidden;
+  color: #e8e8e8;
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-grid-tile div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-finance-grid-tile b {
+  color: #f0f0f0;
+  font-size: 13px;
+}
+
+.wm-finance-grid-tile em {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 740;
+}
+
+.wm-finance-sentiment {
+  padding: 8px 13px 6px;
+}
+
+.wm-finance-sentiment-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.wm-finance-sentiment-head strong {
+  color: #e8e8e8;
+  font-family: var(--font-mono);
+  font-size: 27px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.wm-finance-sentiment-head span {
+  color: #e8e8e8;
+  font-size: 14px;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.wm-finance-empty {
+  min-height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 20px;
+  text-align: center;
+}
+
+.wm-finance-empty span {
+  color: rgba(235, 235, 235, 0.44);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.wm-finance-empty strong {
+  color: #e8e8e8;
+  font-size: 12px;
+}
+
+.wm-finance-watch-panel .tone-up {
+  color: #24f284;
+}
+
+.wm-finance-watch-panel .tone-down {
+  color: #ff4848;
+}
+
+.wm-finance-watch-panel .tone-watch {
+  color: #ffc53d;
+}
+
+.wm-finance-watch-panel .tone-neutral {
+  color: rgba(235, 235, 235, 0.62);
+}
+
 @media (max-width: 620px) {
   .wm-defi-token-row {
     grid-template-columns: minmax(0, 1fr) minmax(126px, auto);

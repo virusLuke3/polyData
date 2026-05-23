@@ -24,6 +24,7 @@ import type {
   RuntimeEquityEventCommandPayload,
   RuntimeFinanceLiquidityRegimePayload,
   RuntimeFinanceMarketAtlasPayload,
+  RuntimeFinanceWatchPayload,
   RuntimeGlobalWeatherMapPayload,
   RuntimeGridEsportsPayload,
   RuntimeFoodRetailBasketPayload,
@@ -223,6 +224,10 @@ export function fetchRuntimeCryptoFundingWatch(limit = 18) {
 
 export function fetchRuntimeDefiTokenWatch(limit = 10) {
   return apiGet<RuntimeDefiTokenWatchPayload>(`/runtime/finance/defi-token-watch?limit=${limit}`);
+}
+
+export function fetchRuntimeFinanceWatchPanel(panelId: string, limit = 10) {
+  return apiGet<RuntimeFinanceWatchPayload>(`/runtime/finance/${panelId}?limit=${limit}`);
 }
 
 export function fetchRuntimeFinanceMarketAtlas(limit = 16) {

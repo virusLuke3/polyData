@@ -1351,6 +1351,43 @@ export type RuntimeDefiTokenWatchPayload = {
   items?: RuntimeDefiTokenRow[];
 };
 
+export type RuntimeFinanceWatchItem = {
+  id?: string | null;
+  label?: string | null;
+  symbol?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  source?: string | null;
+  url?: string | null;
+  publishedAt?: string | null;
+  metric?: number | string | null;
+  metricLabel?: string | null;
+  metricUnit?: string | null;
+  secondary?: number | string | null;
+  secondaryLabel?: string | null;
+  change?: number | string | null;
+  changeLabel?: string | null;
+  tags?: string[];
+  tone?: string | null;
+  points?: Array<{ timestamp?: string | null; value?: number | string | null }>;
+};
+
+export type RuntimeFinanceWatchPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  panelId?: string | null;
+  title?: string | null;
+  headline?: {
+    label?: string | null;
+    score?: number | string | null;
+    tone?: string | null;
+  } | null;
+  sources?: Record<string, string>;
+  summary?: Record<string, unknown>;
+  items?: RuntimeFinanceWatchItem[];
+};
+
 export type RuntimeFinanceCoverageKey = 'quote' | 'earn' | 'sec' | 'perp' | 'etf' | 'clob' | 'oracle' | 'flow' | string;
 
 export type RuntimeFinanceLinkedMarket = {
