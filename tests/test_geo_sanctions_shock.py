@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
+from api.config import load_api_settings
 from api.services import geo_sanctions_shock_service
 from runtime.geo_sanctions_shock_watcher import GeoSanctionsShockWatcher
 from runtime.seed_meta import SeedMetaStore
@@ -385,6 +387,23 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("refreshed-acled-token", token)
         self.assertEqual("refreshed-acled-token", stored["access_token"])
         self.assertEqual("refresh-2", stored["refresh_token"])
+
+    def test_settings_accepts_worldmonitor_ucdp_alias(self):
+        previous = {key: os.environ.get(key) for key in ("POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN", "UCDP_API_TOKEN", "UCDP_API_Token", "UCDP_ACCESS_TOKEN", "UC_DP_KEY")}
+        try:
+            for key in previous:
+                os.environ.pop(key, None)
+            os.environ["UCDP_ACCESS_TOKEN"] = "worldmonitor-token"
+            load_api_settings.cache_clear()
+            settings = load_api_settings()
+            self.assertEqual("worldmonitor-token", settings.geo_shock_ucdp_access_token)
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            load_api_settings.cache_clear()
 
 
 class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):

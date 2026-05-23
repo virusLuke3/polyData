@@ -391,7 +391,13 @@ def load_api_settings() -> ApiSettings:
         ),
         geo_shock_ucdp_access_token=_get_str(
             "POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN",
-            _get_str("UCDP_API_TOKEN", _get_str("UCDP_API_Token", GEO_SHOCK_UCDP_ACCESS_TOKEN)),
+            _get_str(
+                "UCDP_API_TOKEN",
+                _get_str(
+                    "UCDP_API_Token",
+                    _get_str("UCDP_ACCESS_TOKEN", _get_str("UC_DP_KEY", GEO_SHOCK_UCDP_ACCESS_TOKEN)),
+                ),
+            ),
         ),
         geo_shock_acled_token_url=_get_str(
             "POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL",
