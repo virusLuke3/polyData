@@ -56,6 +56,7 @@ class FoodRetailBasketWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
+        self.requests.trust_env = False
 
     def namespace(self) -> str:
         return food_retail_basket_service.FOOD_BASKET_SNAPSHOT_NAMESPACE

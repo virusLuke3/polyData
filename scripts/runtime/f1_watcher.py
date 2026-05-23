@@ -90,6 +90,8 @@ class F1Watcher:
             redis_prefix=self.redis_prefix,
             snapshot_store=self.snapshot_store,
         )
+        self.requests = requests.Session()
+        self.requests.trust_env = False
 
     def namespace(self) -> str:
         return f1_runtime_service.F1_SNAPSHOT_NAMESPACE
@@ -167,7 +169,7 @@ class F1Watcher:
         ctx = {
             "SETTINGS": self.settings,
             "app": _AppAdapter(),
-            "requests": requests,
+            "requests": self.requests,
             "utc_now_iso": utc_now_iso,
         }
         return f1_runtime_service.fetch_live_f1_panel_payload(ctx, limit=self.limit)

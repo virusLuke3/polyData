@@ -28,6 +28,8 @@ def resolve_polydata_api_base(
     if not clean_candidates:
         return ApiBaseResolution(base_url="", healthy=False)
     client = session or requests.Session()
+    if session is None:
+        client.trust_env = False
     errors: Dict[str, str] = {}
     checked: list[str] = []
     for base_url in clean_candidates:
@@ -50,6 +52,7 @@ class PolyDataApiClient:
         self.base_url = str(base_url or "").rstrip("/")
         self.timeout_seconds = max(1, int(timeout_seconds or 12))
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.headers.update({"Accept": "application/json", "User-Agent": "polydata-telegram-publisher/1.0"})
 
     def get_json(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

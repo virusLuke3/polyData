@@ -92,6 +92,7 @@ class GeoSanctionsShockWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
+        self.requests.trust_env = False
         self.requests.headers.update({"User-Agent": "polyData-geo-shock-watcher/1.0"})
         self._acled_auth_state: Dict[str, Any] | None = None
 

@@ -27,6 +27,11 @@ try:
 except ImportError:
     redis = None
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 from api.config import load_api_settings
 from api.services import jin10_runtime_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
@@ -66,6 +71,8 @@ class Jin10Watcher:
     ) -> None:
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
+        if requests is None:
+            raise RuntimeError("requests package is required. Install scripts/requirements.txt")
         if not str(redis_url or "").strip():
             raise RuntimeError("POLYDATA_REDIS_URL is required for Jin10 watcher")
         self.settings = settings
@@ -79,6 +86,8 @@ class Jin10Watcher:
             redis_prefix=self.redis_prefix,
             snapshot_store=self.snapshot_store,
         )
+        self.requests = requests.Session()
+        self.requests.trust_env = False
 
     def namespace(self) -> str:
         return jin10_runtime_service.JIN10_SNAPSHOT_NAMESPACE
@@ -155,6 +164,7 @@ class Jin10Watcher:
     def build_payload(self) -> Dict[str, Any]:
         ctx = {
             "SETTINGS": self.settings,
+            "requests": self.requests,
             "utc_now_iso": utc_now_iso,
         }
         return jin10_runtime_service.fetch_live_jin10_panel_payload(ctx, limit=self.limit)

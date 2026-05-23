@@ -56,6 +56,7 @@ class TelegramClient:
         self.api_base = str(api_base or "https://api.telegram.org").rstrip("/")
         self.timeout_seconds = max(1, int(timeout_seconds or 12))
         self.session = requests.Session()
+        self.session.trust_env = False
 
     def send_message(
         self,

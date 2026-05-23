@@ -163,6 +163,7 @@ class NewMarketSignalWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=redis_prefix, snapshot_store=self.snapshot_store)
         self.http = requests.Session()
+        self.http.trust_env = False
         self.http.headers.update({"Accept": "application/json", "User-Agent": "polyData-new-market-signal/1.0"})
 
     def snapshot_redis_key(self) -> str:

@@ -741,17 +741,27 @@ def http_json_get(url: str, *, params: Optional[Dict[str, Any]] = None, timeout:
 def http_text_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
     if requests is None:
         raise RuntimeError("requests is not installed")
-    response = requests.get(url, timeout=timeout, headers=headers)
-    response.raise_for_status()
-    return response.text
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        response = session.get(url, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.text
+    finally:
+        session.close()
 
 
 def http_bytes_get(url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> bytes:
     if requests is None:
         raise RuntimeError("requests is not installed")
-    response = requests.get(url, timeout=timeout, headers=headers)
-    response.raise_for_status()
-    return response.content
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        response = session.get(url, timeout=timeout, headers=headers)
+        response.raise_for_status()
+        return response.content
+    finally:
+        session.close()
 
 
 def _safe_decimal(value: Any) -> Optional[Decimal]:

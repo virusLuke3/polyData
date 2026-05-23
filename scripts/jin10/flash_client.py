@@ -138,6 +138,7 @@ def fetch_jin10_panel_payload(
     detail_base_url: str = DEFAULT_FLASH_DETAIL_BASE_URL,
     live_url: str = DEFAULT_LIVE_URL,
     timeout: int = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    requests_lib: Any = None,
 ) -> Dict[str, Any]:
     headers = {
         "Accept": "application/json",
@@ -151,35 +152,45 @@ def fetch_jin10_panel_payload(
     candidates: List[Dict[str, Any]] = []
     seen_keys: set[str] = set()
     last_cursor = ""
+    close_client = False
+    client = requests_lib
+    if client is None or hasattr(client, "Session"):
+        client = requests.Session()
+        client.trust_env = False
+        close_client = True
 
-    for _ in range(max_pages):
-        response = requests.get(
-            api_url,
-            params={"channel": channel, "max_time": cursor},
-            headers=headers,
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        rows = payload.get("data") if isinstance(payload, dict) else []
-        if not rows:
-            break
-        for row in rows or []:
-            normalized = normalize_item(row, detail_base_url=detail_base_url, live_url=live_url)
-            if normalized is None:
-                continue
-            key = _item_key(normalized)
-            if not key or key in seen_keys:
-                continue
-            seen_keys.add(key)
-            candidates.append(normalized)
-        if len(candidates) >= candidate_target:
-            break
-        next_cursor = str((rows[-1] or {}).get("time") or "").strip()
-        if not next_cursor or next_cursor == cursor or next_cursor == last_cursor:
-            break
-        last_cursor = cursor
-        cursor = next_cursor
+    try:
+        for _ in range(max_pages):
+            response = client.get(
+                api_url,
+                params={"channel": channel, "max_time": cursor},
+                headers=headers,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            rows = payload.get("data") if isinstance(payload, dict) else []
+            if not rows:
+                break
+            for row in rows or []:
+                normalized = normalize_item(row, detail_base_url=detail_base_url, live_url=live_url)
+                if normalized is None:
+                    continue
+                key = _item_key(normalized)
+                if not key or key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                candidates.append(normalized)
+            if len(candidates) >= candidate_target:
+                break
+            next_cursor = str((rows[-1] or {}).get("time") or "").strip()
+            if not next_cursor or next_cursor == cursor or next_cursor == last_cursor:
+                break
+            last_cursor = cursor
+            cursor = next_cursor
+    finally:
+        if close_client:
+            client.close()
 
     items = select_panel_items(candidates, limit=limit)
     return {

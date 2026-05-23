@@ -449,6 +449,21 @@ Source Worker / watcher
 - `system_service.py` 的 seed health 列表必须能观察到新 panel 的 watcher 状态。
 - 测试必须覆盖 watcher 存储、preserve previous、API 读 seeded snapshot 不触发 live fetch。
 
+### 5.2 部署边界与代理流量要求
+
+polyData 的部署边界必须清晰区分本机开发服务器和远端 GCP 服务器：
+
+- 本机开发服务器只允许运行 `market`、`orderfilled/trade`、`oracle`、`agent` 相关服务。
+- 除上述四类外，新增或修改的 panel watcher / seed service / Telegram publisher / runtime external source service 默认都应该部署并运行在 GCP 服务器上。
+- 这些 GCP-side 服务必须使用 GCP 服务器自己的公网出站流量，不能使用本机开发服务器的 Clash / HTTP proxy / SOCKS proxy 流量。
+- 新增 watcher 或任何会访问外部数据源的长期服务时，`requests.Session()` 必须显式设置 `trust_env = False`，避免继承 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`http_proxy`、`https_proxy`、`all_proxy`。
+- 如果代码必须通过代理访问某个特殊数据源，必须先在实现说明里解释原因，并使用 panel 专属环境变量显式配置；禁止复用本机开发环境的全局代理变量。
+- `deploy/systemd/polydata.env.example` 不要新增真实 proxy 配置；不要把本机 shell 里的 proxy 变量复制到 `~/.config/polydata/polydata.env`。
+- 新增 systemd service 时必须确认 `WantedBy` / target 与部署角色一致：GCP panel watcher 归属 GCP 侧 target，本机 local collector 只保留 `market/orderfilled/oracle/agent` 边界内的服务。
+- 验收时需要确认目标服务实际运行在 GCP，并检查进程环境中没有 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写同名变量。
+
+如果一个 panel 的实现会导致本机误启动 GCP watcher，或让 GCP watcher 继承本机 Clash 流量，该实现不能算完成。
+
 ## 6. 测试要求
 
 本机是开发环境，远端 GCP 是测试与验收环境。除非用户明确说只做本地开发，否则不能停在本机。
@@ -632,6 +647,13 @@ ssh <ssh-user>@<gcp-host> 'cd /opt/polyData/webpage && npm run build'
 ssh <ssh-user>@<gcp-host> 'sudo rsync -a --delete /opt/polyData/webpage/dist/ /var/www/polydata/'
 ssh <ssh-user>@<gcp-host> 'systemctl --user restart polydata-api.service'
 ssh <ssh-user>@<gcp-host> 'sudo nginx -t && sudo systemctl reload nginx'
+```
+
+如果新增或修改了 watcher / seed service，还必须在 GCP 上启动或重启对应 service，并确认该进程环境中没有代理变量：
+
+```bash
+ssh <ssh-user>@<gcp-host> 'systemctl --user restart polydata-{panel_name}-seed.service'
+ssh <ssh-user>@<gcp-host> 'pid=$(systemctl --user show polydata-{panel_name}-seed.service -p MainPID --value); test "$pid" != "0" && tr "\0" "\n" </proc/$pid/environ | grep -Ei "^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy)=" && exit 1 || true'
 ```
 
 公网验收：

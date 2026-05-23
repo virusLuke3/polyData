@@ -82,6 +82,7 @@ class SportsOddsWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
+        self.requests.trust_env = False
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_SPORTS_ODDS_SEED_TTL_SECONDS", "0") or 0)

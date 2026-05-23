@@ -23,6 +23,7 @@ class PolyDataBotApi:
         self.base_urls = _unique_urls((self.base_url, *(base_urls or ())))
         self.timeout_seconds = max(1, int(timeout_seconds or 12))
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.headers.update({"Accept": "application/json", "User-Agent": "polydata-telegram-bot/1.0"})
 
     def get_json(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

@@ -101,6 +101,7 @@ class NbaWatcher:
             snapshot_store=self.snapshot_store,
         )
         self.requests = requests.Session()
+        self.requests.trust_env = False
         self.requests.headers.update({"User-Agent": "polydata-nba-seed/1.0"})
 
     def ttl_seconds(self) -> int:

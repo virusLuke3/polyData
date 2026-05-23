@@ -86,9 +86,14 @@ def _http_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, t
         return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
     if requests is None:
         raise RuntimeError("requests package is required")
-    response = requests.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
-    response.raise_for_status()
-    return response.json() if response.content else None
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        response.raise_for_status()
+        return response.json() if response.content else None
+    finally:
+        session.close()
 
 
 def _http_post(ctx: dict, url: str, *, json_payload: Dict[str, Any], timeout: int = 12) -> Any:
@@ -97,9 +102,14 @@ def _http_post(ctx: dict, url: str, *, json_payload: Dict[str, Any], timeout: in
         return poster(url, json_payload=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
     if requests is None:
         raise RuntimeError("requests package is required")
-    response = requests.post(url, json=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
-    response.raise_for_status()
-    return response.json() if response.content else None
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        response = session.post(url, json=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        response.raise_for_status()
+        return response.json() if response.content else None
+    finally:
+        session.close()
 
 
 def read_finance_external_sources(ctx: dict) -> Dict[str, Any]:

@@ -51,6 +51,7 @@ def fetch_live_jin10_panel_payload(ctx: dict, limit: int = 24) -> Dict[str, Any]
         version=ctx["SETTINGS"].jin10_flash_version,
         detail_base_url=ctx["SETTINGS"].jin10_flash_detail_base_url,
         live_url=ctx["SETTINGS"].jin10_live_url,
+        requests_lib=ctx.get("requests"),
     )
     return normalize_jin10_panel_payload(
         payload,

@@ -133,14 +133,24 @@ def _post_graphql(ctx: dict, url: str, query: str, variables: Dict[str, Any], ti
     requests = ctx.get("requests")
     if requests is None:
         raise RuntimeError("requests is not available")
-    response = requests.post(
-        url,
-        json={"query": query, "variables": variables},
-        timeout=timeout,
-        headers=_graphql_headers(ctx["SETTINGS"]),
-    )
-    response.raise_for_status()
-    payload = response.json()
+    close_client = False
+    client = requests
+    if hasattr(requests, "Session"):
+        client = requests.Session()
+        client.trust_env = False
+        close_client = True
+    try:
+        response = client.post(
+            url,
+            json={"query": query, "variables": variables},
+            timeout=timeout,
+            headers=_graphql_headers(ctx["SETTINGS"]),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    finally:
+        if close_client:
+            client.close()
     if not isinstance(payload, dict):
         raise RuntimeError("GRID GraphQL returned non-object payload")
     return payload

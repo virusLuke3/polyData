@@ -65,6 +65,13 @@ def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def _requests_get(requests_lib, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 20, headers: Optional[Dict[str, str]] = None):
+    if hasattr(requests_lib, "Session"):
+        session = requests_lib.Session()
+        session.trust_env = False
+        try:
+            return session.get(url, params=params, timeout=timeout, headers=headers or {})
+        finally:
+            session.close()
     return requests_lib.get(url, params=params, timeout=timeout, headers=headers or {})
 
 

@@ -121,22 +121,6 @@ forced = {
 }
 values.update(forced)
 
-for proxy_key in (
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "no_proxy",
-):
-    if values.get(proxy_key):
-        continue
-    env_value = os.environ.get(proxy_key)
-    if env_value:
-        values[proxy_key] = env_value
-
 if "POLYDATA_API_HOST" not in values:
     values["POLYDATA_API_HOST"] = "127.0.0.1"
 if "POLYDATA_API_PORT" not in values:

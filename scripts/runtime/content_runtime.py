@@ -51,6 +51,7 @@ class RuntimeContentProvider:
         self._lock = threading.Lock()
         self._cache: Dict[str, Any] = {"fetched_at": 0.0, "items": []}
         self._session = requests.Session()
+        self._session.trust_env = False
         self._session.headers.update(
             {
                 "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
