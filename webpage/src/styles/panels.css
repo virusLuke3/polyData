@@ -226,7 +226,7 @@
 }
 
 .wm-defi-token-panel .wm-monitor-list {
-  padding: 8px 14px 6px;
+  padding: 6px 14px 5px;
 }
 
 .wm-monitor-row {
@@ -242,40 +242,40 @@
 }
 
 .wm-defi-token-row {
-  grid-template-columns: minmax(96px, 1fr) minmax(214px, auto);
-  gap: 12px;
-  min-height: 74px;
+  grid-template-columns: minmax(88px, 1fr) minmax(188px, auto);
+  gap: 10px;
+  min-height: 58px;
 }
 
 .wm-defi-token-panel .wm-monitor-entity {
-  gap: 7px;
+  gap: 5px;
 }
 
 .wm-defi-token-panel .wm-monitor-entity strong {
-  font-size: 16px;
-  font-weight: 740;
-  line-height: 1.08;
+  font-size: 14px;
+  font-weight: 730;
+  line-height: 1.05;
 }
 
 .wm-defi-token-panel .wm-monitor-entity span {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 690;
 }
 
 .wm-defi-token-panel .wm-monitor-values {
-  grid-template-columns: minmax(78px, auto) minmax(58px, auto) minmax(64px, auto);
-  gap: 9px;
+  grid-template-columns: minmax(66px, auto) minmax(50px, auto) minmax(56px, auto);
+  gap: 8px;
 }
 
 .wm-defi-token-panel .wm-monitor-values strong {
-  font-size: 18px;
-  font-weight: 820;
+  font-size: 15px;
+  font-weight: 780;
 }
 
 .wm-defi-token-panel .wm-monitor-values span,
 .wm-defi-token-panel .wm-monitor-values em {
-  font-size: 14px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .wm-monitor-entity {
@@ -439,9 +439,9 @@
 
 @container (max-width: 360px) {
   .wm-defi-token-row {
-    grid-template-columns: minmax(0, 1fr) minmax(148px, auto);
-    gap: 8px;
-    min-height: 70px;
+    grid-template-columns: minmax(0, 1fr) minmax(132px, auto);
+    gap: 7px;
+    min-height: 56px;
   }
 
   .wm-defi-token-row .wm-monitor-sparkline {
@@ -449,19 +449,19 @@
   }
 
   .wm-defi-token-row .wm-monitor-values {
-    grid-template-columns: minmax(62px, auto) minmax(42px, auto) minmax(46px, auto);
-    gap: 6px;
+    grid-template-columns: minmax(52px, auto) minmax(36px, auto) minmax(40px, auto);
+    gap: 5px;
   }
 
   .wm-defi-token-row .wm-monitor-entity strong,
   .wm-defi-token-row .wm-monitor-values strong {
-    font-size: 15px;
+    font-size: 13px;
   }
 
   .wm-defi-token-row .wm-monitor-entity span,
   .wm-defi-token-row .wm-monitor-values span,
   .wm-defi-token-row .wm-monitor-values em {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 
