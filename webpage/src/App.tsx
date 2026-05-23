@@ -1,8 +1,8 @@
 import { type ComponentChildren } from 'preact';
-import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '@/components/FocusedMarketStrip';
 import { PanelLoading } from '@/components/Panel';
+import WeatherDeckMap from '@/components/WeatherDeckMap';
 import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
@@ -108,7 +108,6 @@ const MARKET_WORKSPACE_PANEL_IDS = new Set([
   'oracle-timeline',
   'related-news',
 ]);
-const WeatherDeckMap = lazy(() => import('@/components/WeatherDeckMap'));
 const PANEL_ROW_RESIZE_STEP = 170;
 const PANEL_COL_RESIZE_STEP = 260;
 const PANEL_DRAG_THRESHOLD = 8;
@@ -247,9 +246,13 @@ function WeatherInlineMap({
         {mappedCount}/{cityCount}
       </div>
       {error ? <div className="wm-inline-weather-map-error">{error}</div> : null}
-      <Suspense fallback={<div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING BASEMAP</span></div>}>
-        <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} />
-      </Suspense>
+      {!items.length && loading ? (
+        <div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>LOADING WEATHER MAP</span></div>
+      ) : null}
+      {!items.length && !loading ? (
+        <div className="wm-weather-deck-map wm-weather-deck-map-loading"><span>WEATHER MAP WARMING</span></div>
+      ) : null}
+      {items.length ? <WeatherDeckMap items={items} selectedCityId={selected?.cityId || null} onSelectCity={selectCity} height={620} /> : null}
       {detailOpen && selected ? <WeatherMapCityInspector city={selected} onClose={() => setDetailOpen(false)} /> : null}
     </div>
   );
