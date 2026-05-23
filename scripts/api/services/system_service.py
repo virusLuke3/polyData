@@ -82,6 +82,14 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 30,
     },
     {
+        "panelId": "defi-token-watch",
+        "namespace": "seed-meta:finance",
+        "cacheKey": "defi-token-watch",
+        "serviceName": "polydata-defi-token-watch-seed.service",
+        "intervalEnv": "POLYDATA_DEFI_TOKEN_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 120,
+    },
+    {
         "panelId": "finance-external-sources",
         "namespace": "seed-meta:finance",
         "cacheKey": "external-sources",

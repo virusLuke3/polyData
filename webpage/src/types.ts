@@ -1324,6 +1324,33 @@ export type RuntimeNewMarketSignalsPayload = {
   status?: string | null;
 };
 
+export type RuntimeDefiTokenRow = {
+  id?: string | null;
+  symbol?: string | null;
+  name?: string | null;
+  price?: number | string | null;
+  change24h?: number | string | null;
+  change7d?: number | string | null;
+  marketCap?: number | string | null;
+  volume24h?: number | string | null;
+  sparkline?: number[];
+  tags?: string[];
+  tone?: string | null;
+};
+
+export type RuntimeDefiTokenWatchPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    count?: number | string | null;
+    topSymbol?: string | null;
+    moveCount?: number | string | null;
+  } | null;
+  items?: RuntimeDefiTokenRow[];
+};
+
 export type RuntimeFinanceCoverageKey = 'quote' | 'earn' | 'sec' | 'perp' | 'etf' | 'clob' | 'oracle' | 'flow' | string;
 
 export type RuntimeFinanceLinkedMarket = {

@@ -19,6 +19,7 @@ import type {
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
   RuntimeCpiReleaseCalendarPayload,
+  RuntimeDefiTokenWatchPayload,
   RuntimeEnergyGasolineShockPayload,
   RuntimeEquityEventCommandPayload,
   RuntimeFinanceLiquidityRegimePayload,
@@ -218,6 +219,10 @@ export function fetchRuntimeCrypto() {
 
 export function fetchRuntimeCryptoFundingWatch(limit = 18) {
   return apiGet<RuntimeCryptoFundingPayload>(`/runtime/crypto/funding-watch?limit=${limit}`);
+}
+
+export function fetchRuntimeDefiTokenWatch(limit = 10) {
+  return apiGet<RuntimeDefiTokenWatchPayload>(`/runtime/finance/defi-token-watch?limit=${limit}`);
 }
 
 export function fetchRuntimeFinanceMarketAtlas(limit = 16) {

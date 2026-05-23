@@ -167,6 +167,8 @@ class ApiSettings:
     crypto_funding_watch_source_url: str
     crypto_funding_watch_ttl_seconds: int
     crypto_funding_watch_symbols: tuple[str, ...]
+    defi_token_watch_ids: tuple[str, ...]
+    defi_token_watch_ttl_seconds: int
     yahoo_chart_base_url: str
     coingecko_base_url: str
     espn_nba_base_url: str
@@ -312,6 +314,22 @@ def load_api_settings() -> ApiSettings:
                 "ETCUSDT",
             ),
         ),
+        defi_token_watch_ids=_get_csv(
+            "POLYDATA_DEFI_TOKEN_WATCH_IDS",
+            (
+                "uniswap",
+                "pendle",
+                "maker",
+                "aave",
+                "lido-dao",
+                "ethena",
+                "curve-dao-token",
+                "compound-governance-token",
+                "synthetix-network-token",
+                "rocket-pool",
+            ),
+        ),
+        defi_token_watch_ttl_seconds=_get_int("POLYDATA_DEFI_TOKEN_WATCH_TTL_SECONDS", 120),
         yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", YAHOO_CHART_BASE_URL),
         coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", COINGECKO_BASE_URL),
         espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", ESPN_NBA_BASE_URL),
