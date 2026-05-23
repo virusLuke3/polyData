@@ -15,10 +15,6 @@ import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
 import { panel as cryptoFundingWatch } from './crypto-funding-watch';
-import { panel as financeMarketAtlas } from './finance-market-atlas';
-import { panel as equityEventCommand } from './equity-event-command';
-import { panel as onchainTradfiPerpRadar } from './onchain-tradfi-perp-radar';
-import { panel as financeLiquidityRegime } from './finance-liquidity-regime';
 import { panel as geoSanctionsShock } from './geo-sanctions-shock';
 import { panel as cpiReleaseCommandCenter } from './cpi-release-command-center';
 import { panel as cpiComponentsPressureRegistry } from './cpi-components-pressure-registry';
@@ -70,10 +66,6 @@ export const PANEL_MODULES: PanelModule[] = [
   commoditiesWatch,
   cryptoWatch,
   cryptoFundingWatch,
-  financeMarketAtlas,
-  equityEventCommand,
-  onchainTradfiPerpRadar,
-  financeLiquidityRegime,
   geoSanctionsShock,
   cpiReleaseCommandCenter,
   cpiComponentsPressureRegistry,
