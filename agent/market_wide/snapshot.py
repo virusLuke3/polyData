@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent.common.budget import claim_agent_live_call
+from agent.common.gateway_client import call_market_wide_insight_gateway, gateway_configured
 
 from .service import LENS_ALIASES, VALID_LENSES, build_market_wide_fallback, build_market_wide_insight
 
@@ -207,7 +208,7 @@ def build_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, live: bool
     if live_allowed:
         live_allowed, budget = claim_agent_live_call(f"market-wide-seed:{normalized_lens}")
     if live_allowed:
-        insight = build_market_wide_insight(payload)
+        insight = call_market_wide_insight_gateway(payload) if gateway_configured() else build_market_wide_insight(payload)
         return _snapshot_from_insight(normalized_lens, insight, live_attempted=True, budget=budget)
     reason = "seed-disabled" if live else "fallback-only"
     if budget is not None and budget.get("enabled"):
