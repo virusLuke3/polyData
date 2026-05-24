@@ -26,6 +26,7 @@ FINANCE_WATCH_PANEL_IDS = (
     "crypto-perp-funding",
     "tradfi-perp-radar",
     "ipo-news-watch",
+    "broker-research-watch",
     "global-index-monitor",
     "crypto-fear-greed",
     "crypto-etf-flow",
@@ -123,6 +124,67 @@ NEWS_QUERIES = {
     "ipo-news-watch": 'IPO OR "S-1" OR "F-1" OR "files for listing" OR "public listing" OR "listing rumor"',
     "blockchain-policy-news": '("crypto bill" OR "stablecoin legislation" OR "SEC crypto" OR "CFTC crypto" OR "exchange enforcement" OR "tokenization regulation")',
 }
+
+BROKER_RESEARCH_SYMBOLS = (
+    ("NVDA", "Nvidia", "AI"),
+    ("AMD", "AMD", "AI"),
+    ("MSFT", "Microsoft", "AI"),
+    ("AAPL", "Apple", "MEGA"),
+    ("AMZN", "Amazon", "MEGA"),
+    ("GOOGL", "Alphabet", "MEGA"),
+    ("META", "Meta", "MEGA"),
+    ("TSLA", "Tesla", "EV"),
+    ("COIN", "Coinbase", "CRYPTO"),
+    ("MSTR", "MicroStrategy", "CRYPTO"),
+    ("HOOD", "Robinhood", "CRYPTO"),
+    ("MARA", "MARA", "MINER"),
+    ("RIOT", "Riot", "MINER"),
+    ("IBIT", "iShares Bitcoin Trust", "ETF"),
+    ("ETHA", "iShares Ethereum Trust", "ETF"),
+    ("GBTC", "Grayscale Bitcoin Trust", "ETF"),
+    ("SPY", "SPDR S&P 500 ETF", "ETF"),
+    ("QQQ", "Invesco QQQ", "ETF"),
+    ("XOM", "Exxon Mobil", "ENERGY"),
+    ("CVX", "Chevron", "ENERGY"),
+    ("GLD", "SPDR Gold Shares", "GOLD"),
+    ("USO", "United States Oil Fund", "OIL"),
+)
+
+BROKER_NAMES = (
+    "Morgan Stanley",
+    "Goldman Sachs",
+    "JPMorgan",
+    "JP Morgan",
+    "Bank of America",
+    "BofA",
+    "Citigroup",
+    "Citi",
+    "UBS",
+    "Deutsche Bank",
+    "Wells Fargo",
+    "Barclays",
+    "Bernstein",
+    "Benchmark",
+    "Daiwa",
+    "Evercore",
+    "Jefferies",
+    "Mizuho",
+    "Melius",
+    "Wedbush",
+    "Needham",
+    "Piper Sandler",
+    "RBC",
+    "TD Cowen",
+    "Oppenheimer",
+    "Raymond James",
+    "Stifel",
+    "Cantor Fitzgerald",
+    "KeyBanc",
+    "Truist",
+    "HSBC",
+    "Loop Capital",
+    "Rosenblatt",
+)
 
 
 def utc_now_iso() -> str:
@@ -464,6 +526,207 @@ def _news_tags(panel_id: str, title: str, description: str) -> List[str]:
     if panel_id == "ipo-news-watch":
         return (tags or ["IPO"])[:3]
     return (tags or ["POLICY"])[:3]
+
+
+def _broker_research_query() -> str:
+    symbols = " OR ".join(symbol for symbol, _name, _theme in BROKER_RESEARCH_SYMBOLS[:18])
+    return f'("price target" OR upgrade OR downgrade OR "initiates coverage" OR "top pick" OR reiterates) ({symbols}) when:4d'
+
+
+def _find_broker_symbol(text: str) -> Optional[tuple[str, str, str]]:
+    normalized = f" {text.upper()} "
+    for symbol, name, theme in BROKER_RESEARCH_SYMBOLS:
+        if re.search(rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])", normalized):
+            return symbol, name, theme
+        name_tokens = [token for token in re.split(r"\W+", name.upper()) if len(token) >= 4]
+        if name_tokens and all(token in normalized for token in name_tokens[:2]):
+            return symbol, name, theme
+    return None
+
+
+def _find_broker_name(text: str, fallback: str) -> str:
+    lowered = text.lower()
+    for broker in BROKER_NAMES:
+        if broker.lower() in lowered:
+            return "JPMorgan" if broker == "JP Morgan" else broker
+    return fallback or "Research"
+
+
+def _has_known_broker(text: str) -> bool:
+    lowered = text.lower()
+    return any(broker.lower() in lowered for broker in BROKER_NAMES)
+
+
+def _broker_action(text: str) -> tuple[str, str]:
+    lowered = text.lower()
+    if any(word in lowered for word in ("downgrade", "downgrades", "cut to sell", "lowered to underperform")):
+        return "DOWNGRADE", "down"
+    if any(word in lowered for word in ("upgrade", "upgrades", "raised to buy", "raised to outperform")):
+        return "UPGRADE", "up"
+    if any(word in lowered for word in ("initiates coverage", "initiate coverage", "started coverage", "starts coverage")):
+        return "INITIATE", "watch"
+    if any(word in lowered for word in ("top pick", "best idea", "conviction list")):
+        return "TOP PICK", "up"
+    if any(word in lowered for word in ("raises price target", "raised price target", "boosts price target", "lifts price target", "price target raised", "price target increased")) or re.search(r"\braises\b.{0,40}\bprice target\b", lowered):
+        return "PT RAISE", "up"
+    if any(word in lowered for word in ("cuts price target", "cut price target", "lowers price target", "lowered price target", "price target cut", "price target lowered")) or re.search(r"\blowers\b.{0,40}\bprice target\b", lowered):
+        return "PT CUT", "down"
+    if any(word in lowered for word in ("reiterates", "maintains", "keeps")):
+        return "REITERATE", "neutral"
+    return "NOTE", "neutral"
+
+
+def _is_broker_research_candidate(text: str, source: str, action: str, target: Optional[float]) -> bool:
+    lowered = text.lower()
+    product_noise = ("gpu upgrade", "upgrade your", "memory upgrade", "software upgrade", "processor", "driver update", "windows upgrade")
+    if any(needle in lowered for needle in product_noise):
+        return False
+    if target is not None or _has_known_broker(text):
+        return True
+    source_lower = source.lower()
+    if any(needle in source_lower for needle in ("marketbeat", "benzinga", "thefly", "tipranks", "streetinsider", "investing.com")):
+        return action in {"UPGRADE", "DOWNGRADE", "INITIATE", "TOP PICK", "PT RAISE", "PT CUT"} and any(needle in lowered for needle in ("analyst", "rating", "price target", "coverage"))
+    return False
+
+
+def _extract_target_prices(text: str) -> tuple[Optional[float], Optional[float]]:
+    cleaned = re.sub(r"\s+", " ", text)
+    target = None
+    previous = None
+    target_patterns = (
+        r"(?:price target|pt)[^$]{0,48}?\b(?:to|at|of|:)\s*\$([0-9][0-9,]*(?:\.\d+)?)",
+        r"\bto\s+\$([0-9][0-9,]*(?:\.\d+)?)\s+from\s+\$([0-9][0-9,]*(?:\.\d+)?)",
+        r"\$([0-9][0-9,]*(?:\.\d+)?)\s+(?:price target|pt)",
+    )
+    for pattern in target_patterns:
+        match = re.search(pattern, cleaned, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = _safe_float(match.group(1).replace(",", ""))
+        if len(match.groups()) >= 2:
+            previous = _safe_float(match.group(2).replace(",", ""))
+        break
+    if previous is None:
+        from_match = re.search(r"\bfrom\s+\$([0-9][0-9,]*(?:\.\d+)?)", cleaned, flags=re.IGNORECASE)
+        previous = _safe_float(from_match.group(1).replace(",", "")) if from_match else None
+    return target, previous
+
+
+def _broker_priority(action: str, upside: Optional[float], target_change: Optional[float], published_at: Optional[str], symbol: str) -> float:
+    action_score = {
+        "UPGRADE": 42,
+        "DOWNGRADE": 42,
+        "INITIATE": 34,
+        "TOP PICK": 32,
+        "PT RAISE": 26,
+        "PT CUT": 26,
+        "REITERATE": 12,
+    }.get(action, 8)
+    recency = 0.0
+    if published_at:
+        try:
+            age_hours = max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(published_at.replace("Z", "+00:00"))).total_seconds() / 3600)
+            recency = max(0.0, 30.0 - age_hours)
+        except ValueError:
+            recency = 0.0
+    importance = 16 if symbol in {"NVDA", "AMD", "MSFT", "TSLA", "COIN", "MSTR", "AAPL", "META"} else 8
+    return action_score + recency + importance + min(22.0, abs(upside or 0.0)) + min(18.0, abs(target_change or 0.0))
+
+
+def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+    try:
+        xml_text = _http_text_get(ctx, _news_url(_broker_research_query()), timeout=14)
+    except Exception as exc:
+        return _payload("broker-research-watch", title="BROKER RESEARCH", items=[], status="error", sources={"googleNews": "error"}, summary={"error": str(exc)})
+    try:
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError:
+        return _payload("broker-research-watch", title="BROKER RESEARCH", items=[], status="empty", sources={"googleNews": "parse-error"})
+
+    rows: List[Dict[str, Any]] = []
+    seen_titles = set()
+    quote_cache: Dict[str, Dict[str, Any]] = {}
+    for item in root.findall(".//item")[: max(12, limit * 4)]:
+        title = _strip_html(item.findtext("title"))
+        description = _strip_html(item.findtext("description"))
+        source = _compact_source(item.findtext("source") or "Google News")
+        text = f"{title} {description}"
+        match = _find_broker_symbol(text)
+        if not match or title in seen_titles:
+            continue
+        seen_titles.add(title)
+        symbol, company, theme = match
+        broker = _find_broker_name(text, source)
+        action, action_tone = _broker_action(text)
+        target, previous_target = _extract_target_prices(text)
+        if not _is_broker_research_candidate(text, source, action, target):
+            continue
+        if symbol not in quote_cache:
+            quote_cache[symbol] = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d") or {}
+        quote = quote_cache.get(symbol) or {}
+        current_price = _safe_float(quote.get("price"))
+        upside = ((target - current_price) / current_price * 100) if target is not None and current_price not in (None, 0) else None
+        target_change = ((target - previous_target) / previous_target * 100) if target is not None and previous_target not in (None, 0) else None
+        published_raw = item.findtext("pubDate")
+        published_at = None
+        if published_raw:
+            try:
+                published_at = parsedate_to_datetime(published_raw).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            except (TypeError, ValueError):
+                published_at = None
+        tags = [action]
+        if target_change is not None:
+            price_target_tag = "PT RAISE" if target_change > 0 else "PT CUT" if target_change < 0 else "PT"
+            if price_target_tag not in tags:
+                tags.append(price_target_tag)
+        tags.append(theme)
+        tone = "up" if (upside is not None and upside > 0) or action_tone == "up" else "down" if (upside is not None and upside < 0) or action_tone == "down" else "watch" if action_tone == "watch" else "neutral"
+        target_label = f"PT {_format_price(target)}" if target is not None else (_format_price(current_price) if current_price is not None else "--")
+        metric_label = f"{upside:+.1f}%" if upside is not None else target_label
+        summary_bits = [broker, action.replace("PT ", "target ")]
+        if target is not None:
+            summary_bits.append(f"target {target_label}")
+        if previous_target is not None:
+            summary_bits.append(f"from {_format_price(previous_target)}")
+        if current_price is not None:
+            summary_bits.append(f"spot {_format_price(current_price)}")
+        rows.append(
+            {
+                "id": f"broker-research:{symbol}:{abs(hash(title))}",
+                "label": symbol,
+                "symbol": company.upper()[:16],
+                "title": title,
+                "summary": " | ".join(summary_bits),
+                "source": broker,
+                "url": item.findtext("link"),
+                "publishedAt": published_at,
+                "metric": upside,
+                "metricLabel": metric_label,
+                "metricUnit": "UPSIDE",
+                "secondary": target,
+                "secondaryLabel": target_label,
+                "change": target_change,
+                "changeLabel": f"{target_change:+.1f}% PT" if target_change is not None else (_format_pct(quote.get("changePercent")) if quote.get("changePercent") is not None else None),
+                "tags": tags[:3],
+                "tone": tone,
+                "points": quote.get("points") or [],
+                "_priority": _broker_priority(action, upside, target_change, published_at, symbol),
+            }
+        )
+        if len(rows) >= max(limit * 2, 18):
+            break
+    rows.sort(key=lambda row: _safe_float(row.get("_priority")) or 0.0, reverse=True)
+    for row in rows:
+        row.pop("_priority", None)
+    upgrades = sum(1 for row in rows if "UPGRADE" in (row.get("tags") or []))
+    cuts = sum(1 for row in rows if any(tag in {"DOWNGRADE", "PT CUT"} for tag in (row.get("tags") or [])))
+    return _payload(
+        "broker-research-watch",
+        title="BROKER RESEARCH",
+        items=rows[:limit],
+        summary={"upgrades": upgrades, "cuts": cuts, "topSymbol": rows[0]["label"] if rows else None, "rankBy": "rating action + target revision + recency"},
+        sources={"googleNews": "ok" if rows else "empty", "yahoo": "ok" if quote_cache else "empty"},
+    )
 
 
 def _read_finance_external(ctx: dict) -> Dict[str, Any]:
@@ -877,6 +1140,8 @@ def build_finance_watch_panel_payload(ctx: dict, panel_id: str, limit: int = 10,
         return build_tradfi_perps_payload(ctx, limit, external or _read_finance_external(ctx))
     if panel_id == "ipo-news-watch":
         return build_news_payload(ctx, panel_id, "IPO NEWS", limit)
+    if panel_id == "broker-research-watch":
+        return build_broker_research_payload(ctx, limit)
     if panel_id == "global-index-monitor":
         return build_global_indices_payload(ctx, limit)
     if panel_id == "crypto-fear-greed":

@@ -7,6 +7,7 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'cpi-release-calendar': 8,
   'cpi-release-command-center': 36,
   'blockchain-policy-news': 12,
+  'broker-research-watch': 12,
   'crypto-etf-flow': 8,
   'crypto-fear-greed': 6,
   'crypto-funding-watch': 18,

@@ -6,7 +6,7 @@ import { formatRelative } from '../shared/formatters';
 import type { PanelRenderMap } from '../types';
 import { runtimePanelFromRenderer } from './helpers';
 
-type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment' | 'etf';
+type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment' | 'etf' | 'research';
 
 type FinancePanelConfig = {
   id: string;
@@ -112,6 +112,36 @@ function FeedRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh
     return <a className={`wm-finance-feed-row${fresh ? ' is-fresh' : ''}`} href={item.url} target="_blank" rel="noreferrer">{content}</a>;
   }
   return <article className={`wm-finance-feed-row${fresh ? ' is-fresh' : ''}`}>{content}</article>;
+}
+
+function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
+  const content = (
+    <>
+      <div className="wm-finance-research-main">
+        <div className="wm-finance-feed-meta">
+          <span className="wm-finance-dot" />
+          <b>{item.label || 'TICKER'}</b>
+          <span>{item.source || item.symbol || 'BROKER'}</span>
+          <FinanceTags tags={item.tags} />
+        </div>
+        <strong>{item.title || item.summary || 'Research note pending'}</strong>
+        <em>{item.summary || item.symbol || 'Analyst note pending'}</em>
+        <div className="wm-finance-feed-foot">
+          <span>{formatRelative(item.publishedAt || undefined)}</span>
+          {item.url ? <b>Read source</b> : null}
+        </div>
+      </div>
+      <div className="wm-finance-research-metric">
+        <strong className={toneClass(item.tone)}>{item.metricLabel || '--'}</strong>
+        <span>{item.secondaryLabel || item.metricUnit || 'UPSIDE'}</span>
+        {item.changeLabel ? <em className={toneClass(item.tone)}>{item.changeLabel}</em> : null}
+      </div>
+    </>
+  );
+  if (item.url) {
+    return <a className={`wm-finance-research-row${fresh ? ' is-fresh' : ''}`} href={item.url} target="_blank" rel="noreferrer">{content}</a>;
+  }
+  return <article className={`wm-finance-research-row${fresh ? ' is-fresh' : ''}`}>{content}</article>;
 }
 
 function GridTile({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
@@ -251,6 +281,9 @@ function FinanceWatchView({ payload, mode, freshKeys }: { payload?: RuntimeFinan
   }
   if (mode === 'feed') {
     return <div className="wm-finance-feed-list">{items.map((item, index) => <FeedRow item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;
+  }
+  if (mode === 'research') {
+    return <div className="wm-finance-research-list">{items.map((item, index) => <ResearchRow item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;
   }
   if (mode === 'grid') {
     return <div className="wm-finance-grid-list">{items.map((item, index) => <GridTile item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;

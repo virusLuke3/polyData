@@ -104,6 +104,7 @@ SEED_META_SPECS = [
             "crypto-perp-funding",
             "tradfi-perp-radar",
             "ipo-news-watch",
+            "broker-research-watch",
             "global-index-monitor",
             "crypto-fear-greed",
             "crypto-etf-flow",
