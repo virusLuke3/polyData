@@ -226,7 +226,8 @@ class FinanceWatchPanelsWatcher:
             previous = self.load_previous_payload(panel_id)
             record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
             status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
-            if previous and (status == "error" or record_count <= 0):
+            replace_with_empty = panel_id == "broker-research-watch" and status == "empty"
+            if previous and (status == "error" or record_count <= 0) and not replace_with_empty:
                 self.store_payload(panel_id, previous)
                 self.store_seed_meta(
                     panel_id,
