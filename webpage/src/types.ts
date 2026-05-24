@@ -498,6 +498,76 @@ export type RuntimeMarketGroup = {
   generatedAt?: string;
 };
 
+export type RuntimeCommodityTapeItem = {
+  id: string;
+  label: string;
+  symbol: string;
+  price?: number | null;
+  changePct?: number | null;
+  changeLabel?: string | null;
+  tone?: 'up' | 'down' | 'neutral' | string;
+};
+
+export type RuntimeEquityExposure = {
+  ticker: string;
+  name: string;
+  market?: string | null;
+  role?: 'producer' | 'processor' | 'consumer' | 'spread' | string;
+  direction?: 'positive' | 'negative' | 'spread' | 'weak' | string;
+  score?: number | null;
+  impactLabel?: string | null;
+  confidence?: 'high' | 'medium' | 'low' | string;
+  basis?: string | null;
+};
+
+export type RuntimeLinkedMarket = {
+  id?: number | string | null;
+  title?: string | null;
+  slug?: string | null;
+  query?: string | null;
+  source?: string | null;
+};
+
+export type RuntimeTransmissionChain = {
+  id: string;
+  commodityId: string;
+  chainLabel: string;
+  shockLabel?: string | null;
+  shockPct?: number | null;
+  tone?: 'up' | 'down' | 'watch' | 'neutral' | string;
+  demandRegime?: string | null;
+  lagLabel?: string | null;
+  confidence?: 'high' | 'medium' | 'low' | string;
+  formula?: string | null;
+  winners?: RuntimeEquityExposure[];
+  losers?: RuntimeEquityExposure[];
+  spreadWatch?: RuntimeEquityExposure[];
+  linkedMarkets?: RuntimeLinkedMarket[];
+};
+
+export type RuntimeCommodityTransmissionPayload = {
+  generatedAt?: string;
+  panelId?: string | null;
+  source?: string | null;
+  cacheMode?: string | null;
+  status?: 'ok' | 'partial' | 'model' | string | null;
+  sources?: Record<string, string>;
+  summary?: {
+    signal?: string | null;
+    signalLabel?: string | null;
+    bias?: 'beneficiary' | 'pressure' | 'mixed' | 'model' | string | null;
+    chainCount?: number | string | null;
+    liveCommodityCount?: number | string | null;
+    topShockLabel?: string | null;
+    topShockChangeLabel?: string | null;
+    positiveCount?: number | string | null;
+    negativeCount?: number | string | null;
+    spreadCount?: number | string | null;
+  } | null;
+  commodities?: RuntimeCommodityTapeItem[];
+  transmissions?: RuntimeTransmissionChain[];
+};
+
 export type RuntimeF1PanelCard = {
   id?: string;
   kind?: 'meeting' | 'session' | 'result' | 'news' | string;

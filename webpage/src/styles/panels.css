@@ -18,6 +18,380 @@
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
+/* ----------------------------------------------------------
+   Commodity Equity Transmission
+   ---------------------------------------------------------- */
+.wm-commodity-transmission-panel .wm-panel-body {
+  overflow-x: hidden;
+}
+
+.wm-transmission-signal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-transmission-signal div {
+  min-width: 0;
+}
+
+.wm-transmission-signal span,
+.wm-transmission-scanbar em,
+.wm-commodity-chip span,
+.wm-transmission-meta,
+.wm-transmission-exposure-col > span,
+.wm-transmission-linked b {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wm-text-dim);
+}
+
+.wm-transmission-signal strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.2;
+  color: var(--wm-text);
+}
+
+.wm-transmission-signal em {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #d9dddc;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.wm-transmission-scanbar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wm-transmission-scanbar span {
+  min-width: 0;
+  padding: 6px 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.wm-transmission-scanbar span:last-child {
+  border-right: none;
+}
+
+.wm-transmission-scanbar b {
+  display: block;
+  color: var(--wm-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.wm-commodity-tape {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wm-commodity-chip {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wm-commodity-chip strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--wm-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.wm-commodity-chip em {
+  color: var(--wm-text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.wm-transmission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+}
+
+.wm-transmission-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) minmax(58px, auto);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 8px 8px 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.wm-transmission-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wm-transmission-rail {
+  width: 3px;
+  border-radius: 4px;
+  background: #5f6670;
+}
+
+.wm-transmission-main {
+  min-width: 0;
+}
+
+.wm-transmission-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wm-transmission-meta span,
+.wm-transmission-meta b,
+.wm-transmission-meta em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-transmission-meta b {
+  color: #9aa2a8;
+}
+
+.wm-transmission-meta em,
+.wm-transmission-exposure-col > span {
+  font-style: normal;
+}
+
+.wm-transmission-main > strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--wm-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-transmission-main p {
+  display: -webkit-box;
+  margin: 2px 0 6px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: #8b918d;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.wm-transmission-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.wm-transmission-exposure-col {
+  min-width: 0;
+}
+
+.wm-transmission-exposure-col div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin-top: 3px;
+}
+
+.wm-transmission-exposure-col div > em {
+  color: #727976;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.wm-transmission-exposure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wm-transmission-exposure b,
+.wm-transmission-exposure em,
+.wm-transmission-exposure i {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-transmission-exposure b {
+  color: var(--wm-text);
+}
+
+.wm-transmission-exposure em {
+  color: var(--wm-text-dim);
+}
+
+.wm-transmission-exposure i,
+.wm-transmission-value strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-transmission-linked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.wm-transmission-linked span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 3px;
+  color: #aeb4b0;
+  font-size: 10px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-transmission-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  text-align: right;
+}
+
+.wm-transmission-value strong {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wm-transmission-value span {
+  max-width: 84px;
+  overflow: hidden;
+  color: var(--wm-text-dim);
+  font-size: 9px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.wm-commodity-transmission-panel .tone-up .wm-transmission-rail,
+.wm-commodity-transmission-panel .wm-transmission-row.tone-up .wm-transmission-rail {
+  background: var(--wm-green);
+}
+
+.wm-commodity-transmission-panel .tone-down .wm-transmission-rail,
+.wm-commodity-transmission-panel .wm-transmission-row.tone-down .wm-transmission-rail {
+  background: var(--wm-red);
+}
+
+.wm-commodity-transmission-panel .tone-watch .wm-transmission-rail,
+.wm-commodity-transmission-panel .wm-transmission-row.tone-watch .wm-transmission-rail {
+  background: var(--wm-yellow);
+}
+
+.wm-commodity-transmission-panel .tone-up,
+.wm-commodity-transmission-panel .tone-up strong,
+.wm-commodity-transmission-panel .tone-up i {
+  color: var(--wm-green);
+}
+
+.wm-commodity-transmission-panel .tone-down,
+.wm-commodity-transmission-panel .tone-down strong,
+.wm-commodity-transmission-panel .tone-down i {
+  color: var(--wm-red);
+}
+
+.wm-commodity-transmission-panel .tone-watch,
+.wm-commodity-transmission-panel .tone-watch strong,
+.wm-commodity-transmission-panel .tone-watch i {
+  color: var(--wm-yellow);
+}
+
+.wm-commodity-transmission-panel .tone-neutral,
+.wm-commodity-transmission-panel .tone-neutral strong,
+.wm-commodity-transmission-panel .tone-neutral i {
+  color: var(--wm-text-dim);
+}
+
+.wm-commodity-transmission-panel .conf-high {
+  color: var(--wm-green) !important;
+}
+
+.wm-commodity-transmission-panel .conf-medium {
+  color: var(--wm-yellow) !important;
+}
+
+.wm-commodity-transmission-panel .conf-low {
+  color: var(--wm-text-dim) !important;
+}
+
+@media (max-width: 760px) {
+  .wm-transmission-row {
+    grid-template-columns: 3px minmax(0, 1fr);
+  }
+
+  .wm-transmission-value {
+    grid-column: 2;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .wm-transmission-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 .wm-panel::after {
   content: '';
   position: absolute;
@@ -9692,6 +10066,125 @@ body.panel-resize-active iframe {
 .wm-weather-summary strong {
   font-size: 12px;
   white-space: nowrap;
+}
+
+.wm-world-clock-panel .wm-panel-body {
+  padding: 8px 9px 10px;
+  overflow: hidden;
+}
+
+.wm-world-clock-list {
+  display: grid;
+  gap: 0;
+}
+
+.wm-world-clock-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 58px;
+  padding: 8px 10px 8px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.wm-world-clock-row.primary {
+  border-left: 3px solid rgba(57, 255, 115, 0.5);
+  background: rgba(57, 255, 115, 0.07);
+}
+
+.wm-world-clock-drag {
+  color: #6f7779;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+}
+
+.wm-world-clock-city {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.wm-world-clock-city strong {
+  overflow: hidden;
+  color: #e6e9e7;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-world-clock-city span,
+.wm-world-clock-time span {
+  color: #777d7b;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.wm-world-clock-city i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px;
+  border-radius: 999px;
+  background: #4b4f4e;
+}
+
+.wm-world-clock-city i.open {
+  background: #39ff73;
+  box-shadow: 0 0 10px rgba(57, 255, 115, 0.5);
+}
+
+.wm-world-clock-time {
+  min-width: 132px;
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.wm-world-clock-time b {
+  color: #f2f3f1;
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-world-clock-time span {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.wm-world-clock-time span::before {
+  content: '';
+  width: 56px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.wm-world-clock-time span em {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  max-width: 56px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffb224, #5c8dff);
+  transform: translateY(-50%);
 }
 
 .wm-weather-deck-map {

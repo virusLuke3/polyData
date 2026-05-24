@@ -18,6 +18,7 @@ import type {
   PriceSummary,
   RuntimeMarketGroup,
   RuntimeCryptoFundingPayload,
+  RuntimeCommodityTransmissionPayload,
   RuntimeCpiReleaseCalendarPayload,
   RuntimeDefiTokenWatchPayload,
   RuntimeEnergyGasolineShockPayload,
@@ -249,6 +250,10 @@ export function fetchRuntimeOnchainTradfiPerpRadar(limit = 12) {
 
 export function fetchRuntimeFinanceLiquidityRegime(limit = 12) {
   return apiGet<RuntimeFinanceLiquidityRegimePayload>(`/runtime/finance/liquidity-regime?limit=${limit}`);
+}
+
+export function fetchRuntimeCommodityEquityTransmission(limit = 8) {
+  return apiGet<RuntimeCommodityTransmissionPayload>(`/runtime/finance/commodity-equity-transmission?limit=${limit}`);
 }
 
 export function fetchRuntimeF1(limit = 10) {

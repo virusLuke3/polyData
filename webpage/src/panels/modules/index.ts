@@ -26,6 +26,7 @@ import { panel as tradfiPerpRadar } from './tradfi-perp-radar';
 import { panel as ipoNewsWatch } from './ipo-news-watch';
 import { panel as brokerResearchWatch } from './broker-research-watch';
 import { panel as globalIndexMonitor } from './global-index-monitor';
+import { panel as commodityEquityTransmission } from './commodity-equity-transmission';
 import { panel as cryptoFearGreed } from './crypto-fear-greed';
 import { panel as cryptoEtfFlow } from './crypto-etf-flow';
 import { panel as stablecoinMonitor } from './stablecoin-monitor';
@@ -93,6 +94,7 @@ export const PANEL_MODULES: PanelModule[] = [
   ipoNewsWatch,
   brokerResearchWatch,
   globalIndexMonitor,
+  commodityEquityTransmission,
   cryptoFearGreed,
   cryptoEtfFlow,
   stablecoinMonitor,
