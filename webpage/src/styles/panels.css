@@ -10310,113 +10310,6 @@ body.panel-resize-active iframe {
   display: none;
 }
 
-.wm-weather-static-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: #030405;
-  cursor: grab;
-  opacity: 1;
-  transition: opacity 180ms ease;
-  user-select: none;
-  touch-action: none;
-}
-
-.wm-weather-static-fallback:active {
-  cursor: grabbing;
-}
-
-.wm-weather-deck-map.map-ready.has-screen-points .wm-weather-static-fallback {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.wm-weather-deck-map.map-fallback .wm-weather-deck-basemap,
-.wm-weather-deck-map.no-screen-points .wm-weather-deck-basemap {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.wm-weather-static-fallback svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-}
-
-.wm-weather-static-grid {
-  fill: none;
-  stroke: rgba(255, 168, 0, 0.22);
-  stroke-width: 0.75;
-}
-
-.wm-weather-static-land {
-  fill: #0b141a;
-  stroke: rgba(255, 168, 0, 0.52);
-  stroke-width: 0.8;
-}
-
-.wm-weather-static-point .ring {
-  fill: none;
-  stroke: rgba(255, 168, 0, 0.35);
-  stroke-width: 4;
-}
-
-.wm-weather-static-point .dot {
-  fill: #ffa620;
-  stroke: #ffe7a3;
-  stroke-width: 1.6;
-  cursor: pointer;
-}
-
-.wm-weather-static-point.hot .ring {
-  stroke: rgba(255, 121, 72, 0.55);
-}
-
-.wm-weather-static-point.hot .dot {
-  fill: #ff7948;
-  stroke: #ffd1ad;
-}
-
-.wm-weather-static-point.cool .ring {
-  stroke: rgba(72, 215, 190, 0.55);
-}
-
-.wm-weather-static-point.cool .dot {
-  fill: #48d7be;
-  stroke: #bdfdf5;
-}
-
-.wm-weather-static-point.neutral .ring {
-  stroke: rgba(255, 168, 0, 0.36);
-}
-
-.wm-weather-static-point.selected .ring {
-  stroke: rgba(255, 245, 190, 0.78);
-}
-
-.wm-weather-static-point rect {
-  fill: rgba(0, 0, 0, 0.76);
-  stroke: rgba(255, 168, 0, 0.18);
-}
-
-.wm-weather-static-point .label-hit {
-  cursor: pointer;
-}
-
-.wm-weather-static-point text {
-  fill: #73d8ff;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.4px;
-}
-
-.wm-weather-static-point text.sub {
-  fill: #ffd772;
-  font-size: 9px;
-}
-
 .wm-weather-html-label-layer {
   position: absolute;
   inset: 0;
@@ -10428,9 +10321,12 @@ body.panel-resize-active iframe {
   position: absolute;
   left: 0;
   top: 0;
-  min-width: 58px;
-  max-width: 112px;
-  padding: 4px 7px;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  column-gap: 5px;
+  min-width: 72px;
+  max-width: 126px;
+  padding: 4px 7px 4px 6px;
   border: 1px solid rgba(255, 168, 0, 0.22);
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.8);
@@ -10440,6 +10336,17 @@ body.panel-resize-active iframe {
   pointer-events: auto;
   cursor: pointer;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+}
+
+.wm-weather-html-label i {
+  grid-row: 1 / 3;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ffa620;
+  border: 2px solid rgba(255, 231, 163, 0.95);
+  box-shadow: 0 0 0 5px rgba(255, 168, 0, 0.3), 0 0 18px rgba(255, 168, 0, 0.38);
 }
 
 .wm-weather-html-label strong,
@@ -10469,8 +10376,20 @@ body.panel-resize-active iframe {
   color: #ffb073;
 }
 
+.wm-weather-html-label.hot i {
+  background: #ff7948;
+  border-color: rgba(255, 209, 173, 0.95);
+  box-shadow: 0 0 0 5px rgba(255, 121, 72, 0.32), 0 0 18px rgba(255, 121, 72, 0.38);
+}
+
 .wm-weather-html-label.cool span {
   color: #80eadc;
+}
+
+.wm-weather-html-label.cool i {
+  background: #48d7be;
+  border-color: rgba(189, 253, 245, 0.95);
+  box-shadow: 0 0 0 5px rgba(72, 215, 190, 0.32), 0 0 18px rgba(72, 215, 190, 0.38);
 }
 
 .wm-weather-html-label.hot {
