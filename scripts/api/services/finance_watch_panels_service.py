@@ -1007,7 +1007,10 @@ def _build_broker_rows_from_open_sources(
             if not _is_original_research_url(report_url, allowed_domains=allowed_domains) or report_url in seen_urls:
                 continue
             page_text = detail_html or listing_html
-            title = _extract_html_title(page_text) or candidate.get("label") or f"{provider} research report"
+            title = _extract_html_title(page_text)
+            if title.lower().strip() in {"news details", "zacks small cap research - news details"}:
+                title = ""
+            title = title or candidate.get("label") or f"{provider} research report"
             summary = _extract_html_summary(page_text)
             published_at = _extract_html_published_at(page_text)
             symbol = _symbol_from_text(f"{title} {summary} {candidate_url} {report_url}")
