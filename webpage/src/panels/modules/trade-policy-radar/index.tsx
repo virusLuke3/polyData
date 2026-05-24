@@ -405,8 +405,7 @@ function PolicyRow({ item }: { item: TradeSignal }) {
     <article className="wm-trade-news-row">
       <div className="wm-trade-news-meta">
         <span className="wm-trade-dot" />
-        <b>{item.badge}</b>
-        <em>{item.source}</em>
+        <b>{item.source}</b>
         <i className={`wm-trade-tag ${toneClass(item.tone)}`}>{item.badge}</i>
       </div>
 
