@@ -14,12 +14,6 @@ FINANCE_EXTERNAL_NAMESPACE = "runtime:finance:external-sources"
 FINANCE_EXTERNAL_CACHE_KEY = "v1"
 FINANCE_EXTERNAL_TTL_SECONDS = 15 * 60
 
-HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
-OKX_MARKET_TICKER_URL = "https://www.okx.com/api/v5/market/ticker"
-YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-DEFILLAMA_STABLECOINS_URL = "https://stablecoins.llama.fi/stablecoins"
-CFTC_LEGACY_COT_URL = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
-
 ETF_FLOW_SYMBOLS: Tuple[Tuple[str, str], ...] = (
     ("IBIT", "iShares Bitcoin Trust"),
     ("FBTC", "Fidelity Wise Origin Bitcoin Fund"),
@@ -92,6 +86,19 @@ def _safe_float(value: Any) -> Optional[float]:
     return number
 
 
+def _setting(ctx: dict, name: str) -> str:
+    settings = ctx.get("SETTINGS")
+    value = getattr(settings, name, "") if settings is not None else ""
+    return str(value or "").strip()
+
+
+def _source_url_from_template(template: str, placeholder: str = "{symbol}") -> str:
+    text = str(template or "").strip()
+    if not text:
+        return ""
+    return text.replace(f"/{placeholder}", "").replace(placeholder, "").rstrip("?&/")
+
+
 def _pct_change(current: Any, previous: Any) -> Optional[float]:
     current_float = _safe_float(current)
     previous_float = _safe_float(previous)
@@ -154,7 +161,7 @@ def _fetch_yahoo_snapshot(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
         return quote
     payload = _http_get(
         ctx,
-        YAHOO_CHART_URL.format(symbol=symbol),
+        _setting(ctx, "finance_yahoo_chart_url_template").format(symbol=symbol),
         params={"range": "5d", "interval": "1d"},
         timeout=12,
     )
@@ -197,7 +204,8 @@ def _source_status(items: Iterable[Any], *, degraded_if_empty: bool = True) -> s
 
 
 def fetch_hyperliquid_perp_source(ctx: dict) -> Dict[str, Any]:
-    payload = _http_post(ctx, HYPERLIQUID_INFO_URL, json_payload={"type": "metaAndAssetCtxs"}, timeout=15)
+    source_url = _setting(ctx, "finance_hyperliquid_info_url")
+    payload = _http_post(ctx, source_url, json_payload={"type": "metaAndAssetCtxs"}, timeout=15)
     if not isinstance(payload, list) or len(payload) < 2:
         return {"status": "degraded", "items": [], "error": "unexpected Hyperliquid response"}
     universe = (payload[0] or {}).get("universe") or []
@@ -226,14 +234,15 @@ def fetch_hyperliquid_perp_source(ctx: dict) -> Dict[str, Any]:
                 "alerts": ["HYPER"],
             }
         )
-    return {"status": _source_status(rows), "items": rows, "sourceUrl": HYPERLIQUID_INFO_URL}
+    return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
 def fetch_okx_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    source_url = _setting(ctx, "finance_okx_market_ticker_url")
     for inst_id, display, asset_class in TRADFI_PERP_SYMBOLS:
         try:
-            payload = _http_get(ctx, OKX_MARKET_TICKER_URL, params={"instId": inst_id}, timeout=12)
+            payload = _http_get(ctx, source_url, params={"instId": inst_id}, timeout=12)
         except Exception:
             payload = None
         data = payload.get("data") if isinstance(payload, dict) else []
@@ -261,7 +270,7 @@ def fetch_okx_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
                 "alerts": ["OKX", "PERP"],
             }
         )
-    return {"status": _source_status(rows), "items": rows, "sourceUrl": OKX_MARKET_TICKER_URL}
+    return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
 def fetch_reference_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
@@ -291,7 +300,11 @@ def fetch_reference_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
                 "alerts": ["REF", "PERP"],
             }
         )
-    return {"status": _source_status(rows), "items": rows, "sourceUrl": "https://query1.finance.yahoo.com/v8/finance/chart"}
+    return {
+        "status": _source_status(rows),
+        "items": rows,
+        "sourceUrl": _source_url_from_template(_setting(ctx, "finance_yahoo_chart_url_template")),
+    }
 
 
 def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
@@ -322,11 +335,11 @@ def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
         "status": _source_status(rows),
         "netFlowProxyUsd": net_flow_proxy,
         "items": sorted(rows, key=lambda item: abs(_safe_float(item.get("flowProxyUsd")) or 0.0), reverse=True),
-        "sourceUrl": "https://query1.finance.yahoo.com/v8/finance/chart",
+        "sourceUrl": _source_url_from_template(_setting(ctx, "finance_yahoo_chart_url_template")),
     }
 
 
-def build_etf_flow_proxy_from_perps(hyperliquid_payload: Dict[str, Any]) -> Dict[str, Any]:
+def build_etf_flow_proxy_from_perps(ctx: dict, hyperliquid_payload: Dict[str, Any]) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for item in hyperliquid_payload.get("items") or []:
         if not isinstance(item, dict):
@@ -352,18 +365,19 @@ def build_etf_flow_proxy_from_perps(hyperliquid_payload: Dict[str, Any]) -> Dict
         "status": "proxy" if rows else "degraded",
         "netFlowProxyUsd": net_flow_proxy,
         "items": rows,
-        "sourceUrl": HYPERLIQUID_INFO_URL,
+        "sourceUrl": _setting(ctx, "finance_hyperliquid_info_url"),
         "note": "Yahoo ETF quotes unavailable; using BTC/ETH perp funding notional as an ETF demand proxy.",
     }
 
 
 def fetch_cot_source(ctx: dict) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    source_url = _setting(ctx, "finance_cftc_legacy_cot_url")
     for symbol, query_term, asset_class in COT_MARKETS:
         try:
             payload = _http_get(
                 ctx,
-                CFTC_LEGACY_COT_URL,
+                source_url,
                 params={
                     "$limit": 1,
                     "$order": "report_date_as_yyyy_mm_dd DESC",
@@ -399,11 +413,12 @@ def fetch_cot_source(ctx: dict) -> Dict[str, Any]:
                 "source": "cftc-cot",
             }
         )
-    return {"status": _source_status(rows), "items": rows, "sourceUrl": CFTC_LEGACY_COT_URL}
+    return {"status": _source_status(rows), "items": rows, "sourceUrl": source_url}
 
 
 def fetch_stablecoin_source(ctx: dict) -> Dict[str, Any]:
-    payload = _http_get(ctx, DEFILLAMA_STABLECOINS_URL, params={"includePrices": "true"}, timeout=15)
+    source_url = _setting(ctx, "finance_defillama_stablecoins_url")
+    payload = _http_get(ctx, source_url, params={"includePrices": "true"}, timeout=15)
     assets = payload.get("peggedAssets") if isinstance(payload, dict) else []
     rows: List[Dict[str, Any]] = []
     seen_symbols = set()
@@ -453,7 +468,7 @@ def fetch_stablecoin_source(ctx: dict) -> Dict[str, Any]:
         "supplyChange7dPct": total_prev_week,
         "stressedCount": stressed,
         "items": rows,
-        "sourceUrl": DEFILLAMA_STABLECOINS_URL,
+        "sourceUrl": source_url,
     }
 
 
@@ -486,12 +501,12 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
     tradfi_perps = {
         "status": _source_status(tradfi_items),
         "items": tradfi_items,
-        "sourceUrl": OKX_MARKET_TICKER_URL,
+        "sourceUrl": _setting(ctx, "finance_okx_market_ticker_url"),
         "sources": {"okx": okx_tradfi.get("status"), "reference": reference_tradfi.get("status")},
     }
     etf_flow = capture("etfFlow", fetch_etf_flow_source)
     if not (etf_flow.get("items") or []):
-        etf_flow = build_etf_flow_proxy_from_perps(hyperliquid)
+        etf_flow = build_etf_flow_proxy_from_perps(ctx, hyperliquid)
         sources["etfFlow"] = str(etf_flow.get("status") or "proxy")
     cot = capture("cot", fetch_cot_source)
     stablecoin = capture("stablecoin", fetch_stablecoin_source)

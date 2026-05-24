@@ -477,6 +477,11 @@ def _is_terminal_price(outcome: Dict[str, Any]) -> bool:
     return price is not None and (price <= 0.01 or price >= 0.99)
 
 
+def _is_flat_mid_price(outcome: Dict[str, Any]) -> bool:
+    price = _to_float(outcome.get("yesPrice"))
+    return price is not None and abs(price - 0.5) <= 0.005
+
+
 def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     groups: Dict[str, Dict[str, Any]] = {}
     for row in rows:
@@ -577,6 +582,7 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         trades = _to_int(group.get("trade_count_24h"))
         live_outcomes = sum(1 for outcome in outcomes if _is_live_price(outcome))
         terminal_outcomes = sum(1 for outcome in outcomes if _is_terminal_price(outcome))
+        flat_mid_outcomes = sum(1 for outcome in outcomes if _is_flat_mid_price(outcome))
         terminal_ratio = terminal_outcomes / max(1, len(outcomes))
         recency_days = max(0.0, (time.time() - (_timestamp(group.get("last_activity_at")) or _timestamp(group.get("created_at")))) / 86400)
         recency_boost = max(0.0, 25.0 - recency_days)
@@ -585,6 +591,8 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         terminal_penalty = terminal_ratio * 150.0
         if live_outcomes == 0 and trades == 0:
             terminal_penalty += 110.0
+        if live_outcomes > 0 and flat_mid_outcomes == live_outcomes and trades == 0:
+            terminal_penalty += 80.0
         active_rank = (
             volume_component
             + min(50.0, trades * 0.5)

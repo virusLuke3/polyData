@@ -34,15 +34,6 @@ FINANCE_WATCH_PANEL_IDS = (
     "blockchain-policy-news",
 )
 
-DEFILLAMA_YIELDS_URL = "https://yields.llama.fi/pools"
-ALTERNATIVE_FNG_URL = "https://api.alternative.me/fng/"
-GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
-YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
-BARCHART_QUOTE_URL = "https://www.barchart.com/stocks/quotes/{symbol}"
-CNN_FNG_URL = "https://production.dataviz.cnn.io/index/fearandgreed/current"
-AAII_SENTIMENT_URL = "https://www.aaii.com/sentimentsurvey/sent_results"
-
 GLOBAL_INDEX_SYMBOLS = (
     ("S&P 500", "^GSPC", "US"),
     ("NASDAQ", "^IXIC", "US"),
@@ -215,6 +206,12 @@ def _strip_html(value: Any) -> str:
     return re.sub(r"\s+", " ", unescape(text)).strip()
 
 
+def _setting(ctx: dict, name: str) -> str:
+    settings = ctx.get("SETTINGS")
+    value = getattr(settings, name, "") if settings is not None else ""
+    return str(value or "").strip()
+
+
 def _tone(value: Any, *, inverted: bool = False) -> str:
     number = _safe_float(value)
     if number is None:
@@ -266,8 +263,9 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12) -> str:
         session.close()
 
 
-def _news_url(query: str) -> str:
-    return f"{GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
+def _news_url(ctx: dict, query: str) -> str:
+    # URL is supplied through POLYDATA_FINANCE_GOOGLE_NEWS_RSS_URL.
+    return f"{_setting(ctx, 'finance_google_news_rss_url')}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
 
 
 def _fetch_yahoo_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
@@ -279,7 +277,7 @@ def _fetch_yahoo_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", rang
         return quote
     payload = _http_json_get(
         ctx,
-        YAHOO_CHART_URL.format(symbol=symbol),
+        _setting(ctx, "finance_yahoo_chart_url_template").format(symbol=symbol),
         params={"range": range_name, "interval": "1d" if range_name != "1d" else "5m"},
         timeout=12,
     )
@@ -317,7 +315,7 @@ def _fetch_yahoo_closes(ctx: dict, symbol: str, *, range_name: str = "1y") -> Di
 
 def _fetch_fred_observations(ctx: dict, series_id: str) -> List[Dict[str, Any]]:
     try:
-        text = _http_text_get(ctx, FRED_CSV_URL.format(series_id=series_id), timeout=10)
+        text = _http_text_get(ctx, _setting(ctx, "finance_fred_csv_url_template").format(series_id=series_id), timeout=10)
     except Exception:
         return []
     rows: List[Dict[str, Any]] = []
@@ -406,7 +404,7 @@ def _score_tone(score: Any) -> str:
 
 def _fetch_barchart_last_price(ctx: dict, symbol: str) -> Optional[float]:
     try:
-        html = _http_text_get(ctx, BARCHART_QUOTE_URL.format(symbol=symbol), timeout=10)
+        html = _http_text_get(ctx, _setting(ctx, "finance_barchart_quote_url_template").format(symbol=symbol), timeout=10)
     except Exception:
         return None
     block_match = re.search(r'<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)</script>', html)
@@ -422,12 +420,12 @@ def _fetch_cnn_fng(ctx: dict) -> Optional[Dict[str, Any]]:
     session.trust_env = True
     try:
         response = session.get(
-            CNN_FNG_URL,
+            _setting(ctx, "finance_cnn_fng_url"),
             timeout=10,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
                 "Accept": "application/json",
-                "Referer": "https://www.cnn.com/markets/fear-and-greed",
+                "Referer": _setting(ctx, "finance_cnn_fng_referer_url"),
             },
         )
         response.raise_for_status()
@@ -443,7 +441,7 @@ def _fetch_cnn_fng(ctx: dict) -> Optional[Dict[str, Any]]:
 
 def _fetch_aaii_sentiment(ctx: dict) -> Optional[Dict[str, float]]:
     try:
-        html = _http_text_get(ctx, AAII_SENTIMENT_URL, timeout=10)
+        html = _http_text_get(ctx, _setting(ctx, "finance_aaii_sentiment_url"), timeout=10)
     except Exception:
         return None
     values = [_safe_float(match.group(1)) for match in re.finditer(r'<td[^>]*class="tableTxt"[^>]*>([\d.]+)%', html)]
@@ -635,7 +633,7 @@ def _broker_priority(action: str, upside: Optional[float], target_change: Option
 
 def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     try:
-        xml_text = _http_text_get(ctx, _news_url(_broker_research_query()), timeout=14)
+        xml_text = _http_text_get(ctx, _news_url(ctx, _broker_research_query()), timeout=14)
     except Exception as exc:
         return _payload("broker-research-watch", title="BROKER RESEARCH", items=[], status="error", sources={"googleNews": "error"}, summary={"error": str(exc)})
     try:
@@ -753,7 +751,7 @@ def _payload(panel_id: str, *, title: str, items: List[Dict[str, Any]], summary:
 
 
 def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    raw = _http_json_get(ctx, DEFILLAMA_YIELDS_URL, timeout=16)
+    raw = _http_json_get(ctx, _setting(ctx, "finance_defillama_yields_url"), timeout=16)
     pools = raw.get("data") if isinstance(raw, dict) else []
     rows: List[Dict[str, Any]] = []
     for pool in pools or []:
@@ -802,7 +800,7 @@ def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
 
 def build_news_payload(ctx: dict, panel_id: str, title: str, limit: int) -> Dict[str, Any]:
     query = NEWS_QUERIES[panel_id]
-    xml_text = _http_text_get(ctx, _news_url(query), timeout=16)
+    xml_text = _http_text_get(ctx, _news_url(ctx, query), timeout=16)
     rows = _parse_rss_items(xml_text, panel_id=panel_id, limit=limit)
     return _payload(panel_id, title=title, items=rows, summary={"query": query}, sources={"googleNewsRss": "ok" if rows else "empty"})
 
@@ -912,7 +910,7 @@ def build_global_indices_payload(ctx: dict, limit: int) -> Dict[str, Any]:
 
 
 def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    raw = _http_json_get(ctx, ALTERNATIVE_FNG_URL, params={"limit": 2, "format": "json"}, timeout=12)
+    raw = _http_json_get(ctx, _setting(ctx, "finance_alternative_fng_url"), params={"limit": 2, "format": "json"}, timeout=12)
     data = (raw.get("data") or []) if isinstance(raw, dict) else []
     item = data[0] if data and isinstance(data[0], dict) else {}
     previous = data[1] if len(data) > 1 and isinstance(data[1], dict) else {}

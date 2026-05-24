@@ -24,6 +24,19 @@ from data_sources import (
     ENERGY_SHOCK_WTI_XLS_URL,
     FOOD_BASKET_FRED_CSV_URL_TEMPLATE,
     FOOD_BASKET_SOURCE_URL,
+    FINANCE_AAII_SENTIMENT_URL,
+    FINANCE_ALTERNATIVE_FNG_URL,
+    FINANCE_BARCHART_QUOTE_URL_TEMPLATE,
+    FINANCE_CFTC_LEGACY_COT_URL,
+    FINANCE_CNN_FNG_URL,
+    FINANCE_CNN_FNG_REFERER_URL,
+    FINANCE_DEFILLAMA_STABLECOINS_URL,
+    FINANCE_DEFILLAMA_YIELDS_URL,
+    FINANCE_FRED_CSV_URL_TEMPLATE,
+    FINANCE_GOOGLE_NEWS_RSS_URL,
+    FINANCE_HYPERLIQUID_INFO_URL,
+    FINANCE_OKX_MARKET_TICKER_URL,
+    FINANCE_YAHOO_CHART_URL_TEMPLATE,
     CRYPTO_FUNDING_WATCH_API_URL,
     CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
     CRYPTO_FUNDING_WATCH_SOURCE_URL,
@@ -141,6 +154,19 @@ class ApiSettings:
     clob_timeout_seconds: int
     clob_price_cache_ttl_seconds: int
     finance_runtime_ttl_seconds: int
+    finance_defillama_yields_url: str
+    finance_alternative_fng_url: str
+    finance_google_news_rss_url: str
+    finance_yahoo_chart_url_template: str
+    finance_fred_csv_url_template: str
+    finance_barchart_quote_url_template: str
+    finance_cnn_fng_url: str
+    finance_cnn_fng_referer_url: str
+    finance_aaii_sentiment_url: str
+    finance_hyperliquid_info_url: str
+    finance_okx_market_ticker_url: str
+    finance_defillama_stablecoins_url: str
+    finance_cftc_legacy_cot_url: str
     sports_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
     grid_open_access_base_url: str
@@ -257,6 +283,28 @@ def load_api_settings() -> ApiSettings:
         clob_timeout_seconds=_get_int("POLYDATA_CLOB_TIMEOUT_SECONDS", 12),
         clob_price_cache_ttl_seconds=_get_int("POLYDATA_CLOB_PRICE_CACHE_TTL_SECONDS", 45),
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
+        finance_defillama_yields_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_YIELDS_URL", FINANCE_DEFILLAMA_YIELDS_URL or "https://yields.llama.fi/pools"),
+        finance_alternative_fng_url=_get_str("POLYDATA_FINANCE_ALTERNATIVE_FNG_URL", FINANCE_ALTERNATIVE_FNG_URL or "https://api.alternative.me/fng/"),
+        finance_google_news_rss_url=_get_str("POLYDATA_FINANCE_GOOGLE_NEWS_RSS_URL", FINANCE_GOOGLE_NEWS_RSS_URL or GOOGLE_NEWS_RSS_URL or "https://news.google.com/rss/search"),
+        finance_yahoo_chart_url_template=_get_str(
+            "POLYDATA_FINANCE_YAHOO_CHART_URL_TEMPLATE",
+            FINANCE_YAHOO_CHART_URL_TEMPLATE or "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+        ),
+        finance_fred_csv_url_template=_get_str(
+            "POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE",
+            FINANCE_FRED_CSV_URL_TEMPLATE or "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+        ),
+        finance_barchart_quote_url_template=_get_str(
+            "POLYDATA_FINANCE_BARCHART_QUOTE_URL_TEMPLATE",
+            FINANCE_BARCHART_QUOTE_URL_TEMPLATE or "https://www.barchart.com/stocks/quotes/{symbol}",
+        ),
+        finance_cnn_fng_url=_get_str("POLYDATA_FINANCE_CNN_FNG_URL", FINANCE_CNN_FNG_URL or "https://production.dataviz.cnn.io/index/fearandgreed/current"),
+        finance_cnn_fng_referer_url=_get_str("POLYDATA_FINANCE_CNN_FNG_REFERER_URL", FINANCE_CNN_FNG_REFERER_URL or "https://www.cnn.com/markets/fear-and-greed"),
+        finance_aaii_sentiment_url=_get_str("POLYDATA_FINANCE_AAII_SENTIMENT_URL", FINANCE_AAII_SENTIMENT_URL or "https://www.aaii.com/sentimentsurvey/sent_results"),
+        finance_hyperliquid_info_url=_get_str("POLYDATA_FINANCE_HYPERLIQUID_INFO_URL", FINANCE_HYPERLIQUID_INFO_URL or "https://api.hyperliquid.xyz/info"),
+        finance_okx_market_ticker_url=_get_str("POLYDATA_FINANCE_OKX_MARKET_TICKER_URL", FINANCE_OKX_MARKET_TICKER_URL or "https://www.okx.com/api/v5/market/ticker"),
+        finance_defillama_stablecoins_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL", FINANCE_DEFILLAMA_STABLECOINS_URL or "https://stablecoins.llama.fi/stablecoins"),
+        finance_cftc_legacy_cot_url=_get_str("POLYDATA_FINANCE_CFTC_LEGACY_COT_URL", FINANCE_CFTC_LEGACY_COT_URL or "https://publicreporting.cftc.gov/resource/6dca-aqww.json"),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
         grid_open_access_base_url=_get_str(
