@@ -154,12 +154,14 @@ def test_ai_model_race_payload_extracts_entity_and_tags():
 
 
 def test_big_tech_market_cap_payload_ranks_by_market_cap():
-    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "big-tech-market-cap", limit=3)
+    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "big-tech-market-cap", limit=16)
 
     assert payload["status"] == "ok"
     assert payload["items"][0]["symbol"] == "NVDA"
     assert payload["items"][0]["metricUnit"] == "MKT CAP"
     assert payload["items"][0]["rank"] == 1
+    assert len(payload["items"]) == 16
+    assert payload["summary"]["tracked"] >= 20
 
 
 def test_big_tech_market_cap_estimates_when_yahoo_omits_cap():

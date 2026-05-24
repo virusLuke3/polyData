@@ -1469,6 +1469,7 @@ export type RuntimeFinanceWatchPayload = {
 };
 
 export type RuntimeTechPanelItem = RuntimeFinanceWatchItem & {
+  category?: string | null;
   rank?: number | string | null;
   marketCap?: number | string | null;
   price?: number | string | null;

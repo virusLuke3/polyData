@@ -6,5 +6,5 @@ export const panel = createTechPanel({
   description: 'Mega-cap tech quote and market-cap rank board.',
   question: 'Ranks major technology companies by current market cap and shows price moves that can drive largest-company markets.',
   mode: 'market-cap',
-  limit: 8,
+  limit: 16,
 });

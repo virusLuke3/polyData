@@ -1306,17 +1306,42 @@
   margin-bottom: 6px;
 }
 
-.wm-tech-watch-strip span {
+.wm-tech-watch-strip button {
   min-width: 0;
+  min-height: 27px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 5px;
   padding: 5px 6px;
   border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
   background: rgba(255, 255, 255, 0.035);
+  color: rgba(235, 235, 235, 0.68);
+  cursor: pointer;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wm-tech-watch-strip button:hover {
+  border-color: rgba(126, 220, 255, 0.28);
+  background: rgba(126, 220, 255, 0.055);
+  color: #e9f8ff;
+}
+
+.wm-tech-watch-strip button.active {
+  border-color: rgba(36, 242, 132, 0.36);
+  background: rgba(36, 242, 132, 0.075);
+  box-shadow: inset 0 -2px 0 rgba(36, 242, 132, 0.44);
+  color: #24f284;
+}
+
+.wm-tech-watch-strip button.active.tone-watch {
+  border-color: rgba(255, 197, 61, 0.48);
+  background: rgba(255, 197, 61, 0.07);
+  box-shadow: inset 0 -2px 0 rgba(255, 197, 61, 0.48);
+  color: #ffc53d;
 }
 
 .wm-tech-watch-strip b,

@@ -46,6 +46,22 @@ BIG_TECH_SYMBOLS = (
     ("Meta", "META", "SOCIAL"),
     ("Tesla", "TSLA", "EV"),
     ("Broadcom", "AVGO", "CHIP"),
+    ("TSMC", "TSM", "CHIP"),
+    ("Oracle", "ORCL", "CLOUD"),
+    ("Netflix", "NFLX", "MEDIA"),
+    ("AMD", "AMD", "CHIP"),
+    ("SAP", "SAP", "SOFTWARE"),
+    ("ASML", "ASML", "CHIP"),
+    ("Salesforce", "CRM", "SAAS"),
+    ("Cisco", "CSCO", "NETWORK"),
+    ("IBM", "IBM", "AI"),
+    ("Qualcomm", "QCOM", "CHIP"),
+    ("Adobe", "ADBE", "SAAS"),
+    ("Palantir", "PLTR", "AI"),
+    ("ServiceNow", "NOW", "SAAS"),
+    ("Shopify", "SHOP", "COMMERCE"),
+    ("Arm", "ARM", "CHIP"),
+    ("Intuit", "INTU", "SOFTWARE"),
 )
 
 # Approximate shares outstanding used only when Yahoo chart metadata omits
@@ -60,6 +76,19 @@ BIG_TECH_SHARES_OUTSTANDING = {
     "META": 2_500_000_000,
     "TSLA": 3_230_000_000,
     "AVGO": 4_680_000_000,
+    "ORCL": 2_830_000_000,
+    "NFLX": 420_000_000,
+    "AMD": 1_620_000_000,
+    "CRM": 960_000_000,
+    "CSCO": 3_980_000_000,
+    "IBM": 930_000_000,
+    "QCOM": 1_090_000_000,
+    "ADBE": 430_000_000,
+    "PLTR": 2_380_000_000,
+    "NOW": 207_000_000,
+    "SHOP": 1_300_000_000,
+    "ARM": 1_050_000_000,
+    "INTU": 280_000_000,
 }
 
 APP_ENTITIES = (

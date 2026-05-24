@@ -45,17 +45,36 @@ function tags(item: RuntimeTechPanelItem) {
   ));
 }
 
-function WatchlistStrip({ payload }: { payload?: RuntimeTechPanelPayload | null }) {
+function WatchlistStrip({
+  activeCategory,
+  onSelectCategory,
+  payload,
+}: {
+  activeCategory?: string | null;
+  onSelectCategory?: (category: string) => void;
+  payload?: RuntimeTechPanelPayload | null;
+}) {
   const watchlist = Array.isArray(payload?.summary?.watchlist) ? payload?.summary?.watchlist as Array<Record<string, unknown>> : [];
   if (!watchlist.length) return null;
   return (
-    <div className="wm-tech-watch-strip">
-      {watchlist.slice(0, 4).map((item) => (
-        <span className={toneClass(item.tone as string)} key={String(item.label || item.symbol)}>
-          <b>{String(item.symbol || item.label || '--')}</b>
-          <em>{Number(item.count || 0)}</em>
-        </span>
-      ))}
+    <div className="wm-tech-watch-strip" role="tablist" aria-label={`${payload?.title || 'Tech'} filters`}>
+      {watchlist.slice(0, 4).map((item) => {
+        const category = String(item.symbol || item.label || '').trim();
+        const active = category === activeCategory;
+        return (
+          <button
+            aria-selected={active}
+            className={`${toneClass(item.tone as string)}${active ? ' active' : ''}`}
+            key={category}
+            onClick={() => onSelectCategory?.(category)}
+            role="tab"
+            type="button"
+          >
+            <b>{String(item.symbol || item.label || '--')}</b>
+            <em>{Number(item.count || 0)}</em>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -133,6 +152,13 @@ function AppPulseRow({ item }: { item: RuntimeTechPanelItem }) {
 
 function TechPanelBody({ payload, mode }: { payload?: RuntimeTechPanelPayload | null; mode: TechPanelMode }) {
   const items = payload?.items || [];
+  const watchlist = Array.isArray(payload?.summary?.watchlist) ? payload?.summary?.watchlist as Array<Record<string, unknown>> : [];
+  const categoryTabs = watchlist.slice(0, 4).map((item) => String(item.symbol || item.label || '').trim()).filter(Boolean);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const safeActiveCategory = categoryTabs.includes(String(activeCategory || '')) ? activeCategory : categoryTabs[0] || null;
+  const visibleItems = safeActiveCategory && mode !== 'market-cap'
+    ? items.filter((item) => String(item.category || item.symbol || '').toUpperCase() === String(safeActiveCategory).toUpperCase())
+    : items;
   if (!items.length) {
     return (
       <div className="wm-tech-empty">
@@ -147,15 +173,15 @@ function TechPanelBody({ payload, mode }: { payload?: RuntimeTechPanelPayload | 
   if (mode === 'app-pulse') {
     return (
       <div className="wm-tech-app-list">
-        <WatchlistStrip payload={payload} />
-        {items.map((item, index) => <AppPulseRow item={item} key={itemKey(item, index)} />)}
+        <WatchlistStrip activeCategory={safeActiveCategory} onSelectCategory={setActiveCategory} payload={payload} />
+        {visibleItems.map((item, index) => <AppPulseRow item={item} key={itemKey(item, index)} />)}
       </div>
     );
   }
   return (
     <div className="wm-tech-feed-list">
-      <WatchlistStrip payload={payload} />
-      {items.map((item, index) => <TechFeedRow item={item} key={itemKey(item, index)} />)}
+      <WatchlistStrip activeCategory={safeActiveCategory} onSelectCategory={setActiveCategory} payload={payload} />
+      {visibleItems.map((item, index) => <TechFeedRow item={item} key={itemKey(item, index)} />)}
     </div>
   );
 }
