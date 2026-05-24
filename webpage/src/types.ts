@@ -1370,6 +1370,13 @@ export type RuntimeFinanceWatchItem = {
   tags?: string[];
   tone?: string | null;
   points?: Array<{ timestamp?: string | null; value?: number | string | null }>;
+  company?: string | null;
+  institution?: string | null;
+  analyst?: string | null;
+  rating?: string | null;
+  targetPriceLabel?: string | null;
+  previousTargetPriceLabel?: string | null;
+  reportPageLabel?: string | null;
 };
 
 export type RuntimeFinanceWatchPayload = {

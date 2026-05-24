@@ -695,6 +695,40 @@
   white-space: nowrap;
 }
 
+.wm-finance-research-fields {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px 6px;
+}
+
+.wm-finance-research-fields span {
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.wm-finance-research-fields b {
+  flex: 0 0 auto;
+  color: rgba(235, 235, 235, 0.38);
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.wm-finance-research-fields em {
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(235, 235, 235, 0.64);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wm-finance-research-metric {
   display: grid;
   align-content: center;
@@ -705,9 +739,12 @@
 }
 
 .wm-finance-research-metric strong {
-  font-size: 13px;
+  max-width: 82px;
+  overflow: hidden;
+  font-size: 11px;
   font-weight: 850;
   line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

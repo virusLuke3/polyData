@@ -206,6 +206,17 @@ def _strip_html(value: Any) -> str:
     return re.sub(r"\s+", " ", unescape(text)).strip()
 
 
+def _field_text(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(part for part in (_field_text(item) for item in value[:4]) if part)
+    if isinstance(value, dict):
+        for key in ("name", "displayName", "analystName", "value", "title", "text", "label"):
+            if value.get(key) not in (None, ""):
+                return _field_text(value.get(key))
+        return ""
+    return _strip_html(value)
+
+
 def _setting(ctx: dict, name: str) -> str:
     settings = ctx.get("SETTINGS")
     value = getattr(settings, name, "") if settings is not None else ""
@@ -574,7 +585,7 @@ def _find_broker_name(text: str, fallback: str) -> str:
 
 def _coalesce_text(*values: Any) -> str:
     for value in values:
-        text = _strip_html(value)
+        text = _field_text(value)
         if text:
             return text
     return ""
@@ -695,6 +706,18 @@ def _symbol_from_text(text: str) -> str:
     return ""
 
 
+def _normalize_security_code(value: Any) -> str:
+    text = re.sub(r"\s+", "", str(value or "")).upper().strip()
+    if not text:
+        return ""
+    match = re.search(r"([A-Z]{0,5}\d{3,6}(?:\.[A-Z]{1,4})?|[A-Z][A-Z0-9.:-]{1,11})", text)
+    if not match:
+        return ""
+    code = match.group(1).strip(".:-")
+    blocked = {"HTTP", "HTTPS", "REPORT", "RESEARCH", "PDF"}
+    return "" if code in blocked else code[:14]
+
+
 def _broker_number(value: Any) -> Optional[float]:
     if isinstance(value, str):
         value = value.replace("$", "").replace(",", "").strip()
@@ -705,6 +728,11 @@ def _dict_value(payload: Dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in payload and payload.get(key) not in (None, ""):
             return payload.get(key)
+    lowered = {str(key).lower(): value for key, value in payload.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if value not in (None, ""):
+            return value
     return None
 
 
@@ -850,20 +878,25 @@ def _broker_research_row(
     published_at: Optional[str],
     quote_cache: Dict[str, Dict[str, Any]],
     explicit_symbol: str = "",
+    explicit_company: str = "",
     explicit_target: Any = None,
     explicit_previous_target: Any = None,
     explicit_action: str = "",
+    explicit_rating: str = "",
+    explicit_analyst: str = "",
 ) -> Optional[Dict[str, Any]]:
     text = f"{title} {summary} {explicit_symbol}"
     match = _find_broker_symbol(text)
     if match:
         symbol, company, theme = match
     else:
-        symbol = _symbol_from_text(f"{explicit_symbol} {title} {summary}")
+        symbol = _normalize_security_code(explicit_symbol) or _symbol_from_text(f"{explicit_symbol} {title} {summary}")
         if not symbol:
             return None
-        company = symbol
+        company = explicit_company or symbol
         theme = "RESEARCH"
+    if explicit_company:
+        company = explicit_company
     title = title or f"{symbol} broker research"
     summary = summary or title
     broker = _find_broker_name(text, source)
@@ -871,25 +904,25 @@ def _broker_research_row(
     target, previous_target = _extract_target_prices(text)
     target = _broker_number(explicit_target) if explicit_target not in (None, "") else target
     previous_target = _broker_number(explicit_previous_target) if explicit_previous_target not in (None, "") else previous_target
-    if symbol not in quote_cache:
-        quote_cache[symbol] = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d") or {}
-    quote = quote_cache.get(symbol) or {}
-    current_price = _safe_float(quote.get("price"))
-    upside = ((target - current_price) / current_price * 100) if target is not None and current_price not in (None, 0) else None
     target_change = ((target - previous_target) / previous_target * 100) if target is not None and previous_target not in (None, 0) else None
-    tags = [action, "REPORT", theme]
+    rating_label = _coalesce_text(explicit_rating, explicit_action, action).upper()
+    if rating_label in {"NOTE", "REPORT"}:
+        rating_label = "REPORT"
+    tags = [rating_label, "REPORT", theme]
     if target_change is not None:
         tags[0] = "PT RAISE" if target_change > 0 else "PT CUT" if target_change < 0 else action
-    tone = "up" if (upside is not None and upside > 0) or action_tone == "up" else "down" if (upside is not None and upside < 0) or action_tone == "down" else "watch" if action_tone == "watch" else "neutral"
-    target_label = f"PT {_format_price(target)}" if target is not None else (_format_price(current_price) if current_price is not None else "--")
-    metric_label = f"{upside:+.1f}%" if upside is not None else target_label
-    summary_bits = [broker, "original report", action.replace("PT ", "target ")]
+    tone = "up" if action_tone == "up" else "down" if action_tone == "down" else "watch" if action_tone == "watch" else "neutral"
+    target_label = f"PT {_format_price(target)}" if target is not None else "PT --"
+    analyst = _coalesce_text(explicit_analyst)
+    summary_bits = [broker, company]
+    if analyst:
+        summary_bits.append(analyst)
+    if rating_label and rating_label != "REPORT":
+        summary_bits.append(rating_label.title())
     if target is not None:
-        summary_bits.append(f"target {target_label}")
+        summary_bits.append(target_label)
     if previous_target is not None:
         summary_bits.append(f"from {_format_price(previous_target)}")
-    if current_price is not None:
-        summary_bits.append(f"spot {_format_price(current_price)}")
     return {
         "id": f"broker-research:{symbol}:{abs(hash(report_url or title))}",
         "label": symbol,
@@ -899,17 +932,24 @@ def _broker_research_row(
         "source": broker,
         "url": report_url,
         "publishedAt": published_at,
-        "metric": upside,
-        "metricLabel": metric_label,
-        "metricUnit": "UPSIDE",
+        "metric": target,
+        "metricLabel": rating_label,
+        "metricUnit": "RATING",
         "secondary": target,
         "secondaryLabel": target_label,
         "change": target_change,
-        "changeLabel": f"{target_change:+.1f}% PT" if target_change is not None else (_format_pct(quote.get("changePercent")) if quote.get("changePercent") is not None else None),
+        "changeLabel": f"{target_change:+.1f}% PT" if target_change is not None else None,
         "tags": tags[:3],
         "tone": tone,
-        "points": quote.get("points") or [],
-        "_priority": _broker_priority(action, upside, target_change, published_at, symbol),
+        "points": [],
+        "company": company,
+        "institution": broker,
+        "analyst": analyst,
+        "rating": rating_label,
+        "targetPriceLabel": target_label,
+        "previousTargetPriceLabel": f"FROM {_format_price(previous_target)}" if previous_target is not None else None,
+        "reportPageLabel": "Read report",
+        "_priority": _broker_priority(action, None, target_change, published_at, symbol),
     }
 
 
@@ -952,6 +992,11 @@ def _candidate_links_for_provider(provider: str, html: str, source_url: str, lim
                 and ("/research" in lower_url or "/content/" in lower_url or "/reports/" in lower_url or ".pdf" in lower_url)
                 and "login" not in lower_url
             )
+        elif provider_key in {"eastmoney", "choice"}:
+            keep = (
+                ("eastmoney.com" in lower_url or "dfcfw.com" in lower_url)
+                and any(word in lower_url or word in lower_label for word in ("report", "research", "yanbao", "研报", "评级", "目标价"))
+            )
         else:
             keep = any(word in lower_url or word in lower_label for word in ("research", "report", "pdf"))
         if keep and url not in seen:
@@ -964,6 +1009,8 @@ def _candidate_links_for_provider(provider: str, html: str, source_url: str, lim
 
 def _open_research_sources(ctx: dict) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
     sources = (
+        ("Eastmoney", _setting(ctx, "finance_broker_research_eastmoney_url"), ("eastmoney.com", "eastmoney.com.cn", "dfcfw.com")),
+        ("Choice", _setting(ctx, "finance_broker_research_choice_url"), ("eastmoney.com", "eastmoney.com.cn", "dfcfw.com")),
         ("Edison", _setting(ctx, "finance_broker_research_edison_url"), ("edisongroup.com",)),
         ("Zacks SCR", _setting(ctx, "finance_broker_research_zacks_url"), ("scr.zacks.com",)),
         ("Water Tower", _setting(ctx, "finance_broker_research_water_tower_url"), ("watertowerresearch.com",)),
@@ -996,12 +1043,13 @@ def _build_broker_rows_from_open_sources(
             candidate_url = candidate["url"]
             detail_html = ""
             report_url = candidate_url
+            keep_detail_page = provider.lower() in {"eastmoney", "choice"}
             if ".pdf" not in candidate_url.lower():
                 try:
                     detail_html = _http_text_get(ctx, candidate_url, timeout=12, headers=_research_headers())
                 except Exception:
                     detail_html = ""
-                pdf_url = _extract_first_pdf_url(detail_html, candidate_url) if detail_html else ""
+                pdf_url = "" if keep_detail_page else (_extract_first_pdf_url(detail_html, candidate_url) if detail_html else "")
                 if pdf_url:
                     report_url = pdf_url
             if not _is_original_research_url(report_url, allowed_domains=allowed_domains) or report_url in seen_urls:
@@ -1055,22 +1103,40 @@ def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[L
                 continue
             for item in _extract_json_research_items(payload):
                 report_url = _coalesce_url(
-                    _dict_value(item, "reportUrl", "originalUrl", "sourceUrl", "pdfUrl", "documentUrl", "researchUrl", "url", "link")
+                    _dict_value(
+                        item,
+                        "reportPageUrl",
+                        "eastmoneyUrl",
+                        "choiceUrl",
+                        "originalUrl",
+                        "sourceUrl",
+                        "pageUrl",
+                        "detailUrl",
+                        "researchUrl",
+                        "url",
+                        "link",
+                        "reportUrl",
+                        "pdfUrl",
+                        "documentUrl",
+                    )
                 )
                 if not _is_original_research_url(report_url) or report_url in seen_urls:
                     continue
                 row = _broker_research_row(
                     ctx,
-                    title=_coalesce_text(_dict_value(item, "title", "headline", "reportTitle", "name")),
+                    title=_coalesce_text(_dict_value(item, "title", "headline", "reportTitle", "reportName", "researchTitle", "name")),
                     summary=_coalesce_text(_dict_value(item, "summary", "abstract", "description", "body")),
                     report_url=report_url,
-                    source=_coalesce_text(_dict_value(item, "broker", "brokerName", "firm", "source", "publisher", "provider")),
-                    published_at=_published_iso(_dict_value(item, "publishedAt", "published", "date", "createdAt", "time")),
+                    source=_coalesce_text(_dict_value(item, "institution", "researchInstitution", "orgName", "orgSName", "broker", "brokerName", "firm", "source", "publisher", "provider")),
+                    published_at=_published_iso(_dict_value(item, "publishedAt", "published", "publishDate", "publishTime", "reportDate", "noticeDate", "date", "createdAt", "time")),
                     quote_cache=quote_cache,
-                    explicit_symbol=_coalesce_text(_dict_value(item, "symbol", "ticker", "ric")),
+                    explicit_symbol=_coalesce_text(_dict_value(item, "symbol", "ticker", "ric", "securityCode", "secuCode", "stockCode", "code")),
+                    explicit_company=_coalesce_text(_dict_value(item, "company", "companyName", "securityName", "stockName", "secuName")),
                     explicit_target=_dict_value(item, "targetPrice", "priceTarget", "pt"),
                     explicit_previous_target=_dict_value(item, "previousTargetPrice", "previousPriceTarget", "previousPt"),
                     explicit_action=_coalesce_text(_dict_value(item, "action", "ratingAction", "recommendation", "rating")),
+                    explicit_rating=_coalesce_text(_dict_value(item, "rating", "ratingName", "investmentRating", "recommendation")),
+                    explicit_analyst=_coalesce_text(_dict_value(item, "analyst", "analystName", "analysts", "author", "researcher", "researchAuthors")),
                 )
                 if row:
                     rows.append(row)
@@ -1222,7 +1288,10 @@ def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         title="BROKER RESEARCH",
         items=[],
         status="empty",
-        summary={"reason": "No original broker research feed configured", "requiredEnv": "POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS"},
+        summary={
+            "reason": "No original broker research metadata source produced rows",
+            "requiredEnv": "POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS or POLYDATA_FINANCE_BROKER_RESEARCH_EASTMONEY_URL / POLYDATA_FINANCE_BROKER_RESEARCH_CHOICE_URL",
+        },
         sources=sources or {"brokerResearchFeeds": "missing"},
     )
 

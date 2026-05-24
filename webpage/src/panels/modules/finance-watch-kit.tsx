@@ -50,6 +50,10 @@ function itemSignature(item: RuntimeFinanceWatchItem) {
     item.changeLabel,
     item.publishedAt,
     item.summary,
+    item.institution,
+    item.analyst,
+    item.rating,
+    item.targetPriceLabel,
   ].map((value) => String(value ?? '')).join('::');
 }
 
@@ -115,25 +119,41 @@ function FeedRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh
 }
 
 function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
+  const fields = [
+    { label: 'CODE', value: item.label },
+    { label: 'RATING', value: item.rating || item.metricLabel },
+    { label: 'TARGET', value: item.targetPriceLabel || item.secondaryLabel },
+    { label: 'FIRM', value: item.institution || item.source },
+    { label: 'ANALYST', value: item.analyst },
+    { label: 'TIME', value: formatRelative(item.publishedAt || undefined) },
+  ].filter((field) => field.value);
   const content = (
     <>
       <div className="wm-finance-research-main">
         <div className="wm-finance-feed-meta">
           <span className="wm-finance-dot" />
           <b>{item.label || 'TICKER'}</b>
-          <span>{item.source || item.symbol || 'BROKER'}</span>
+          <span>{item.institution || item.source || item.symbol || 'BROKER'}</span>
           <FinanceTags tags={item.tags} />
         </div>
         <strong>{item.title || item.summary || 'Research note pending'}</strong>
-        <em>{item.summary || item.symbol || 'Analyst note pending'}</em>
+        <div className="wm-finance-research-fields">
+          {fields.slice(0, 6).map((field) => (
+            <span key={field.label}>
+              <b>{field.label}</b>
+              <em>{field.value}</em>
+            </span>
+          ))}
+        </div>
+        <em>{item.summary || item.company || 'Original research metadata pending'}</em>
         <div className="wm-finance-feed-foot">
           <span>{formatRelative(item.publishedAt || undefined)}</span>
-          {item.url ? <b>Read report</b> : null}
+          {item.url ? <b>{item.reportPageLabel || 'Read report'}</b> : null}
         </div>
       </div>
       <div className="wm-finance-research-metric">
-        <strong className={toneClass(item.tone)}>{item.metricLabel || '--'}</strong>
-        <span>{item.secondaryLabel || item.metricUnit || 'UPSIDE'}</span>
+        <strong className={toneClass(item.tone)}>{item.rating || item.metricLabel || 'REPORT'}</strong>
+        <span>{item.targetPriceLabel || item.secondaryLabel || item.metricUnit || 'PT --'}</span>
         {item.changeLabel ? <em className={toneClass(item.tone)}>{item.changeLabel}</em> : null}
       </div>
     </>
