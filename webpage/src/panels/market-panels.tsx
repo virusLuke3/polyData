@@ -118,32 +118,6 @@ function groupAccent(group: MarketGroupItem) {
   return '#22c55e';
 }
 
-function diversifyByTopic<T>(items: T[], topicOf: (item: T) => string) {
-  const buckets = new Map<string, T[]>();
-  items.forEach((item) => {
-    const topic = topicOf(item) || 'market';
-    const bucket = buckets.get(topic) || [];
-    bucket.push(item);
-    buckets.set(topic, bucket);
-  });
-  const topics = Array.from(buckets.keys()).sort((a, b) => {
-    const sizeDelta = (buckets.get(b)?.length || 0) - (buckets.get(a)?.length || 0);
-    return sizeDelta || a.localeCompare(b);
-  });
-  const diversified: T[] = [];
-  while (diversified.length < items.length && topics.length) {
-    for (const topic of topics) {
-      const next = buckets.get(topic)?.shift();
-      if (next) diversified.push(next);
-    }
-    for (let index = topics.length - 1; index >= 0; index -= 1) {
-      const topic = topics[index];
-      if (!topic || !(buckets.get(topic) || []).length) topics.splice(index, 1);
-    }
-  }
-  return diversified;
-}
-
 function defaultGroupMarketId(group: MarketGroupItem) {
   if (group.defaultMarketId) return group.defaultMarketId;
   const topWithMarket = (group.topOutcomes || []).find((outcome) => outcome.marketId);
@@ -216,6 +190,73 @@ function groupDisplayTradeCount(group: MarketGroupItem) {
     group.tradeCount24h,
     sumFiniteValues((group.outcomes || []).map((outcome) => outcome.tradeCount24h)),
     sumFiniteValues((group.topOutcomes || []).map((outcome) => outcome.tradeCount24h)),
+  );
+}
+
+function groupBestLivePrice(group: MarketGroupItem) {
+  const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
+    .map((outcome) => Number(outcome.yesPrice))
+    .filter((value) => Number.isFinite(value));
+  if (!candidates.length) return null;
+  return candidates
+    .slice()
+    .sort((left, right) => Math.abs(left - 0.5) - Math.abs(right - 0.5))[0] ?? null;
+}
+
+function groupHasToken(group: MarketGroupItem) {
+  return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => outcome.yesTokenId || outcome.noTokenId);
+}
+
+function groupIsExpired(group: MarketGroupItem) {
+  const endAt = parseTimestamp(group.endDate);
+  return Boolean(endAt && endAt < Date.now());
+}
+
+function activeGroupScore(group: MarketGroupItem) {
+  const now = Date.now();
+  const createdAt = parseTimestamp(group.createdAt);
+  const endAt = parseTimestamp(group.endDate);
+  const lastActivity = Math.max(
+    parseTimestamp((group as MarketGroupItem & { lastActivityAt?: string | null }).lastActivityAt),
+    ...[...(group.outcomes || []), ...(group.topOutcomes || [])].map((outcome) => parseTimestamp(outcome.lastTradeAt)),
+    createdAt,
+  );
+  const volume = Number(groupDisplayVolume(group) || 0);
+  const trades = Number(groupDisplayTradeCount(group) || 0);
+  const bestPrice = groupBestLivePrice(group);
+  const priceBalance = bestPrice == null ? 0.28 : Math.max(0, 1 - Math.abs(bestPrice - 0.5) / 0.5);
+  const recencyHours = lastActivity ? Math.max(0, (now - lastActivity) / 36e5) : 999;
+  const closesSoonHours = endAt ? Math.max(0, (endAt - now) / 36e5) : 72;
+  const liveWindow = endAt && endAt < now ? -100000 : 0;
+  const tokenBonus = groupHasToken(group) ? 12 : 0;
+  const outcomePenalty = Number(group.outcomeCount || 0) <= 1 ? 8 : 0;
+  return (
+    liveWindow
+    + Math.log10(Math.max(volume, 0) + 1) * 18
+    + Math.log10(Math.max(trades, 0) + 1) * 10
+    + priceBalance * 28
+    + Math.max(0, 24 - recencyHours) * 1.6
+    + Math.max(0, 72 - closesSoonHours) * 0.08
+    + tokenBonus
+    - outcomePenalty
+  );
+}
+
+function activeMarketScore(market: MarketListItem) {
+  const now = Date.now();
+  const createdAt = parseTimestamp(market.createdAt);
+  const lastActivity = Math.max(parseTimestamp(market.lastTradeAt), createdAt);
+  const endAt = parseTimestamp(market.endDate);
+  const price = Number(market.latestPrice);
+  const priceBalance = Number.isFinite(price) ? Math.max(0, 1 - Math.abs(price - 0.5) / 0.5) : 0.25;
+  const recencyHours = lastActivity ? Math.max(0, (now - lastActivity) / 36e5) : 999;
+  const liveWindow = endAt && endAt < now ? -100000 : 0;
+  return (
+    liveWindow
+    + Math.log10(Number(market.volume24h || 0) + 1) * 18
+    + Math.log10(Number(market.tradeCount24h || 0) + 1) * 10
+    + priceBalance * 28
+    + Math.max(0, 24 - recencyHours) * 1.6
   );
 }
 
@@ -372,7 +413,9 @@ function ActiveMarketsPanel({
     if (marketGroupSort === 'volume') {
       return filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
     }
-    return query ? filtered : diversifyByTopic(filtered, groupTopic);
+    return filtered
+      .filter((group) => query || !groupIsExpired(group))
+      .sort((a, b) => activeGroupScore(b) - activeGroupScore(a));
   }, [marketGroupSort, marketGroups, search]);
 
   const visibleMarkets = useMemo(() => {
@@ -392,9 +435,15 @@ function ActiveMarketsPanel({
           return haystack.includes(query);
         })
       : markets.filter((market) => !isDefaultSuppressedMarket(market));
-    const ranked = filtered.sort((a, b) => Number(b.volume24h || 0) - Number(a.volume24h || 0));
-    return query ? ranked : diversifyByTopic(ranked, marketTopic);
-  }, [markets, search]);
+    const ranked = filtered.sort((a, b) => (
+      marketGroupSort === 'new'
+        ? parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt)
+        : marketGroupSort === 'volume'
+          ? Number(b.volume24h || 0) - Number(a.volume24h || 0)
+          : activeMarketScore(b) - activeMarketScore(a)
+    ));
+    return query ? ranked : ranked;
+  }, [marketGroupSort, markets, search]);
 
   const hasGroups = marketGroups.length > 0;
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;

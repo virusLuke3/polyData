@@ -737,6 +737,8 @@ def _serving_market_groups_payload(
     if sort == "active":
         where.append("is_trading_closed = FALSE")
         where.append("completion_status NOT IN ('SETTLED', 'CANCELLED', 'CLOSED_UNRESOLVED')")
+        where.append("(end_date IS NULL OR end_date >= ?)")
+        params.append(ctx["utc_now_iso"]())
     if query:
         like = f"%{query}%"
         where.append("(title ILIKE ? OR COALESCE(event_slug, '') ILIKE ? OR COALESCE(category, '') ILIKE ? OR tags::text ILIKE ?)")
@@ -842,7 +844,7 @@ def get_market_groups_payload(
         sort = "active"
     query = str(query or "").strip()
 
-    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 9}, sort_keys=True)
+    cache_key = json.dumps({"q": query, "page": page, "pageSize": page_size, "sort": sort, "v": 10}, sort_keys=True)
 
     def _builder() -> Dict[str, Any]:
         serving_payload = _serving_market_groups_payload(ctx, query=query, page=page, page_size=page_size, sort=sort)

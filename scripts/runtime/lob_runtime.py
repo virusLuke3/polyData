@@ -149,6 +149,16 @@ class LOBRuntimeManager:
             params={"token_id": token_id},
             timeout=self.timeout_seconds,
         )
+        if response.status_code == 404:
+            return TokenBookSnapshot(
+                token_id=str(token_id),
+                best_bid=None,
+                best_ask=None,
+                spread=None,
+                bids=[],
+                asks=[],
+                updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            )
         response.raise_for_status()
         payload = response.json() if response.content else {}
         bids = _normalize_levels(payload.get("bids"), "bid", self.depth_limit)

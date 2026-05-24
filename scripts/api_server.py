@@ -124,7 +124,10 @@ TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
 TRADE_STATS_SOURCE = sql_identifier(get_trade_stats_source())
 ADDRESS_HISTORY_SOURCE = sql_identifier(get_address_history_source())
 CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
-LOB_RUNTIME_MANAGER = LOBRuntimeManager(api_base=SETTINGS.clob_api_base)
+LOB_RUNTIME_MANAGER = LOBRuntimeManager(
+    api_base=SETTINGS.clob_api_base,
+    timeout_seconds=min(max(1, SETTINGS.clob_timeout_seconds), 3),
+)
 SNAPSHOT_STORE = SnapshotStore(SNAPSHOT_SQLITE_PATH)
 _runtime_init_lock = threading.Lock()
 _runtime_initialized = False

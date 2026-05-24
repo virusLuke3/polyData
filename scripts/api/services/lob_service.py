@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict
 from datetime import datetime, timezone
+from typing import Any, Dict
+
+try:
+    from requests import RequestException
+except Exception:  # pragma: no cover - requests is an API dependency in normal runtime.
+    RequestException = Exception
 
 
 def _empty_book_side() -> Dict[str, Any]:
@@ -72,6 +77,20 @@ def _clob_book_fallback(ctx: dict, market: Dict[str, Any], yes_token_id: str, no
     return payload
 
 
+def _unavailable_lob_payload(market: Dict[str, Any], detail: str = "") -> Dict[str, Any]:
+    return {
+        "marketId": market.get("id"),
+        "localMarketId": market.get("id"),
+        "marketTitle": str(market.get("title") or ""),
+        "fetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source": "clob-book",
+        "bookStatus": "unavailable",
+        "detail": detail[:220],
+        "yes": _empty_book_side(),
+        "no": _empty_book_side(),
+    }
+
+
 def get_runtime_lob_by_token_payload(
     ctx: dict,
     token_id: str,
@@ -133,6 +152,8 @@ def get_runtime_lob_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         return runtime_payload if isinstance(runtime_payload, dict) else fallback_payload
     except Exception as exc:
         ctx["app"].logger.warning("lob-runtime failed market_id=%s; falling back to CLOB /book: %s", market_id, exc)
+        if isinstance(exc, RequestException):
+            return _unavailable_lob_payload(market, str(exc))
         try:
             return _clob_book_fallback(ctx, market, yes_token_id, no_token_id)
         except Exception as fallback_exc:

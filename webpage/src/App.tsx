@@ -1314,7 +1314,7 @@ export function App() {
   }, [selectedMarketGroupChartRange, selectedMarketGroupId]);
 
   useEffect(() => {
-    if (!selectedMarketId || selectedMarketGroupId) return;
+    if (!selectedMarketId) return;
     let cancelled = false;
     const currentMarketId = selectedMarketId;
     const chartRange = selectedMarketGroupChartRange;
@@ -1334,7 +1334,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedMarketGroupChartRange, selectedMarketGroupId, selectedMarketId]);
+  }, [selectedMarketGroupChartRange, selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketId) return;

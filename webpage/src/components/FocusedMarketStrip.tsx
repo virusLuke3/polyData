@@ -705,6 +705,18 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     };
   }, [detail?.title, selectedNoTokenId, selectedOutcome?.label, selectedTokenId, selectedTokenKey]);
 
+  useEffect(() => {
+    setBookSide('yes');
+  }, [ctx.selectedMarketId, activeOutcomeKey]);
+
+  useEffect(() => {
+    if (!lob) return;
+    const yesHasLevels = hasSideBookLevels(lob.yes);
+    const noHasLevels = hasSideBookLevels(lob.no);
+    if (bookSide === 'yes' && !yesHasLevels && noHasLevels) setBookSide('no');
+    if (bookSide === 'no' && !noHasLevels && yesHasLevels) setBookSide('yes');
+  }, [bookSide, lob]);
+
   return (
     <section className="wm-focus-strip">
       {wrapPanel('price-chart', 'wm-focus-panel-slot wm-focus-detail-slot', (

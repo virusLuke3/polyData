@@ -1129,6 +1129,16 @@ body {
   flex-direction: column;
 }
 
+.wm-focus-detail-panel .wm-panel-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wm-focus-detail-panel .wm-focus-detail {
+  flex: 0 0 auto;
+  min-height: min-content;
+}
+
 .wm-focus-book-panel .wm-panel-body {
   overflow: hidden;
 }
@@ -1461,7 +1471,7 @@ body {
 
 .wm-focus-chart-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(126, 220, 255, 0.13);
   background:
     radial-gradient(circle at 74% 14%, rgba(57, 255, 115, 0.055), transparent 28%),
