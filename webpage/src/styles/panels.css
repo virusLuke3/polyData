@@ -943,9 +943,9 @@
 
 .wm-finance-etf-head,
 .wm-finance-etf-row {
-  min-width: 650px;
+  min-width: 760px;
   display: grid;
-  grid-template-columns: 0.7fr 2.2fr 1fr 0.8fr 0.7fr;
+  grid-template-columns: 0.65fr 2.8fr 0.9fr 0.75fr 0.65fr;
   gap: 6px;
   align-items: center;
 }
@@ -959,7 +959,7 @@
 }
 
 .wm-finance-etf-row {
-  min-height: 31px;
+  min-height: 38px;
   border-top: 1px solid rgba(255, 255, 255, 0.075);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -986,7 +986,10 @@
 }
 
 .wm-finance-etf-row span:nth-child(2) {
+  overflow: visible;
+  text-overflow: clip;
   white-space: normal;
+  line-height: 1.15;
 }
 
 .wm-finance-etf-row em {
@@ -1006,6 +1009,11 @@
 
 .wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-value {
   grid-template-columns: minmax(190px, auto) minmax(55px, auto);
+}
+
+.wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-value strong {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .wm-finance-empty {

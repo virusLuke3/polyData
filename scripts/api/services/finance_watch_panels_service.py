@@ -749,19 +749,37 @@ def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     label = _score_label(score).upper()
     regime = _fear_greed_regime(score)
     drivers = []
-    for symbol in ("BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"):
-        quote = _fetch_yahoo_snapshot(ctx, symbol, interval="5m", range_name="1d")
+    crypto_drivers = (
+        ("BTC", "BTC-USD", "MOMENTUM", False),
+        ("ETH", "ETH-USD", "MOMENTUM", False),
+        ("SOL", "SOL-USD", "MOMENTUM", False),
+        ("BNB", "BNB-USD", "MOMENTUM", False),
+    )
+    macro_drivers = (
+        ("SPX", "^GSPC", "TREND", False),
+        ("VIX", "^VIX", "VOL", True),
+        ("HYG", "HYG", "CREDIT", False),
+        ("TLT", "TLT", "RATES", True),
+        ("GLD", "GLD", "HAVEN", True),
+        ("DXY", "DX-Y.NYB", "USD", True),
+        ("RSP", "RSP", "BREADTH", False),
+        ("SPY", "SPY", "EQUITY", False),
+    )
+    for label_name, symbol, tag, inverted in crypto_drivers + macro_drivers:
+        quote = yahoo.get(symbol) if symbol in yahoo else _fetch_yahoo_snapshot(ctx, symbol, interval="5m", range_name="1d")
         if isinstance(quote, dict):
+            change = _safe_float(quote.get("changePercent"))
+            tone_value = _tone((-change if inverted and change is not None else change))
             drivers.append(
                 {
                     "id": symbol,
-                    "label": symbol.replace("-USD", ""),
-                    "symbol": "MOM",
+                    "label": label_name,
+                    "symbol": tag,
                     "metricLabel": _format_price(quote.get("price")),
-                    "change": quote.get("changePercent"),
-                    "changeLabel": _format_pct(quote.get("changePercent")),
-                    "tags": ["MOMENTUM"],
-                    "tone": _tone(quote.get("changePercent")),
+                    "change": change,
+                    "changeLabel": _format_pct(change),
+                    "tags": [tag],
+                    "tone": tone_value,
                 }
             )
     header_metrics = [
@@ -835,7 +853,7 @@ def build_stablecoin_payload(ctx: dict, limit: int, external: Dict[str, Any]) ->
                 "metricLabel": f"{_format_price(item.get('price'), digits=4)}  SUPPLY {_format_usd(item.get('supplyUsd'))}",
                 "metricUnit": "PEG",
                 "secondary": item.get("supplyUsd"),
-                "secondaryLabel": _format_usd(item.get("supplyUsd")),
+                "secondaryLabel": None,
                 "change": change,
                 "changeLabel": _format_pct(change),
                 "tags": ["WATCH"] if abs(deviation or 0.0) >= 20 else [],

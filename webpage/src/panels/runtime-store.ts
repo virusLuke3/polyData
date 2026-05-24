@@ -34,7 +34,7 @@ const PANEL_RUNTIME_LIMITS: Record<string, number> = {
   'sports-odds': 8,
   'stablecoin-monitor': 8,
   'suspicious-flow': 12,
-  'tradfi-perp-radar': 10,
+  'tradfi-perp-radar': 16,
   'weather-news': 24,
   'whale-tracker': 14,
 };
