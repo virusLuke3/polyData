@@ -1460,10 +1460,28 @@ body {
 }
 
 .wm-focus-chart-card {
-  border: 1px solid rgba(224, 229, 236, 0.98);
-  background: #fff;
-  color: #111827;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(126, 220, 255, 0.13);
+  background:
+    radial-gradient(circle at 74% 14%, rgba(57, 255, 115, 0.055), transparent 28%),
+    linear-gradient(180deg, rgba(18, 19, 19, 0.96), rgba(9, 11, 11, 0.985));
+  color: #e8eeee;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    inset 0 0 28px rgba(78, 142, 255, 0.025),
+    0 12px 30px rgba(0, 0, 0, 0.24);
+}
+
+.wm-focus-chart-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(126, 220, 255, 0.05), transparent 18%, transparent 82%, rgba(57, 255, 115, 0.035)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0, rgba(255, 255, 255, 0.018) 1px, transparent 1px, transparent 32px);
+  opacity: 0.62;
 }
 
 .wm-focus-chart-topline {
@@ -1472,6 +1490,8 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 12px 0;
+  position: relative;
+  z-index: 2;
 }
 
 .wm-focus-chart-tabs {
@@ -1493,31 +1513,32 @@ body {
   appearance: none;
   min-width: 44px;
   padding: 7px 11px;
-  border: 1px solid #eef1f5;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 999px;
-  background: #f5f6f8;
-  color: #667085;
+  background: rgba(255, 255, 255, 0.045);
+  color: #9aa4aa;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
 .wm-focus-chart-tabs button.active {
-  border-color: #111827;
-  background: #111827;
-  color: #fff;
+  border-color: rgba(57, 255, 115, 0.42);
+  background: rgba(57, 255, 115, 0.13);
+  color: #e9fff0;
+  box-shadow: inset 0 0 0 1px rgba(57, 255, 115, 0.07);
 }
 
 .wm-focus-chart-tabs button.ghost {
   min-width: auto;
-  background: #f5f6f8;
-  color: #111827;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d8dedc;
 }
 
 .wm-focus-chart-tabs i {
   margin-left: 6px;
   padding-left: 8px;
-  border-left: 1px solid #e5e7eb;
-  color: #667085;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  color: #8f989d;
 }
 
 .wm-focus-chart-summary {
@@ -1527,18 +1548,20 @@ body {
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: #667085;
+  color: #8f989d;
 }
 
 .wm-focus-chart-summary strong {
-  color: #111827;
+  color: #f2f5f4;
 }
 
 .wm-focus-event-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 18px;
-  padding: 16px 14px 2px;
+  gap: 7px;
+  padding: 13px 14px 2px;
+  position: relative;
+  z-index: 2;
 }
 
 .wm-focus-event-legend-item {
@@ -1547,18 +1570,22 @@ body {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #667085;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid rgba(126, 220, 255, 0.11);
+  background: rgba(13, 17, 17, 0.82);
+  color: #aeb7b6;
   cursor: pointer;
-  font-family: var(--font-sans);
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   line-height: 1.15;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.018);
 }
 
 .wm-focus-event-legend-item.active {
-  color: #111827;
+  border-color: rgba(57, 255, 115, 0.3);
+  background: rgba(57, 255, 115, 0.08);
+  color: #effff3;
 }
 
 .wm-focus-event-legend-dot {
@@ -1569,20 +1596,20 @@ body {
 }
 
 .wm-focus-event-legend-label {
-  max-width: 190px;
+  max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .wm-focus-event-legend-item strong {
-  color: #111827;
+  color: #f2f5f4;
   font-weight: 900;
 }
 
 .wm-focus-event-legend-item em {
   font-style: normal;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .wm-focus-event-legend-item em.up {
@@ -1595,24 +1622,32 @@ body {
 
 .wm-focus-chart-wrap {
   min-height: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .wm-focus-chart-shell {
   position: relative;
   min-height: 0;
+  border: 1px solid rgba(126, 220, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(12, 15, 15, 0.9), rgba(8, 9, 9, 0.94)),
+    radial-gradient(circle at 70% 45%, rgba(57, 255, 115, 0.04), transparent 38%);
 }
 
 .wm-focus-chart-svg {
   display: block;
   width: 100%;
   height: 276px;
-  background: #fff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 18%),
+    linear-gradient(90deg, rgba(126, 220, 255, 0.018), transparent 28%, transparent 72%, rgba(57, 255, 115, 0.018));
 }
 
 .wm-focus-chart-grid {
-  stroke: #d4dbe6;
+  stroke: rgba(180, 198, 205, 0.18);
   stroke-width: 1;
-  stroke-dasharray: 1 4;
+  stroke-dasharray: 2 7;
 }
 
 .wm-focus-chart-grid.v {
@@ -1620,16 +1655,16 @@ body {
 }
 
 .wm-focus-chart-axis-text {
-  fill: #667085;
-  font-family: var(--font-sans);
-  font-size: 11px;
+  fill: #899298;
+  font-family: var(--font-mono);
+  font-size: 10px;
   font-weight: 700;
 }
 
 .wm-focus-chart-time-text {
-  fill: #c2c8d1;
-  font-family: var(--font-sans);
-  font-size: 10px;
+  fill: #687276;
+  font-family: var(--font-mono);
+  font-size: 9px;
   font-weight: 700;
   text-anchor: middle;
 }
@@ -1640,21 +1675,21 @@ body {
   right: 36px;
   font-size: 23px;
   font-weight: 900;
-  color: rgba(132, 143, 158, 0.24);
+  color: rgba(126, 220, 255, 0.06);
   pointer-events: none;
   z-index: 1;
 }
 
 .wm-focus-chart-timeline-line {
-  stroke: #e1e6ee;
+  stroke: rgba(180, 198, 205, 0.18);
   stroke-width: 1;
 }
 
 .wm-focus-chart-timeline-handle {
-  fill: #fff;
-  stroke: #dde3eb;
+  fill: #101515;
+  stroke: rgba(180, 198, 205, 0.25);
   stroke-width: 1;
-  filter: drop-shadow(0 1px 1px rgba(16, 24, 40, 0.08));
+  filter: drop-shadow(0 0 5px rgba(57, 255, 115, 0.12));
 }
 
 .wm-focus-chart-area {
@@ -1670,11 +1705,11 @@ body {
 }
 
 .wm-focus-chart-line.yes {
-  stroke: #4377ff;
+  stroke: #56a0ff;
 }
 
 .wm-focus-chart-line.no {
-  stroke: #7cb6ff;
+  stroke: #7ce6ff;
 }
 
 .wm-focus-chart-line.underlying {
@@ -1691,7 +1726,7 @@ body {
 }
 
 .wm-focus-chart-endpoint {
-  stroke: #fff;
+  stroke: #0c1010;
   stroke-width: 1.7;
 }
 
@@ -1753,6 +1788,8 @@ body {
   gap: 12px;
   min-height: 0;
   padding: 10px 12px 12px;
+  position: relative;
+  z-index: 2;
 }
 
 .wm-focus-detail-grid.compact {
