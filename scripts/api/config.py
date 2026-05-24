@@ -42,6 +42,8 @@ from data_sources import (
     FINANCE_HYPERLIQUID_INFO_URL,
     FINANCE_OKX_MARKET_TICKER_URL,
     FINANCE_YAHOO_CHART_URL_TEMPLATE,
+    TECH_APP_STORE_TOP_FREE_URL,
+    TECH_GOOGLE_NEWS_RSS_URL,
     CRYPTO_FUNDING_WATCH_API_URL,
     CRYPTO_FUNDING_WATCH_BYBIT_API_URL,
     CRYPTO_FUNDING_WATCH_SOURCE_URL,
@@ -179,6 +181,9 @@ class ApiSettings:
     finance_okx_market_ticker_url: str
     finance_defillama_stablecoins_url: str
     finance_cftc_legacy_cot_url: str
+    tech_runtime_ttl_seconds: int
+    tech_google_news_rss_url: str
+    tech_app_store_top_free_url: str
     sports_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
     grid_open_access_base_url: str
@@ -324,6 +329,15 @@ def load_api_settings() -> ApiSettings:
         finance_okx_market_ticker_url=_get_str("POLYDATA_FINANCE_OKX_MARKET_TICKER_URL", FINANCE_OKX_MARKET_TICKER_URL or "https://www.okx.com/api/v5/market/ticker"),
         finance_defillama_stablecoins_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL", FINANCE_DEFILLAMA_STABLECOINS_URL or "https://stablecoins.llama.fi/stablecoins"),
         finance_cftc_legacy_cot_url=_get_str("POLYDATA_FINANCE_CFTC_LEGACY_COT_URL", FINANCE_CFTC_LEGACY_COT_URL or "https://publicreporting.cftc.gov/resource/6dca-aqww.json"),
+        tech_runtime_ttl_seconds=_get_int("POLYDATA_TECH_RUNTIME_TTL_SECONDS", 600),
+        tech_google_news_rss_url=_get_str(
+            "POLYDATA_TECH_GOOGLE_NEWS_RSS_URL",
+            TECH_GOOGLE_NEWS_RSS_URL or GOOGLE_NEWS_RSS_URL or FINANCE_GOOGLE_NEWS_RSS_URL or "https://news.google.com/rss/search",
+        ),
+        tech_app_store_top_free_url=_get_str(
+            "POLYDATA_TECH_APP_STORE_TOP_FREE_URL",
+            TECH_APP_STORE_TOP_FREE_URL or "https://rss.applemarketingtools.com/api/v2/us/apps/top-free/25/apps.json",
+        ),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
         grid_open_access_base_url=_get_str(
@@ -397,7 +411,7 @@ def load_api_settings() -> ApiSettings:
             ),
         ),
         defi_token_watch_ttl_seconds=_get_int("POLYDATA_DEFI_TOKEN_WATCH_TTL_SECONDS", 120),
-        yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", YAHOO_CHART_BASE_URL),
+        yahoo_chart_base_url=_get_str("POLYDATA_YAHOO_CHART_BASE_URL", YAHOO_CHART_BASE_URL or "https://query1.finance.yahoo.com/v8/finance/chart"),
         coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", COINGECKO_BASE_URL),
         espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", ESPN_NBA_BASE_URL),
         espn_core_nba_base_url=_get_str("POLYDATA_ESPN_CORE_NBA_BASE_URL", ESPN_CORE_NBA_BASE_URL),

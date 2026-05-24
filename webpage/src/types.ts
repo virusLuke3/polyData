@@ -1398,6 +1398,23 @@ export type RuntimeFinanceWatchPayload = {
   items?: RuntimeFinanceWatchItem[];
 };
 
+export type RuntimeTechPanelItem = RuntimeFinanceWatchItem & {
+  rank?: number | string | null;
+  marketCap?: number | string | null;
+  price?: number | string | null;
+};
+
+export type RuntimeTechPanelPayload = {
+  generatedAt?: string;
+  status?: string | null;
+  cacheMode?: string | null;
+  panelId?: string | null;
+  title?: string | null;
+  sources?: Record<string, string>;
+  summary?: Record<string, unknown>;
+  items?: RuntimeTechPanelItem[];
+};
+
 export type RuntimeFinanceCoverageKey = 'quote' | 'earn' | 'sec' | 'perp' | 'etf' | 'clob' | 'oracle' | 'flow' | string;
 
 export type RuntimeFinanceLinkedMarket = {

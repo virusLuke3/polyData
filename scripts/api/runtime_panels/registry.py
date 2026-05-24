@@ -4,12 +4,15 @@ from types import ModuleType
 from typing import Dict, Iterable, List, Optional
 
 from .modules import (
+    ai_model_race,
     alpha_signal,
+    big_tech_market_cap,
     crypto_funding_watch,
     crypto_etf_flow,
     crypto_fear_greed,
     crypto_perp_funding,
     commodities_watch,
+    consumer_app_pulse,
     blockchain_policy_news,
     broker_research_watch,
     cpi_components_pressure_registry,
@@ -61,6 +64,9 @@ from .types import RuntimePanelModule
 _MODULES: List[ModuleType] = [
     commodities_watch,
     crypto_watch,
+    ai_model_race,
+    big_tech_market_cap,
+    consumer_app_pulse,
     crypto_funding_watch,
     defi_token_watch,
     defi_yield_monitor,
@@ -148,6 +154,9 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "suspicious-flow",
     "commodities-watch",
     "crypto-watch",
+    "ai-model-race",
+    "big-tech-market-cap",
+    "consumer-app-pulse",
     "crypto-funding-watch",
     "defi-token-watch",
     "defi-yield-monitor",

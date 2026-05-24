@@ -112,6 +112,21 @@ SEED_META_SPECS = [
             "blockchain-policy-news",
         )
     ],
+    *[
+        {
+            "panelId": panel_id,
+            "namespace": "seed-meta:tech",
+            "cacheKey": panel_id,
+            "serviceName": "polydata-tech-panels-seed.service",
+            "intervalEnv": "POLYDATA_TECH_PANELS_INTERVAL_SECONDS",
+            "defaultIntervalSeconds": 600,
+        }
+        for panel_id in (
+            "ai-model-race",
+            "big-tech-market-cap",
+            "consumer-app-pulse",
+        )
+    ],
     {
         "panelId": "finance-external-sources",
         "namespace": "seed-meta:finance",

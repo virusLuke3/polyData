@@ -14,6 +14,9 @@ import { panel as whaleTracker } from './whale-tracker';
 import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
+import { panel as aiModelRace } from './ai-model-race';
+import { panel as bigTechMarketCap } from './big-tech-market-cap';
+import { panel as consumerAppPulse } from './consumer-app-pulse';
 import { panel as cryptoFundingWatch } from './crypto-funding-watch';
 import { panel as defiTokenWatch } from './defi-token-watch';
 import { panel as defiYieldMonitor } from './defi-yield-monitor';
@@ -78,6 +81,9 @@ export const PANEL_MODULES: PanelModule[] = [
   suspiciousFlow,
   commoditiesWatch,
   cryptoWatch,
+  aiModelRace,
+  bigTechMarketCap,
+  consumerAppPulse,
   cryptoFundingWatch,
   defiTokenWatch,
   defiYieldMonitor,

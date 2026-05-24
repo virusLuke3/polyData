@@ -42,6 +42,7 @@ import type {
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
   RuntimeSportsOddsPayload,
+  RuntimeTechPanelPayload,
   RuntimeWeatherNewsPayload,
   SystemHealth,
   TradeRow,
@@ -228,6 +229,10 @@ export function fetchRuntimeDefiTokenWatch(limit = 10) {
 
 export function fetchRuntimeFinanceWatchPanel(panelId: string, limit = 10) {
   return apiGet<RuntimeFinanceWatchPayload>(`/runtime/finance/${panelId}?limit=${limit}`);
+}
+
+export function fetchRuntimeTechPanel(panelId: string, limit = 10) {
+  return apiGet<RuntimeTechPanelPayload>(`/runtime/tech/${panelId}?limit=${limit}`);
 }
 
 export function fetchRuntimeFinanceMarketAtlas(limit = 16) {
