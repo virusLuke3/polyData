@@ -23,6 +23,7 @@ import {
   fetchSystemHealth,
   fetchWorkspaceBundle,
 } from '@/services/api';
+import { buildWorldClockRows, CORE_WORLD_CLOCKS, normalizeTimezone, type WorldClockLocation } from '@/utils/worldClock';
 import type {
   BootstrapPayload,
   ContentItem,
@@ -218,6 +219,7 @@ function WeatherInlineMap({
   selectedCityId,
   onSelectCity,
   onRefresh,
+  now,
 }: {
   payload?: RuntimeGlobalWeatherMapPayload | null;
   loading: boolean;
@@ -225,6 +227,7 @@ function WeatherInlineMap({
   selectedCityId: string | null;
   onSelectCity: (cityId: string) => void;
   onRefresh: () => void;
+  now: Date;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const items = payload?.items || [];
@@ -236,9 +239,28 @@ function WeatherInlineMap({
     onSelectCity(cityId);
     setDetailOpen(true);
   };
+  const selectedTimezone = normalizeTimezone(selected?.timezone);
+  const selectedClock: WorldClockLocation | null = selected && selectedTimezone
+    ? { id: `map-selected-${selected.cityId || selected.city}`, city: String(selected.city || 'Selected'), venue: 'LOCAL', timezone: selectedTimezone, market: 'generic' }
+    : null;
+  const mapClocks = buildWorldClockRows(
+    now,
+    selectedClock && !CORE_WORLD_CLOCKS.some((row) => row.timezone === selectedClock.timezone)
+      ? [selectedClock, ...CORE_WORLD_CLOCKS.slice(0, 3)]
+      : CORE_WORLD_CLOCKS.slice(0, 3),
+  );
   return (
     <div className="wm-inline-weather-map">
       <div className="wm-inline-weather-map-hint">Use the mouse wheel to zoom and drag to pan the map.</div>
+      <div className="wm-inline-weather-clock-strip" aria-label="World clock overlay">
+        {mapClocks.map((clock) => (
+          <span key={clock.id} className={clock.open ? 'open' : ''}>
+            <b>{clock.city}</b>
+            <strong>{clock.time}</strong>
+            <em>{clock.open ? 'OPEN' : 'CLSD'} · {clock.gmtLabel}</em>
+          </span>
+        ))}
+      </div>
       <button type="button" className="wm-inline-weather-map-cache" onClick={onRefresh}>
         {cacheMode}
       </button>
@@ -1793,6 +1815,7 @@ export function App() {
                     selectedCityId={selectedWeatherCityId}
                     onSelectCity={setSelectedWeatherCityId}
                     onRefresh={() => void loadWeatherMap(true)}
+                    now={now}
                   />
                 )}
 

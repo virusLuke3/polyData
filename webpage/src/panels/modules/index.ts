@@ -49,6 +49,7 @@ import { panel as weatherQuoteTable } from './weather-quote-table';
 import { panel as weatherTrendDetail } from './weather-trend-detail';
 import { panel as weatherTrend7d } from './weather-trend-7d';
 import { panel as weatherNews } from './weather-news';
+import { panel as worldClock } from './world-clock';
 import { panel as foodRetailBasketPressure } from './food-retail-basket-pressure';
 import { panel as supplyTariffImportWatch } from './supply-tariff-import-watch';
 import { panel as shelterRentOerPressure } from './shelter-rent-oer-pressure';
@@ -117,6 +118,7 @@ export const PANEL_MODULES: PanelModule[] = [
   weatherTrendDetail,
   weatherTrend7d,
   weatherNews,
+  worldClock,
   foodRetailBasketPressure,
   supplyTariffImportWatch,
   shelterRentOerPressure,
