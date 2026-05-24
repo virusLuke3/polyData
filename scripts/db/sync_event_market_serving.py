@@ -467,6 +467,16 @@ def _default_score(outcome: Dict[str, Any]) -> Tuple[float, float, int]:
     return (score, volume, trades)
 
 
+def _is_live_price(outcome: Dict[str, Any]) -> bool:
+    price = _to_float(outcome.get("yesPrice"))
+    return price is not None and 0.02 < price < 0.98
+
+
+def _is_terminal_price(outcome: Dict[str, Any]) -> bool:
+    price = _to_float(outcome.get("yesPrice"))
+    return price is not None and (price <= 0.01 or price >= 0.99)
+
+
 def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     groups: Dict[str, Dict[str, Any]] = {}
     for row in rows:
@@ -550,11 +560,8 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         outcomes = group["outcomes"]
         if not outcomes:
             continue
-        top_outcomes = sorted(
-            [outcome for outcome in outcomes if _to_float(outcome.get("yesPrice")) is not None],
-            key=lambda outcome: _to_float(outcome.get("yesPrice")) or 0.0,
-            reverse=True,
-        )[:5]
+        priced_outcomes = [outcome for outcome in outcomes if _to_float(outcome.get("yesPrice")) is not None]
+        top_outcomes = sorted(priced_outcomes, key=_default_score, reverse=True)[:5]
         default_outcome = max(outcomes, key=_default_score)
         statuses = set(group.pop("statuses", []))
         closed_flags = group.pop("closed_flags", [])
@@ -568,9 +575,23 @@ def _build_groups(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
             completion_status = "OPEN"
         volume = _to_float(group.get("volume_24h")) or 0.0
         trades = _to_int(group.get("trade_count_24h"))
+        live_outcomes = sum(1 for outcome in outcomes if _is_live_price(outcome))
+        terminal_outcomes = sum(1 for outcome in outcomes if _is_terminal_price(outcome))
+        terminal_ratio = terminal_outcomes / max(1, len(outcomes))
         recency_days = max(0.0, (time.time() - (_timestamp(group.get("last_activity_at")) or _timestamp(group.get("created_at")))) / 86400)
         recency_boost = max(0.0, 25.0 - recency_days)
-        active_rank = (volume ** 0.35 if volume > 0 else 0.0) + min(50.0, trades * 0.5) + recency_boost
+        volume_component = math.log10(max(volume, 0.0) + 1.0) * 16.0
+        live_price_boost = min(58.0, live_outcomes * 12.0)
+        terminal_penalty = terminal_ratio * 150.0
+        if live_outcomes == 0 and trades == 0:
+            terminal_penalty += 110.0
+        active_rank = (
+            volume_component
+            + min(50.0, trades * 0.5)
+            + recency_boost
+            + live_price_boost
+            - terminal_penalty
+        )
         group.update(
             {
                 "outcome_count": len(outcomes),

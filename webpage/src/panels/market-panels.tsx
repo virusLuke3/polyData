@@ -207,6 +207,16 @@ function groupHasToken(group: MarketGroupItem) {
   return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => outcome.yesTokenId || outcome.noTokenId);
 }
 
+function isLiveOutcomePrice(value: string | number | null | undefined) {
+  const price = Number(value);
+  return Number.isFinite(price) && price > 0.02 && price < 0.98;
+}
+
+function isTerminalOutcomePrice(value: string | number | null | undefined) {
+  const price = Number(value);
+  return Number.isFinite(price) && (price <= 0.01 || price >= 0.99);
+}
+
 function groupIsExpired(group: MarketGroupItem) {
   const endAt = parseTimestamp(group.endDate);
   return Boolean(endAt && endAt < Date.now());
@@ -225,19 +235,27 @@ function activeGroupScore(group: MarketGroupItem) {
   const trades = Number(groupDisplayTradeCount(group) || 0);
   const bestPrice = groupBestLivePrice(group);
   const priceBalance = bestPrice == null ? 0.28 : Math.max(0, 1 - Math.abs(bestPrice - 0.5) / 0.5);
+  const outcomePool = uniqueGroupOutcomes([...(group.outcomes || []), ...(group.topOutcomes || [])]);
+  const liveOutcomeCount = outcomePool.filter((outcome) => isLiveOutcomePrice(outcome.yesPrice)).length;
+  const terminalOutcomeCount = outcomePool.filter((outcome) => isTerminalOutcomePrice(outcome.yesPrice)).length;
+  const terminalRatio = terminalOutcomeCount / Math.max(1, outcomePool.length);
   const recencyHours = lastActivity ? Math.max(0, (now - lastActivity) / 36e5) : 999;
   const closesSoonHours = endAt ? Math.max(0, (endAt - now) / 36e5) : 72;
   const liveWindow = endAt && endAt < now ? -100000 : 0;
   const tokenBonus = groupHasToken(group) ? 12 : 0;
+  const livePriceBonus = Math.min(46, liveOutcomeCount * 10);
+  const terminalPenalty = terminalRatio * 120 + (liveOutcomeCount === 0 && trades === 0 ? 90 : 0);
   const outcomePenalty = Number(group.outcomeCount || 0) <= 1 ? 8 : 0;
   return (
     liveWindow
-    + Math.log10(Math.max(volume, 0) + 1) * 18
+    + Math.log10(Math.max(volume, 0) + 1) * 16
     + Math.log10(Math.max(trades, 0) + 1) * 10
     + priceBalance * 28
+    + livePriceBonus
     + Math.max(0, 24 - recencyHours) * 1.6
     + Math.max(0, 72 - closesSoonHours) * 0.08
     + tokenBonus
+    - terminalPenalty
     - outcomePenalty
   );
 }
@@ -249,6 +267,7 @@ function activeMarketScore(market: MarketListItem) {
   const endAt = parseTimestamp(market.endDate);
   const price = Number(market.latestPrice);
   const priceBalance = Number.isFinite(price) ? Math.max(0, 1 - Math.abs(price - 0.5) / 0.5) : 0.25;
+  const terminalPenalty = isTerminalOutcomePrice(market.latestPrice) && Number(market.tradeCount24h || 0) <= 0 ? 55 : 0;
   const recencyHours = lastActivity ? Math.max(0, (now - lastActivity) / 36e5) : 999;
   const liveWindow = endAt && endAt < now ? -100000 : 0;
   return (
@@ -257,6 +276,7 @@ function activeMarketScore(market: MarketListItem) {
     + Math.log10(Number(market.tradeCount24h || 0) + 1) * 10
     + priceBalance * 28
     + Math.max(0, 24 - recencyHours) * 1.6
+    - terminalPenalty
   );
 }
 
