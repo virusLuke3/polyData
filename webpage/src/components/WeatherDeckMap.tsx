@@ -338,7 +338,7 @@ function clampFallbackZoom(value: number) {
 
 function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { points: WeatherMapPoint[]; selectedCityId?: string | null; onSelectCity?: (cityId: string) => void }) {
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
-  const dragRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ pointerId: number; lastX: number; lastY: number; totalDx: number; totalDy: number; moved: boolean } | null>(null);
   const { graticulePath, worldPath, projectedPoints } = useMemo(() => {
     const projection = geoEquirectangular();
     const world = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
@@ -355,9 +355,41 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
     };
   }, [points]);
 
+  const fallbackSvgPoint = (event: PointerEvent) => {
+    const svg = event.currentTarget as SVGSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * FALLBACK_W;
+    const svgY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * FALLBACK_H;
+    return {
+      svgX,
+      svgY,
+      mapX: (svgX - view.x) / view.zoom,
+      mapY: (svgY - view.y) / view.zoom,
+    };
+  };
+
+  const selectPointAt = (event: PointerEvent) => {
+    const { mapX, mapY } = fallbackSvgPoint(event);
+    const hit = [...projectedPoints].reverse().find((point) => {
+      const labelX = point.x + point.labelDx;
+      const labelY = point.y + point.labelDy;
+      const labelW = Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8);
+      const inLabel = shouldShowLabel(point, selectedCityId)
+        && mapX >= labelX - 5
+        && mapX <= labelX + labelW + 5
+        && mapY >= labelY - 16
+        && mapY <= labelY + 16;
+      const pointHitRadius = Math.max(10, 16 / view.zoom);
+      const dx = mapX - point.x;
+      const dy = mapY - point.y;
+      return inLabel || Math.sqrt(dx * dx + dy * dy) <= pointHitRadius;
+    });
+    if (hit) onSelectCity?.(hit.id);
+  };
+
   const handlePointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
+    dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, totalDx: 0, totalDy: 0, moved: false };
     (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
   };
 
@@ -370,7 +402,9 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
     const scaleY = FALLBACK_H / Math.max(1, rect.height);
     const dx = (event.clientX - drag.lastX) * scaleX;
     const dy = (event.clientY - drag.lastY) * scaleY;
-    if (Math.abs(dx) + Math.abs(dy) > 1.5) drag.moved = true;
+    drag.totalDx += dx;
+    drag.totalDy += dy;
+    if (Math.abs(drag.totalDx) + Math.abs(drag.totalDy) > 4) drag.moved = true;
     drag.lastX = event.clientX;
     drag.lastY = event.clientY;
     setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
@@ -381,6 +415,9 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
     if (!drag || drag.pointerId !== event.pointerId) return;
     const svg = event.currentTarget as SVGSVGElement;
     if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+    if (!drag.moved) {
+      selectPointAt(event);
+    }
     window.setTimeout(() => {
       dragRef.current = null;
     }, 0);
@@ -438,19 +475,11 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
                   cx={point.x}
                   cy={point.y}
                   r={selected ? 5 : 4}
-                  onClick={() => {
-                    if (dragRef.current?.moved) return;
-                    onSelectCity?.(point.id);
-                  }}
                 />
                 {showLabel ? (
                   <g
                     className="label-hit"
                     transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}
-                    onClick={() => {
-                      if (dragRef.current?.moved) return;
-                      onSelectCity?.(point.id);
-                    }}
                   >
                     <rect x="-4" y="-13" width={Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8)} height="27" rx="3" />
                     <text x="0" y="-2">{point.city}</text>
