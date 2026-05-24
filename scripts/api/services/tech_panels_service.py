@@ -423,6 +423,8 @@ def _format_token_price(value: Any) -> str:
     number = _safe_float(value)
     if number is None:
         return "--"
+    if number < 0:
+        return "--"
     return "FREE" if number == 0 else f"${number * 1_000_000:.2f}/1M"
 
 
@@ -571,6 +573,8 @@ def _openrouter_price_rows(models: List[Dict[str, Any]], limit: int) -> List[Dic
         prompt = _safe_float(pricing.get("prompt"))
         completion = _safe_float(pricing.get("completion"))
         if prompt is None and completion is None:
+            continue
+        if (prompt is not None and prompt < 0) or (completion is not None and completion < 0):
             continue
         priced_models.append((prompt if prompt is not None else 999, completion if completion is not None else 999, model))
     priced_models.sort(key=lambda item: (item[0], item[1], str(item[2].get("name") or item[2].get("id") or "")))
