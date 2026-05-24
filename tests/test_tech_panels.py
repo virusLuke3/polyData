@@ -104,6 +104,26 @@ def test_big_tech_market_cap_payload_ranks_by_market_cap():
     assert payload["items"][0]["rank"] == 1
 
 
+def test_big_tech_market_cap_estimates_when_yahoo_omits_cap():
+    ctx = _ctx()
+
+    def yahoo_without_cap(symbol, interval="30m", range_name="5d", ttl_seconds=None):
+        return {
+            "symbol": symbol,
+            "price": {"NVDA": 200.0, "AAPL": 100.0}.get(symbol, 10.0),
+            "changePercent": 0.0,
+            "points": [],
+        }
+
+    ctx["get_yahoo_market_snapshot"] = yahoo_without_cap
+    payload = tech_panels_service.build_tech_panel_payload(ctx, "big-tech-market-cap", limit=2)
+
+    assert payload["status"] == "ok"
+    assert payload["items"][0]["symbol"] == "NVDA"
+    assert payload["items"][0]["marketCap"] == 4_860_000_000_000
+    assert payload["items"][0]["marketCapEstimated"] is True
+
+
 def test_consumer_app_pulse_combines_app_store_and_news():
     payload = tech_panels_service.build_tech_panel_payload(_ctx(), "consumer-app-pulse", limit=6)
 

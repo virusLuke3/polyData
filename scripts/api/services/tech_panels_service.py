@@ -44,6 +44,20 @@ BIG_TECH_SYMBOLS = (
     ("Broadcom", "AVGO", "CHIP"),
 )
 
+# Approximate shares outstanding used only when Yahoo chart metadata omits
+# marketCap. This keeps the panel ranked by capitalization instead of falling
+# back to plain price sorting.
+BIG_TECH_SHARES_OUTSTANDING = {
+    "NVDA": 24_300_000_000,
+    "AAPL": 14_800_000_000,
+    "MSFT": 7_430_000_000,
+    "GOOGL": 12_100_000_000,
+    "AMZN": 10_800_000_000,
+    "META": 2_500_000_000,
+    "TSLA": 3_230_000_000,
+    "AVGO": 4_680_000_000,
+}
+
 APP_ENTITIES = (
     ("TikTok", "TIKTOK", ("tiktok",)),
     ("ChatGPT", "CHATGPT", ("chatgpt", "openai")),
@@ -344,6 +358,17 @@ def _fetch_quote(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _market_cap_from_quote(symbol: str, quote: Dict[str, Any]) -> tuple[Optional[float], bool]:
+    market_cap = _safe_float(quote.get("marketCap"))
+    if market_cap is not None:
+        return market_cap, False
+    price = _safe_float(quote.get("price"))
+    shares = BIG_TECH_SHARES_OUTSTANDING.get(symbol)
+    if price is None or not shares:
+        return None, False
+    return price * shares, True
+
+
 def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for label, symbol, group in BIG_TECH_SYMBOLS:
@@ -351,7 +376,7 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         if not isinstance(quote, dict):
             continue
         change = _safe_float(quote.get("changePercent"))
-        market_cap = _safe_float(quote.get("marketCap"))
+        market_cap, estimated_cap = _market_cap_from_quote(symbol, quote)
         rows.append(
             {
                 "id": symbol,
@@ -369,6 +394,7 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 "tone": _tone(change),
                 "points": quote.get("points") or [],
                 "marketCap": market_cap,
+                "marketCapEstimated": estimated_cap,
                 "price": quote.get("price"),
             }
         )
