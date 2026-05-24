@@ -6,5 +6,5 @@ export const panel = createTechPanel({
   description: 'App Store, Google Play, TikTok, and consumer app ranking and regulation signals.',
   question: 'Combines app-store rank rows with consumer-app news to monitor download, rank, ban, lawsuit, and product-update markets.',
   mode: 'app-pulse',
-  limit: 28,
+  limit: 40,
 });

@@ -856,34 +856,26 @@ def _fetch_app_store_rows(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], 
     return rows, ok_sources, style_counts
 
 
-def _interleave_app_rows(rows: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    priority = ("DOWNLOADS", "GAMES", "NEWS", "GROSSING", "PAID", "PRODUCTIVITY", "SOCIAL", "PHOTO", "FINANCE")
-    buckets: Dict[str, List[Dict[str, Any]]] = {key: [] for key in priority}
-    overflow: List[Dict[str, Any]] = []
+def _app_tab_rows(rows: List[Dict[str, Any]], per_category_limit: int = 10) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+    tabs = ("DOWNLOADS", "GAMES", "NEWS", "GROSSING")
+    buckets: Dict[str, List[Dict[str, Any]]] = {key: [] for key in tabs}
     for row in rows:
         category = str(row.get("category") or "")
         if category in buckets:
             buckets[category].append(row)
-        else:
-            overflow.append(row)
-    interleaved: List[Dict[str, Any]] = []
-    while len(interleaved) < limit:
-        added = False
-        for category in priority:
-            if buckets[category]:
-                interleaved.append(buckets[category].pop(0))
-                added = True
-                if len(interleaved) >= limit:
-                    break
-        if not added:
-            break
-    return (interleaved + overflow)[:limit]
+    selected: List[Dict[str, Any]] = []
+    tab_counts: Dict[str, int] = {}
+    for category in tabs:
+        bucket = buckets[category][:per_category_limit]
+        tab_counts[category] = len(bucket)
+        selected.extend(bucket)
+    return selected, tab_counts
 
 
 def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     sources = {"appStoreCharts": "empty", "googleNewsRss": "empty"}
     try:
-        app_rows, ok_chart_sources, style_counts = _fetch_app_store_rows(ctx, max(limit, 24))
+        app_rows, ok_chart_sources, style_counts = _fetch_app_store_rows(ctx, max(limit, 40))
         sources["appStoreCharts"] = "ok" if app_rows else "empty"
     except Exception as exc:
         app_rows = []
@@ -891,7 +883,7 @@ def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         style_counts = {}
         app_error = str(exc)
         sources["appStoreCharts"] = "error"
-    news_limit = max(3, limit - min(len(app_rows), max(4, limit // 2)))
+    news_limit = 4
     try:
         news_rows = _parse_rss_items(_http_text_get(ctx, _news_url(ctx, APP_NEWS_QUERY), timeout=14), panel_id="consumer-app-pulse", limit=news_limit)
         sources["googleNewsRss"] = "ok" if news_rows else "empty"
@@ -899,13 +891,12 @@ def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         news_rows = []
         news_error = str(exc)
         sources["googleNewsRss"] = "error"
-    chart_rows = _interleave_app_rows(app_rows, max(12, limit - 4))
-    rows = (chart_rows + news_rows)[:limit]
+    rows, tab_counts = _app_tab_rows(app_rows, per_category_limit=10)
     chart_buttons = [
-        {"label": "Downloads", "symbol": "DOWNLOADS", "count": style_counts.get("DOWNLOADS", 0), "tone": "up"},
-        {"label": "Games", "symbol": "GAMES", "count": style_counts.get("GAMES", 0), "tone": "up"},
-        {"label": "News", "symbol": "NEWS", "count": style_counts.get("NEWS", 0), "tone": "watch"},
-        {"label": "Grossing", "symbol": "GROSSING", "count": style_counts.get("GROSSING", 0), "tone": "watch"},
+        {"label": "Downloads", "symbol": "DOWNLOADS", "count": tab_counts.get("DOWNLOADS", 0), "tone": "up"},
+        {"label": "Games", "symbol": "GAMES", "count": tab_counts.get("GAMES", 0), "tone": "up"},
+        {"label": "News", "symbol": "NEWS", "count": tab_counts.get("NEWS", 0), "tone": "watch"},
+        {"label": "Grossing", "symbol": "GROSSING", "count": tab_counts.get("GROSSING", 0), "tone": "watch"},
     ]
     return _payload(
         "consumer-app-pulse",
@@ -919,6 +910,7 @@ def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
             "appStoreSourceCount": len(APP_STORE_CHART_FEEDS),
             "appStoreOkSourceCount": ok_chart_sources,
             "appStoreStyleCounts": style_counts,
+            "appStoreTabCounts": tab_counts,
             "newsRows": len(news_rows),
             "appStoreError": locals().get("app_error"),
             "newsError": locals().get("news_error"),
@@ -928,7 +920,7 @@ def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
 
 
 def build_tech_panel_payload(ctx: dict, panel_id: str, limit: int = 10) -> Dict[str, Any]:
-    limit = max(3, min(36, int(limit or 10)))
+    limit = max(3, min(60, int(limit or 10)))
     if panel_id == "ai-model-race":
         return build_ai_model_race_payload(ctx, limit)
     if panel_id == "big-tech-market-cap":

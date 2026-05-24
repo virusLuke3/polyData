@@ -89,6 +89,8 @@ def _ctx():
         else:
             title = "iTunes Store: Top Free Apps"
             names = [("ChatGPT", "OpenAI"), ("TikTok", "TikTok Ltd.")]
+        while len(names) < 10:
+            names.append((f"{names[0][0]} {len(names) + 1}", names[0][1]))
         return {
             "feed": {
                 "title": {"label": title},
@@ -185,11 +187,17 @@ def test_big_tech_market_cap_estimates_when_yahoo_omits_cap():
 
 
 def test_consumer_app_pulse_combines_app_store_and_news():
-    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "consumer-app-pulse", limit=6)
+    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "consumer-app-pulse", limit=40)
 
     assert payload["status"] == "ok"
     assert payload["sources"]["appStoreCharts"] == "ok"
     assert payload["summary"]["appStoreSourceCount"] >= 20
     assert [item["symbol"] for item in payload["summary"]["watchlist"]] == ["DOWNLOADS", "GAMES", "NEWS", "GROSSING"]
+    assert [item["count"] for item in payload["summary"]["watchlist"]] == [10, 10, 10, 10]
     assert "TOP FREE" not in payload["items"][0]["tags"]
-    assert {"DOWNLOADS", "GAMES", "NEWS", "GROSSING"}.issubset({item["category"] for item in payload["items"]})
+    categories = [item["category"] for item in payload["items"]]
+    assert len(payload["items"]) == 40
+    assert categories.count("DOWNLOADS") == 10
+    assert categories.count("GAMES") == 10
+    assert categories.count("NEWS") == 10
+    assert categories.count("GROSSING") == 10
