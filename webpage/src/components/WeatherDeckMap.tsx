@@ -336,9 +336,25 @@ function clampFallbackZoom(value: number) {
   return Math.max(1, Math.min(3.6, value));
 }
 
+function clientPointToFallbackSvg(svg: SVGSVGElement, clientX: number, clientY: number) {
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  const matrix = svg.getScreenCTM();
+  if (matrix) {
+    const transformed = point.matrixTransform(matrix.inverse());
+    return { svgX: transformed.x, svgY: transformed.y };
+  }
+  const rect = svg.getBoundingClientRect();
+  return {
+    svgX: ((clientX - rect.left) / Math.max(1, rect.width)) * FALLBACK_W,
+    svgY: ((clientY - rect.top) / Math.max(1, rect.height)) * FALLBACK_H,
+  };
+}
+
 function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { points: WeatherMapPoint[]; selectedCityId?: string | null; onSelectCity?: (cityId: string) => void }) {
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
-  const dragRef = useRef<{ pointerId: number; lastX: number; lastY: number; totalDx: number; totalDy: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ pointerId: number; lastSvgX: number; lastSvgY: number; totalDx: number; totalDy: number; moved: boolean } | null>(null);
   const { graticulePath, worldPath, projectedPoints } = useMemo(() => {
     const projection = geoEquirectangular();
     const world = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
@@ -357,9 +373,7 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
 
   const fallbackSvgPoint = (event: PointerEvent) => {
     const svg = event.currentTarget as SVGSVGElement;
-    const rect = svg.getBoundingClientRect();
-    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * FALLBACK_W;
-    const svgY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * FALLBACK_H;
+    const { svgX, svgY } = clientPointToFallbackSvg(svg, event.clientX, event.clientY);
     return {
       svgX,
       svgY,
@@ -389,24 +403,24 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
 
   const handlePointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, totalDx: 0, totalDy: 0, moved: false };
-    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
+    const svg = event.currentTarget as SVGSVGElement;
+    const { svgX, svgY } = clientPointToFallbackSvg(svg, event.clientX, event.clientY);
+    dragRef.current = { pointerId: event.pointerId, lastSvgX: svgX, lastSvgY: svgY, totalDx: 0, totalDy: 0, moved: false };
+    svg.setPointerCapture(event.pointerId);
   };
 
   const handlePointerMove = (event: PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const svg = event.currentTarget as SVGSVGElement;
-    const rect = svg.getBoundingClientRect();
-    const scaleX = FALLBACK_W / Math.max(1, rect.width);
-    const scaleY = FALLBACK_H / Math.max(1, rect.height);
-    const dx = (event.clientX - drag.lastX) * scaleX;
-    const dy = (event.clientY - drag.lastY) * scaleY;
+    const { svgX, svgY } = clientPointToFallbackSvg(svg, event.clientX, event.clientY);
+    const dx = svgX - drag.lastSvgX;
+    const dy = svgY - drag.lastSvgY;
     drag.totalDx += dx;
     drag.totalDy += dy;
     if (Math.abs(drag.totalDx) + Math.abs(drag.totalDy) > 4) drag.moved = true;
-    drag.lastX = event.clientX;
-    drag.lastY = event.clientY;
+    drag.lastSvgX = svgX;
+    drag.lastSvgY = svgY;
     setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
   };
 
@@ -416,7 +430,12 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
     const svg = event.currentTarget as SVGSVGElement;
     if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
     if (!drag.moved) {
-      selectPointAt(event);
+      const targetCityId = (event.target as Element | null)?.closest?.('[data-weather-city-id]')?.getAttribute('data-weather-city-id');
+      if (targetCityId) {
+        onSelectCity?.(targetCityId);
+      } else {
+        selectPointAt(event);
+      }
     }
     window.setTimeout(() => {
       dragRef.current = null;
@@ -426,9 +445,7 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
   const handleWheel = (event: WheelEvent) => {
     event.preventDefault();
     const svg = event.currentTarget as SVGSVGElement;
-    const rect = svg.getBoundingClientRect();
-    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * FALLBACK_W;
-    const svgY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * FALLBACK_H;
+    const { svgX, svgY } = clientPointToFallbackSvg(svg, event.clientX, event.clientY);
     const zoomDelta = event.deltaY < 0 ? 1.16 : 0.86;
     setView((current) => {
       const nextZoom = clampFallbackZoom(current.zoom * zoomDelta);
@@ -472,6 +489,7 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
                 <circle className="ring" cx={point.x} cy={point.y} r={selected ? 11 : 8} />
                 <circle
                   className="dot"
+                  data-weather-city-id={point.id}
                   cx={point.x}
                   cy={point.y}
                   r={selected ? 5 : 4}
@@ -479,6 +497,7 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
                 {showLabel ? (
                   <g
                     className="label-hit"
+                    data-weather-city-id={point.id}
                     transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}
                   >
                     <rect x="-4" y="-13" width={Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8)} height="27" rx="3" />

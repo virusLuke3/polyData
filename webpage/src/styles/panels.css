@@ -9200,6 +9200,7 @@ body.panel-resize-active iframe {
 .wm-weather-deck-map.map-fallback .wm-weather-deck-basemap,
 .wm-weather-deck-map.no-screen-points .wm-weather-deck-basemap {
   opacity: 0;
+  pointer-events: none;
 }
 
 .wm-weather-static-fallback svg {
