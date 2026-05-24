@@ -4,307 +4,237 @@ import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
 import './styles.css';
 
-type TabId = 'overview' | 'tariffs' | 'flows' | 'barriers' | 'revenue' | 'strategic';
-type Tone = 'risk' | 'watch' | 'positive' | 'neutral';
+type TabId = 'tariffs' | 'flows' | 'barriers' | 'revenue' | 'strategic';
+type Severity = 'red' | 'amber' | 'green';
 
-type TradeSignal = {
-  id: string;
-  tab: TabId;
-  source: string;
-  badge: string;
-  tone: Tone;
-  title: string;
-  jurisdiction: string;
-  products: string;
-  signal: string;
-  marketRead: string;
-  nextCheck: string;
-};
-
-type MetricCard = {
+type Metric = {
   label: string;
   value: string;
-  detail: string;
-  tone: Tone;
+  tone?: Severity;
 };
 
-type TableRow = {
+type TradeAlert = {
   id: string;
-  col1: string;
-  col2: string;
-  col3: string;
-  col4: string;
-  tone: Tone;
+  tab: TabId;
+  title: string;
+  source: string;
+  jurisdiction: string;
+  score: number;
+  severity: Severity;
+  status: string;
+  action: string;
+  eventCode: string;
+  metricA: Metric;
+  metricB: Metric;
+  metricC: Metric;
+  impact: string;
+  description: string;
+  affected: string;
 };
 
 const TABS: Array<{ id: TabId; label: string; hint: string }> = [
-  { id: 'overview', label: 'Overview', hint: 'Policy shocks that can move markets' },
-  { id: 'tariffs', label: 'Tariffs', hint: 'MFN baseline vs effective burden' },
-  { id: 'flows', label: 'Flows', hint: 'Who exports, imports, and depends on whom' },
-  { id: 'barriers', label: 'Barriers', hint: 'TBT, SPS, licensing, quotas' },
-  { id: 'revenue', label: 'Revenue', hint: 'Customs duties as tariff-pressure proxy' },
-  { id: 'strategic', label: 'Strategic', hint: 'Critical minerals and supply-chain controls' },
+  { id: 'tariffs', label: 'Tariff', hint: 'Effective burden, not headline MFN rates' },
+  { id: 'flows', label: 'Flow', hint: 'Trade-flow breaks and supplier substitution' },
+  { id: 'barriers', label: 'Barrier', hint: 'TBT, SPS, licensing, CBAM, quotas' },
+  { id: 'revenue', label: 'Duty', hint: 'Customs duties as paid-tariff evidence' },
+  { id: 'strategic', label: 'Controls', hint: 'Export controls, sanctions, critical minerals' },
 ];
 
 const DEFAULT_TAB_META = TABS[0] as { id: TabId; label: string; hint: string };
 
-const OVERVIEW_METRICS: MetricCard[] = [
+const ALERTS: TradeAlert[] = [
   {
-    label: 'Policy Layer',
-    value: '6 feeds',
-    detail: 'GTA, WTO, WITS, Remedies, I-TIP, OECD',
-    tone: 'neutral',
-  },
-  {
-    label: 'Market Lens',
-    value: '4 paths',
-    detail: 'Input cost, margin, substitution, headline odds',
-    tone: 'watch',
-  },
-  {
-    label: 'Data Gap',
-    value: 'API next',
-    detail: 'Static watchlist now; live feeds need wiring',
-    tone: 'risk',
-  },
-];
-
-const TRADE_SIGNALS: TradeSignal[] = [
-  {
-    id: 'overview-clean-energy',
-    tab: 'overview',
-    source: 'Global Trade Alert / WTO Remedies',
-    badge: 'Tariff',
-    tone: 'risk',
-    title: 'Clean-energy trade restrictions remain the clearest policy-to-margin channel',
-    jurisdiction: 'US, EU, China, Southeast Asia',
-    products: 'EVs, batteries, solar cells/modules, steel and aluminum inputs',
-    signal: 'Track new tariff actions, anti-subsidy cases, origin-rule tightening, and retaliation headlines.',
-    marketRead: 'Domestic substitutes and upstream metals can benefit; import-heavy automakers, installers, and module buyers face margin pressure.',
-    nextCheck: 'Watch: solar tariffs, EV import duties, battery input costs, clean-energy subsidy markets.',
-  },
-  {
-    id: 'overview-semiconductors',
-    tab: 'overview',
-    source: 'Government notices / Global Trade Alert',
-    badge: 'Export Control',
-    tone: 'watch',
-    title: 'Advanced-chip export controls link directly to AI capex and semiconductor equipment revenue',
-    jurisdiction: 'US, China, Japan, Netherlands, Korea, Taiwan',
-    products: 'AI accelerators, lithography tools, EDA access, advanced packaging equipment',
-    signal: 'Monitor licensing changes, entity-list additions, cloud-compute restrictions, and ally alignment.',
-    marketRead: 'Equipment makers and foundry capex react first; domestic substitution and AI compute scarcity themes follow.',
-    nextCheck: 'Watch: AI chip export markets, semiconductor equipment sales, China tech-policy odds.',
-  },
-  {
-    id: 'overview-critical-minerals',
-    tab: 'overview',
-    source: 'OECD Export Restrictions / UN Comtrade',
-    badge: 'Raw Materials',
-    tone: 'risk',
-    title: 'Critical-mineral export controls are the upstream cost shock for batteries and electronics',
-    jurisdiction: 'Indonesia, Chile, DRC, China, Australia',
-    products: 'Nickel, cobalt, lithium, copper, graphite, rare earths',
-    signal: 'Export taxes, quotas, licensing rules, and beneficiation mandates can reprice inputs before official trade data updates.',
-    marketRead: 'Miners and refiners gain pricing power; battery, EV, storage, and electronics supply chains absorb cost pressure.',
-    nextCheck: 'Watch: nickel/lithium prices, battery-cost markets, resource-nationalism headlines.',
-  },
-  {
-    id: 'tariffs-mfn-effective',
+    id: 'tariff-clean-energy',
     tab: 'tariffs',
-    source: 'WTO Tariff Data / Effective-rate estimate',
-    badge: 'Gap',
-    tone: 'risk',
-    title: 'Useful tariff view is not the MFN rate alone; it is MFN plus policy overlays',
-    jurisdiction: 'US import stack vs China and sector partners',
-    products: 'HS84 machinery, HS85 electronics, HS87 vehicles, HS72 steel, HS76 aluminum',
-    signal: 'Compare WTO MFN applied rates with unilateral tariff layers, AD/CVD duties, safeguard measures, and exclusions.',
-    marketRead: 'The gap between baseline and effective burden is the number that matters for corporate margins.',
-    nextCheck: 'Next data wire: WTO MFN baseline + US effective tariff estimate + sector-level gap.',
+    title: 'US clean-energy import stack',
+    source: 'WTO baseline + US tariff actions + trade remedies',
+    jurisdiction: 'US vs China / Southeast Asia',
+    score: 86,
+    severity: 'red',
+    status: 'red',
+    action: 'TARIFF STACK',
+    eventCode: 'HS8541/8507',
+    metricA: { label: 'Baseline', value: 'MFN + Section 301', tone: 'amber' },
+    metricB: { label: 'Products', value: 'Solar, EVs, batteries', tone: 'red' },
+    metricC: { label: 'Transmission', value: 'Input cost -> margin', tone: 'red' },
+    impact: 'Domestic module makers and upstream metals gain leverage; installers, EV assemblers, and import-heavy retailers absorb cost pressure.',
+    description: 'Useful signal is the gap between WTO MFN baseline and the real paid burden after Section 301, AD/CVD, safeguard actions, origin rules, and exclusions.',
+    affected: 'Solar tariffs, EV import-duty markets, lithium battery costs, clean-energy subsidy odds',
   },
   {
-    id: 'tariffs-sector-stack',
+    id: 'tariff-eu-ev',
     tab: 'tariffs',
-    source: 'WTO IDB / CTS / national customs notices',
-    badge: 'HS Codes',
-    tone: 'watch',
-    title: 'Sector tariff stack should be shown by HS code, not broad news labels',
-    jurisdiction: 'US, EU, China, India, ASEAN',
-    products: 'Solar modules, steel pipe, tires, chemicals, auto parts',
-    signal: 'A usable panel needs HS code, reporter, partner, baseline rate, extra duty, effective rate, and last update.',
-    marketRead: 'Without HS-level mapping, the panel cannot tell which commodity, company, or market is exposed.',
-    nextCheck: 'Next data wire: HS6 watchlist for clean energy, metals, chemicals, auto parts.',
+    title: 'EU China EV duty channel',
+    source: 'EU trade defence / WTO tariff baseline',
+    jurisdiction: 'EU vs China',
+    score: 78,
+    severity: 'amber',
+    status: 'amber',
+    action: 'ANTI-SUBSIDY',
+    eventCode: 'HS8703',
+    metricA: { label: 'Policy', value: 'Countervailing duty', tone: 'amber' },
+    metricB: { label: 'Products', value: 'EVs, cells, packs', tone: 'amber' },
+    metricC: { label: 'Watch', value: 'Retaliation risk', tone: 'red' },
+    impact: 'European OEMs with local production benefit; China-export exposure and battery-pack importers face demand and margin risk.',
+    description: 'This is not just a tariff story. It changes where vehicles are assembled, which battery suppliers win share, and whether China responds against EU exporters.',
+    affected: 'EU auto margins, China EV exports, battery supply chain, retaliation headline markets',
   },
   {
-    id: 'flows-battery',
+    id: 'flow-indonesia-nickel',
     tab: 'flows',
-    source: 'World Bank WITS / UN Comtrade',
-    badge: 'Exposure',
-    tone: 'risk',
-    title: 'Battery-chain exposure needs reporter, partner, commodity, value, and YoY change',
-    jurisdiction: 'Indonesia -> China/Korea; Chile -> China/US/EU; DRC -> refiners',
-    products: 'Nickel ores, cobalt intermediates, lithium carbonate, graphite anodes',
-    signal: 'Flag high concentration, sudden YoY flow drops, and rerouting to substitute suppliers.',
-    marketRead: 'Trade-flow contraction is an early warning for battery input inflation and delayed downstream production.',
-    nextCheck: 'Watch: trade value anomalies, partner concentration, battery input price markets.',
+    title: 'Indonesia nickel rerouting risk',
+    source: 'WITS / UN Comtrade / OECD export restrictions',
+    jurisdiction: 'Indonesia -> China / Korea / Japan',
+    score: 82,
+    severity: 'red',
+    status: 'red',
+    action: 'SUPPLY SHOCK',
+    eventCode: 'NICKEL-26',
+    metricA: { label: 'Flow', value: 'Ore -> matte -> precursor', tone: 'red' },
+    metricB: { label: 'Policy', value: 'Export ban / processing mandate', tone: 'red' },
+    metricC: { label: 'Market', value: 'Battery input inflation', tone: 'amber' },
+    impact: 'Miners and refiners gain pricing power; battery, storage, and EV producers lose margin unless they pass through cost.',
+    description: 'Trade-flow alerts should flag concentration and sudden YoY drops. Nickel is high value because policy can move the upstream price before downstream earnings react.',
+    affected: 'Nickel price, battery cost, EV margin, storage deployment, Indonesia resource nationalism',
   },
   {
-    id: 'flows-steel-aluminum',
+    id: 'flow-steel-aluminum',
     tab: 'flows',
-    source: 'UN Comtrade / WITS',
-    badge: 'Substitution',
-    tone: 'watch',
-    title: 'Steel and aluminum policy should separate protected upstream producers from cost-exposed buyers',
-    jurisdiction: 'US, EU, China, Turkey, India, Vietnam',
-    products: 'Flat steel, steel pipe, aluminum sheet, machinery components',
-    signal: 'Track import dependence, top alternative suppliers, and volume displacement after tariff or remedy actions.',
-    marketRead: 'Domestic producers may gain pricing power while autos, machinery, packaging, and construction absorb higher costs.',
-    nextCheck: 'Watch: steel import restriction markets, manufacturing-margin pressure, auto input costs.',
+    title: 'Steel and aluminum substitution map',
+    source: 'UN Comtrade / WTO trade flows',
+    jurisdiction: 'US / EU / China / Turkey / India',
+    score: 69,
+    severity: 'amber',
+    status: 'amber',
+    action: 'SUBSTITUTION',
+    eventCode: 'HS72/76',
+    metricA: { label: 'Upstream', value: 'Domestic producers', tone: 'green' },
+    metricB: { label: 'Downstream', value: 'Autos, machinery, packaging', tone: 'amber' },
+    metricC: { label: 'Signal', value: 'Partner switch', tone: 'amber' },
+    impact: 'Protection helps local steel and aluminum producers while raising costs for autos, machinery, construction, and packaging.',
+    description: 'The useful view is not only import volume. It is importer dependence, alternative supplier capacity, and whether trade remedies force rerouting.',
+    affected: 'Steel prices, industrial margins, auto input costs, machinery and construction exposure',
   },
   {
-    id: 'barriers-tbt-sps',
+    id: 'barrier-cbam',
     tab: 'barriers',
-    source: 'WTO I-TIP / TBT / SPS notifications',
-    badge: 'Non-tariff',
-    tone: 'watch',
-    title: 'Non-tariff measures often matter more than headline tariffs for food, pharma, and chemicals',
-    jurisdiction: 'EU, US, China, Japan, ASEAN',
-    products: 'Food, agriculture, APIs, chemicals, autos parts, medical devices',
-    signal: 'Track TBT/SPS notifications, import licensing, testing standards, quantity limits, and conformity rules.',
-    marketRead: 'The impact shows up as customs delays, inventory rebuilds, compliance costs, and supplier switching.',
-    nextCheck: 'Watch: food inflation, drug-shortage, chemical supply-chain, auto parts markets.',
+    title: 'EU carbon border compliance drag',
+    source: 'WTO I-TIP / EU CBAM notices',
+    jurisdiction: 'EU import regime',
+    score: 74,
+    severity: 'amber',
+    status: 'amber',
+    action: 'COMPLIANCE WALL',
+    eventCode: 'CBAM-26',
+    metricA: { label: 'Sectors', value: 'Steel, aluminum, cement, fertilizer', tone: 'amber' },
+    metricB: { label: 'Cost', value: 'Reporting + carbon price', tone: 'amber' },
+    metricC: { label: 'Risk', value: 'Supplier exclusion', tone: 'red' },
+    impact: 'Low-carbon exporters gain access premium; high-emission suppliers face documentation cost, price discount, or lost EU demand.',
+    description: 'Non-tariff barriers can be more actionable than tariff rates because they affect delivery eligibility, compliance cost, and supplier selection.',
+    affected: 'EU steel imports, fertilizer margins, aluminum supply, carbon-credit and industrial policy markets',
   },
   {
-    id: 'barriers-procurement',
+    id: 'barrier-food-pharma',
     tab: 'barriers',
-    source: 'Global Trade Alert',
-    badge: 'Preference',
-    tone: 'neutral',
-    title: 'Government procurement preferences are a policy signal for industrial winners and losers',
-    jurisdiction: 'US, EU, China, India',
-    products: 'Defense, infrastructure, grid equipment, clean energy, telecom hardware',
-    signal: 'Preferential procurement and local-content rules can move demand before formal tariff data changes.',
-    marketRead: 'Local suppliers gain visibility; foreign vendors lose addressable demand even without a tariff headline.',
-    nextCheck: 'Watch: Buy-local policies, defense procurement, grid investment, telecom restrictions.',
+    title: 'Food and pharma TBT/SPS delay channel',
+    source: 'WTO TBT/SPS notifications / I-TIP',
+    jurisdiction: 'EU / US / China / ASEAN',
+    score: 63,
+    severity: 'amber',
+    status: 'watch',
+    action: 'PORT DELAY',
+    eventCode: 'TBT/SPS',
+    metricA: { label: 'Products', value: 'Food, APIs, chemicals', tone: 'amber' },
+    metricB: { label: 'Mechanism', value: 'Testing, licensing, inspection', tone: 'amber' },
+    metricC: { label: 'Market', value: 'Inventory rebuild', tone: 'green' },
+    impact: 'Delays can lift inventories, widen regional price gaps, and create shortage risk without any tariff headline.',
+    description: 'Track notification volume, product scope, objective, and affected exporters. The signal is customs delay and compliance cost, not headline rate.',
+    affected: 'Food inflation, API shortages, chemicals supply, auto parts delivery risk',
   },
   {
-    id: 'revenue-customs',
+    id: 'revenue-customs-duty',
     tab: 'revenue',
+    title: 'US customs-duty receipt spike',
     source: 'US Treasury Monthly Treasury Statement',
-    badge: 'Duties',
-    tone: 'watch',
-    title: 'Customs-duty revenue is the fastest public proxy for effective tariff burden',
     jurisdiction: 'United States',
-    products: 'All dutiable imports; sector split requires customs or tariff-line mapping',
-    signal: 'Track monthly customs duties, fiscal-year-to-date totals, and spikes vs prior-year run rate.',
-    marketRead: 'A revenue spike suggests tariff burden is showing up in paid duties, not just announcements.',
-    nextCheck: 'Next data wire: MTS customs duties chart + YoY spike detection + effective-rate note.',
+    score: 71,
+    severity: 'amber',
+    status: 'watch',
+    action: 'PAID BURDEN',
+    eventCode: 'MTS-DUTY',
+    metricA: { label: 'Signal', value: 'Monthly customs duties', tone: 'amber' },
+    metricB: { label: 'Compare', value: 'FYTD vs prior FY', tone: 'amber' },
+    metricC: { label: 'Use', value: 'Effective tariff proxy', tone: 'green' },
+    impact: 'If duty revenue jumps, tariff burden is showing up in paid imports rather than staying at announcement level.',
+    description: 'Revenue is useful because it confirms real payment pressure. Pair it with import-heavy sectors to infer who absorbs the tax.',
+    affected: 'Retail margins, industrial importers, CPI pass-through, fiscal revenue, effective-rate estimates',
   },
   {
-    id: 'revenue-company-pass-through',
+    id: 'revenue-pass-through',
     tab: 'revenue',
-    source: 'US Treasury / company filings',
-    badge: 'Pass-through',
-    tone: 'neutral',
-    title: 'Revenue data becomes actionable only when paired with import-heavy sectors',
-    jurisdiction: 'US-listed importers and global suppliers',
-    products: 'Retail, autos, industrial machinery, electronics, clean energy equipment',
-    signal: 'Map tariff revenue spikes to sectors with high imported input share and weak pricing power.',
-    marketRead: 'The key question is who absorbs the duty: supplier, importer, consumer, or government through exemptions.',
-    nextCheck: 'Watch: margin guidance, CPI pass-through, retailer earnings, industrial input costs.',
+    title: 'Importer pass-through watch',
+    source: 'Treasury receipts / company guidance',
+    jurisdiction: 'US-listed importers',
+    score: 66,
+    severity: 'amber',
+    status: 'watch',
+    action: 'MARGIN TEST',
+    eventCode: 'PASS-THRU',
+    metricA: { label: 'Absorber', value: 'Supplier / importer / consumer', tone: 'amber' },
+    metricB: { label: 'Sector', value: 'Retail, autos, electronics', tone: 'red' },
+    metricC: { label: 'Trigger', value: 'Guidance cuts', tone: 'red' },
+    impact: 'The same tariff can be bullish or bearish depending on pricing power. Weak pass-through means margin compression.',
+    description: 'Customs revenue becomes actionable only when linked to import share, gross margin, inventory cycle, and company guidance language.',
+    affected: 'Retail earnings, auto margins, electronics pricing, CPI goods inflation',
   },
   {
-    id: 'strategic-rare-earths',
+    id: 'strategic-graphite-rare-earths',
     tab: 'strategic',
-    source: 'OECD Export Restrictions / USGS / UN Comtrade',
-    badge: 'Rare Earths',
-    tone: 'risk',
-    title: 'Rare-earth and graphite restrictions should be treated as strategic supply-chain alerts',
-    jurisdiction: 'China, US, EU, Japan, Korea',
-    products: 'Rare earth magnets, graphite, gallium, germanium, battery anodes',
-    signal: 'Track export licensing, end-use checks, domestic-processing mandates, and stockpiling signals.',
-    marketRead: 'Defense, EV, wind, electronics, and semiconductor supply chains can reprice on policy news alone.',
-    nextCheck: 'Watch: critical-mineral export controls, defense supply-chain, battery-material markets.',
+    title: 'China graphite and rare-earth licensing',
+    source: 'Official export-control notices / OECD / USGS',
+    jurisdiction: 'China -> US / EU / Japan / Korea',
+    score: 88,
+    severity: 'red',
+    status: 'red',
+    action: 'EXPORT CONTROL',
+    eventCode: 'CRIT-MIN',
+    metricA: { label: 'Products', value: 'Graphite, magnets, gallium, germanium', tone: 'red' },
+    metricB: { label: 'End use', value: 'EV, defense, chips, wind', tone: 'red' },
+    metricC: { label: 'Market', value: 'Binary flow risk', tone: 'red' },
+    impact: 'Defense, EV, wind, electronics, and semiconductor supply chains can reprice on export-license headlines alone.',
+    description: 'Strategic controls block physical flows without needing a tariff. The key signal is license approval, end-use screening, and alternative stockpile capacity.',
+    affected: 'Critical-mineral controls, defense supply chain, battery materials, semiconductor input risk',
   },
   {
-    id: 'strategic-sanctions',
+    id: 'strategic-sanctions-dual-use',
     tab: 'strategic',
+    title: 'Dual-use sanctions and shipping chokepoints',
     source: 'Official sanctions lists / Global Trade Alert',
-    badge: 'Sanctions',
-    tone: 'risk',
-    title: 'Sanctions and investment controls belong in trade policy because they block flows without a tariff',
-    jurisdiction: 'US, EU, UK, China, Russia, Middle East',
-    products: 'Energy, shipping, banking, chips, dual-use goods, aircraft parts',
-    signal: 'Track entity listings, sectoral sanctions, shipping restrictions, investment screening, and export bans.',
-    marketRead: 'The market impact is often binary: legal flow vs blocked flow, insured cargo vs stranded cargo.',
-    nextCheck: 'Watch: sanctions markets, oil flows, shipping insurance, dual-use export controls.',
+    jurisdiction: 'US / EU / UK / China / Russia / Middle East',
+    score: 79,
+    severity: 'red',
+    status: 'red',
+    action: 'FLOW BLOCK',
+    eventCode: 'SANCTION',
+    metricA: { label: 'Products', value: 'Energy, chips, aircraft parts', tone: 'red' },
+    metricB: { label: 'Mechanism', value: 'Entity list / shipping ban', tone: 'red' },
+    metricC: { label: 'Market', value: 'Legal flow vs blocked flow', tone: 'red' },
+    impact: 'This is often binary: insured cargo vs stranded cargo, licensed sale vs blocked sale, bankable transaction vs compliance stop.',
+    description: 'Sanctions belong in trade policy because they change flow probability even when tariff rates are unchanged.',
+    affected: 'Oil flows, shipping insurance, dual-use exports, sanctions markets, aircraft and chip supply',
   },
 ];
 
-const TARIFF_TABLE: TableRow[] = [
-  {
-    id: 'tariff-solar',
-    col1: 'Solar cells / modules',
-    col2: 'HS 8541 / 8501 watch',
-    col3: 'MFN + AD/CVD + origin rule',
-    col4: 'Installer margins down; domestic module makers up',
-    tone: 'risk',
-  },
-  {
-    id: 'tariff-steel',
-    col1: 'Steel / aluminum',
-    col2: 'HS 72 / HS 76',
-    col3: 'Safeguard + AD/CVD risk',
-    col4: 'Upstream pricing power; autos and machinery cost pressure',
-    tone: 'watch',
-  },
-  {
-    id: 'tariff-autos',
-    col1: 'EVs / auto parts',
-    col2: 'HS 8703 / 8708',
-    col3: 'Tariff + local-content policy',
-    col4: 'Regional substitution and consumer-price pass-through',
-    tone: 'risk',
-  },
-];
-
-const FLOW_TABLE: TableRow[] = [
-  {
-    id: 'flow-nickel',
-    col1: 'Indonesia nickel chain',
-    col2: 'Ore -> matte -> battery materials',
-    col3: 'Export restrictions + processing mandate',
-    col4: 'Battery input-cost shock and refiner margin expansion',
-    tone: 'risk',
-  },
-  {
-    id: 'flow-lithium',
-    col1: 'Chile / Australia lithium',
-    col2: 'Carbonate and spodumene flows',
-    col3: 'Trade-value anomaly and partner concentration',
-    col4: 'EV battery-cost and storage economics signal',
-    tone: 'watch',
-  },
-  {
-    id: 'flow-rare-earths',
-    col1: 'China rare-earth magnets',
-    col2: 'Magnets, oxides, gallium, germanium',
-    col3: 'Licensing and end-use checks',
-    col4: 'Defense, wind, EV, and chip-supply risk',
-    tone: 'risk',
-  },
-];
-
-function toneClass(tone: Tone) {
-  return `tone-${tone}`;
+function severityClass(severity: Severity) {
+  return `severity-${severity}`;
 }
 
 function TradePolicyRadarPanel() {
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [activeTab, setActiveTab] = useState<TabId>('tariffs');
   const [showHelp, setShowHelp] = useState(false);
   const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || DEFAULT_TAB_META;
   const activeItems = useMemo(
-    () => TRADE_SIGNALS.filter((item) => item.tab === activeTab),
+    () => ALERTS.filter((item) => item.tab === activeTab),
     [activeTab],
   );
 
@@ -328,7 +258,7 @@ function TradePolicyRadarPanel() {
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>Trade Policy</strong>
-          <p>WorldMonitor-style trade intelligence: WTO baseline rates, effective tariff burden, flows, barriers, revenue, and strategic supply-chain controls.</p>
+          <p>High-signal watchlist for tariff burden, trade-flow breaks, non-tariff barriers, customs revenue, and strategic export controls.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-trade-policy-radar-panel"
@@ -354,13 +284,9 @@ function TradePolicyRadarPanel() {
           <em>{activeTabMeta.hint}</em>
         </div>
 
-        {activeTab === 'overview' ? <MetricStrip /> : null}
-        {activeTab === 'tariffs' ? <SignalTable rows={TARIFF_TABLE} headers={['Product', 'Code / Scope', 'Policy Stack', 'Market Read']} /> : null}
-        {activeTab === 'flows' || activeTab === 'strategic' ? <SignalTable rows={FLOW_TABLE} headers={['Flow', 'Commodity', 'Trigger', 'Market Read']} /> : null}
-
-        <div className="wm-trade-news-list">
+        <div className="wm-trade-alert-list">
           {activeItems.map((item) => (
-            <PolicyRow item={item} key={item.id} />
+            <TradeAlertCard item={item} key={item.id} />
           ))}
         </div>
       </div>
@@ -368,73 +294,44 @@ function TradePolicyRadarPanel() {
   );
 }
 
-function MetricStrip() {
+function TradeAlertCard({ item }: { item: TradeAlert }) {
   return (
-    <div className="wm-trade-metric-strip">
-      {OVERVIEW_METRICS.map((item) => (
-        <div className={`wm-trade-metric ${toneClass(item.tone)}`} key={item.label}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-          <em>{item.detail}</em>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SignalTable({ rows, headers }: { rows: TableRow[]; headers: [string, string, string, string] }) {
-  return (
-    <div className="wm-trade-table">
-      <div className="wm-trade-table-head">
-        {headers.map((header) => <span key={header}>{header}</span>)}
-      </div>
-      {rows.map((row) => (
-        <div className={`wm-trade-table-row ${toneClass(row.tone)}`} key={row.id}>
-          <b>{row.col1}</b>
-          <span>{row.col2}</span>
-          <span>{row.col3}</span>
-          <em>{row.col4}</em>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function PolicyRow({ item }: { item: TradeSignal }) {
-  return (
-    <article className="wm-trade-news-row">
-      <div className="wm-trade-news-meta">
-        <span className="wm-trade-dot" />
-        <b>{item.source}</b>
-        <i className={`wm-trade-tag ${toneClass(item.tone)}`}>{item.badge}</i>
+    <article className={`wm-trade-alert-card ${severityClass(item.severity)}`}>
+      <div className="wm-trade-alert-head">
+        <strong>{item.title}</strong>
+        <span className={`wm-trade-dot-status ${severityClass(item.severity)}`} />
+        <em>{item.score}/100</em>
+        <b>{item.status}</b>
       </div>
 
-      <strong>{item.title}</strong>
-
-      <div className="wm-trade-facts">
-        <Fact label="Jurisdiction" value={item.jurisdiction} />
-        <Fact label="Products" value={item.products} />
-        <Fact label="Signal" value={item.signal} />
+      <div className="wm-trade-alert-sub">
+        <span>{item.source}</span>
+        <i>{item.jurisdiction}</i>
       </div>
 
-      <div className="wm-trade-readout">
-        <span>Market Read</span>
-        <b>{item.marketRead}</b>
+      <div className="wm-trade-metric-row">
+        <MetricCell metric={item.metricA} />
+        <MetricCell metric={item.metricB} />
+        <MetricCell metric={item.metricC} />
       </div>
 
-      <div className="wm-trade-news-foot">
-        <span>{item.nextCheck}</span>
-        <b>Source: {item.source}</b>
+      <div className="wm-trade-action-row">
+        <span>{item.action}</span>
+        <b>{item.eventCode}</b>
       </div>
+
+      <p className="wm-trade-impact">{item.impact}</p>
+      <p className="wm-trade-description">{item.description}</p>
+      <div className="wm-trade-affected">{item.affected}</div>
     </article>
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function MetricCell({ metric }: { metric: Metric }) {
   return (
-    <div>
-      <span>{label}</span>
-      <b>{value}</b>
+    <div className={metric.tone ? severityClass(metric.tone) : ''}>
+      <span>{metric.label}</span>
+      <b>{metric.value}</b>
     </div>
   );
 }
@@ -449,6 +346,6 @@ export const panel = panelFromRenderer(renderers, {
   id: 'trade-policy-radar',
   title: 'Trade Policy',
   eyebrow: 'global',
-  description: 'Trade policy intelligence mapped to tariff burden, trade flows, barriers, revenue, and market implications.',
+  description: 'High-signal trade policy watchlist mapped to tariff burden, flows, barriers, revenue, and strategic controls.',
   defaultEnabled: true,
 });
