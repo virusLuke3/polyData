@@ -252,18 +252,34 @@ def _workspace_identity(market_id: int, market: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-def _workspace_selected_outcome(group: Optional[Dict[str, Any]], market_id: int) -> Optional[Dict[str, Any]]:
+def _workspace_selected_outcome(
+    group: Optional[Dict[str, Any]],
+    market_id: int,
+    market: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     if not isinstance(group, dict):
         return None
+    market = market or {}
+    gamma_market_id = str(market.get("gamma_market_id") or "").strip()
+    condition_id = str(market.get("condition_id") or "").strip().lower()
+    yes_token_id = str(market.get("yes_token_id") or "").strip()
     outcomes = list(group.get("outcomes") or []) + list(group.get("topOutcomes") or [])
     for outcome in outcomes:
-        if not isinstance(outcome, dict) or outcome.get("marketId") is None:
+        if not isinstance(outcome, dict):
             continue
-        try:
-            outcome_market_id = int(outcome.get("marketId") or 0)
-        except (TypeError, ValueError):
-            continue
-        if outcome_market_id == int(market_id):
+        for key in ("marketId", "localMarketId"):
+            if outcome.get(key) is None:
+                continue
+            try:
+                if int(outcome.get(key) or 0) == int(market_id):
+                    return outcome
+            except (TypeError, ValueError):
+                continue
+        if gamma_market_id and str(outcome.get("gammaMarketId") or "").strip() == gamma_market_id:
+            return outcome
+        if condition_id and str(outcome.get("conditionId") or "").strip().lower() == condition_id:
+            return outcome
+        if yes_token_id and str(outcome.get("yesTokenId") or "").strip() == yes_token_id:
             return outcome
     return None
 
@@ -2025,7 +2041,7 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
         except Exception:
             ctx["app"].logger.exception("market workspace group load failed market_id=%s event_id=%s", market_id, event_id)
             group = None
-    selected_outcome = _workspace_selected_outcome(group, market_id)
+    selected_outcome = _workspace_selected_outcome(group, market_id, market)
     if selected_outcome and selected_outcome.get("outcomeKey"):
         identity["selectedOutcomeKey"] = selected_outcome.get("outcomeKey")
 
