@@ -128,7 +128,7 @@ function ResearchRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; f
         <em>{item.summary || item.symbol || 'Analyst note pending'}</em>
         <div className="wm-finance-feed-foot">
           <span>{formatRelative(item.publishedAt || undefined)}</span>
-          {item.url ? <b>Read source</b> : null}
+          {item.url ? <b>Read report</b> : null}
         </div>
       </div>
       <div className="wm-finance-research-metric">

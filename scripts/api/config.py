@@ -163,6 +163,8 @@ class ApiSettings:
     finance_cnn_fng_url: str
     finance_cnn_fng_referer_url: str
     finance_aaii_sentiment_url: str
+    finance_broker_research_feed_urls: tuple[str, ...]
+    finance_broker_research_news_fallback: bool
     finance_hyperliquid_info_url: str
     finance_okx_market_ticker_url: str
     finance_defillama_stablecoins_url: str
@@ -301,6 +303,8 @@ def load_api_settings() -> ApiSettings:
         finance_cnn_fng_url=_get_str("POLYDATA_FINANCE_CNN_FNG_URL", FINANCE_CNN_FNG_URL or "https://production.dataviz.cnn.io/index/fearandgreed/current"),
         finance_cnn_fng_referer_url=_get_str("POLYDATA_FINANCE_CNN_FNG_REFERER_URL", FINANCE_CNN_FNG_REFERER_URL or "https://www.cnn.com/markets/fear-and-greed"),
         finance_aaii_sentiment_url=_get_str("POLYDATA_FINANCE_AAII_SENTIMENT_URL", FINANCE_AAII_SENTIMENT_URL or "https://www.aaii.com/sentimentsurvey/sent_results"),
+        finance_broker_research_feed_urls=_get_csv("POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS", ()),
+        finance_broker_research_news_fallback=_get_bool("POLYDATA_FINANCE_BROKER_RESEARCH_NEWS_FALLBACK", False),
         finance_hyperliquid_info_url=_get_str("POLYDATA_FINANCE_HYPERLIQUID_INFO_URL", FINANCE_HYPERLIQUID_INFO_URL or "https://api.hyperliquid.xyz/info"),
         finance_okx_market_ticker_url=_get_str("POLYDATA_FINANCE_OKX_MARKET_TICKER_URL", FINANCE_OKX_MARKET_TICKER_URL or "https://www.okx.com/api/v5/market/ticker"),
         finance_defillama_stablecoins_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL", FINANCE_DEFILLAMA_STABLECOINS_URL or "https://stablecoins.llama.fi/stablecoins"),

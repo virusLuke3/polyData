@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from xml.etree import ElementTree
 
 try:
@@ -210,6 +210,25 @@ def _setting(ctx: dict, name: str) -> str:
     settings = ctx.get("SETTINGS")
     value = getattr(settings, name, "") if settings is not None else ""
     return str(value or "").strip()
+
+
+def _setting_tuple(ctx: dict, name: str) -> tuple[str, ...]:
+    settings = ctx.get("SETTINGS")
+    value = getattr(settings, name, ()) if settings is not None else ()
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(",") if part.strip())
+    try:
+        return tuple(str(part).strip() for part in value if str(part).strip())
+    except TypeError:
+        return ()
+
+
+def _setting_bool(ctx: dict, name: str) -> bool:
+    settings = ctx.get("SETTINGS")
+    value = getattr(settings, name, False) if settings is not None else False
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 def _tone(value: Any, *, inverted: bool = False) -> str:
@@ -550,6 +569,83 @@ def _find_broker_name(text: str, fallback: str) -> str:
     return fallback or "Research"
 
 
+def _coalesce_text(*values: Any) -> str:
+    for value in values:
+        text = _strip_html(value)
+        if text:
+            return text
+    return ""
+
+
+def _coalesce_url(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+    return ""
+
+
+def _broker_number(value: Any) -> Optional[float]:
+    if isinstance(value, str):
+        value = value.replace("$", "").replace(",", "").strip()
+    return _safe_float(value)
+
+
+def _dict_value(payload: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload.get(key) not in (None, ""):
+            return payload.get(key)
+    return None
+
+
+def _published_iso(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        if re.match(r"^\d{4}-\d{2}-\d{2}", text):
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return parsedate_to_datetime(text).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except (TypeError, ValueError):
+        return None
+
+
+NEWS_OR_AGGREGATOR_DOMAINS = (
+    "google.com",
+    "news.google.com",
+    "benzinga.com",
+    "marketbeat.com",
+    "thefly.com",
+    "tipranks.com",
+    "streetinsider.com",
+    "investing.com",
+    "zacks.com",
+    "seekingalpha.com",
+    "yahoo.com",
+    "finance.yahoo.com",
+    "bloomberg.com",
+    "reuters.com",
+    "cnbc.com",
+    "marketwatch.com",
+    "barrons.com",
+    "wsj.com",
+    "fool.com",
+)
+
+
+def _is_news_or_aggregator_url(url: str) -> bool:
+    host = (urlparse(url).netloc or "").lower()
+    if not host:
+        return True
+    return any(host == domain or host.endswith(f".{domain}") for domain in NEWS_OR_AGGREGATOR_DOMAINS)
+
+
+def _is_original_research_url(url: str) -> bool:
+    if not url.startswith(("http://", "https://")):
+        return False
+    return not _is_news_or_aggregator_url(url)
+
+
 def _has_known_broker(text: str) -> bool:
     lowered = text.lower()
     return any(broker.lower() in lowered for broker in BROKER_NAMES)
@@ -631,7 +727,160 @@ def _broker_priority(action: str, upside: Optional[float], target_change: Option
     return action_score + recency + importance + min(22.0, abs(upside or 0.0)) + min(18.0, abs(target_change or 0.0))
 
 
-def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+def _broker_research_row(
+    ctx: dict,
+    *,
+    title: str,
+    summary: str,
+    report_url: str,
+    source: str,
+    published_at: Optional[str],
+    quote_cache: Dict[str, Dict[str, Any]],
+    explicit_symbol: str = "",
+    explicit_target: Any = None,
+    explicit_previous_target: Any = None,
+    explicit_action: str = "",
+) -> Optional[Dict[str, Any]]:
+    text = f"{title} {summary} {explicit_symbol}"
+    match = _find_broker_symbol(text)
+    if not match:
+        return None
+    symbol, company, theme = match
+    title = title or f"{symbol} broker research"
+    summary = summary or title
+    broker = _find_broker_name(text, source)
+    action, action_tone = _broker_action(f"{explicit_action} {text}")
+    target, previous_target = _extract_target_prices(text)
+    target = _broker_number(explicit_target) if explicit_target not in (None, "") else target
+    previous_target = _broker_number(explicit_previous_target) if explicit_previous_target not in (None, "") else previous_target
+    if symbol not in quote_cache:
+        quote_cache[symbol] = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d") or {}
+    quote = quote_cache.get(symbol) or {}
+    current_price = _safe_float(quote.get("price"))
+    upside = ((target - current_price) / current_price * 100) if target is not None and current_price not in (None, 0) else None
+    target_change = ((target - previous_target) / previous_target * 100) if target is not None and previous_target not in (None, 0) else None
+    tags = [action, "REPORT", theme]
+    if target_change is not None:
+        tags[0] = "PT RAISE" if target_change > 0 else "PT CUT" if target_change < 0 else action
+    tone = "up" if (upside is not None and upside > 0) or action_tone == "up" else "down" if (upside is not None and upside < 0) or action_tone == "down" else "watch" if action_tone == "watch" else "neutral"
+    target_label = f"PT {_format_price(target)}" if target is not None else (_format_price(current_price) if current_price is not None else "--")
+    metric_label = f"{upside:+.1f}%" if upside is not None else target_label
+    summary_bits = [broker, "original report", action.replace("PT ", "target ")]
+    if target is not None:
+        summary_bits.append(f"target {target_label}")
+    if previous_target is not None:
+        summary_bits.append(f"from {_format_price(previous_target)}")
+    if current_price is not None:
+        summary_bits.append(f"spot {_format_price(current_price)}")
+    return {
+        "id": f"broker-research:{symbol}:{abs(hash(report_url or title))}",
+        "label": symbol,
+        "symbol": company.upper()[:16],
+        "title": title,
+        "summary": " | ".join(summary_bits),
+        "source": broker,
+        "url": report_url,
+        "publishedAt": published_at,
+        "metric": upside,
+        "metricLabel": metric_label,
+        "metricUnit": "UPSIDE",
+        "secondary": target,
+        "secondaryLabel": target_label,
+        "change": target_change,
+        "changeLabel": f"{target_change:+.1f}% PT" if target_change is not None else (_format_pct(quote.get("changePercent")) if quote.get("changePercent") is not None else None),
+        "tags": tags[:3],
+        "tone": tone,
+        "points": quote.get("points") or [],
+        "_priority": _broker_priority(action, upside, target_change, published_at, symbol),
+    }
+
+
+def _extract_json_research_items(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("items", "data", "reports", "research", "analystActions", "results"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
+    rows: List[Dict[str, Any]] = []
+    sources: Dict[str, str] = {}
+    quote_cache: Dict[str, Dict[str, Any]] = {}
+    seen_urls = set()
+    for source_url in _setting_tuple(ctx, "finance_broker_research_feed_urls"):
+        source_key = urlparse(source_url).netloc or source_url
+        try:
+            raw_text = _http_text_get(ctx, source_url, timeout=16)
+        except Exception:
+            sources[source_key] = "error"
+            continue
+        parsed_count = 0
+        stripped = raw_text.lstrip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                payload = json.loads(raw_text)
+            except json.JSONDecodeError:
+                sources[source_key] = "parse-error"
+                continue
+            for item in _extract_json_research_items(payload):
+                report_url = _coalesce_url(
+                    _dict_value(item, "reportUrl", "originalUrl", "sourceUrl", "pdfUrl", "documentUrl", "researchUrl", "url", "link")
+                )
+                if not _is_original_research_url(report_url) or report_url in seen_urls:
+                    continue
+                row = _broker_research_row(
+                    ctx,
+                    title=_coalesce_text(_dict_value(item, "title", "headline", "reportTitle", "name")),
+                    summary=_coalesce_text(_dict_value(item, "summary", "abstract", "description", "body")),
+                    report_url=report_url,
+                    source=_coalesce_text(_dict_value(item, "broker", "brokerName", "firm", "source", "publisher", "provider")),
+                    published_at=_published_iso(_dict_value(item, "publishedAt", "published", "date", "createdAt", "time")),
+                    quote_cache=quote_cache,
+                    explicit_symbol=_coalesce_text(_dict_value(item, "symbol", "ticker", "ric")),
+                    explicit_target=_dict_value(item, "targetPrice", "priceTarget", "pt"),
+                    explicit_previous_target=_dict_value(item, "previousTargetPrice", "previousPriceTarget", "previousPt"),
+                    explicit_action=_coalesce_text(_dict_value(item, "action", "ratingAction", "recommendation", "rating")),
+                )
+                if row:
+                    rows.append(row)
+                    seen_urls.add(report_url)
+                    parsed_count += 1
+        else:
+            try:
+                root = ElementTree.fromstring(raw_text)
+            except ElementTree.ParseError:
+                sources[source_key] = "parse-error"
+                continue
+            for item in root.findall(".//item")[: max(20, limit * 5)]:
+                report_url = _coalesce_url(item.findtext("link"), item.findtext("guid"))
+                if not _is_original_research_url(report_url) or report_url in seen_urls:
+                    continue
+                row = _broker_research_row(
+                    ctx,
+                    title=_strip_html(item.findtext("title")),
+                    summary=_strip_html(item.findtext("description")),
+                    report_url=report_url,
+                    source=_compact_source(item.findtext("source") or source_key),
+                    published_at=_published_iso(item.findtext("pubDate")),
+                    quote_cache=quote_cache,
+                )
+                if row:
+                    rows.append(row)
+                    seen_urls.add(report_url)
+                    parsed_count += 1
+        sources[source_key] = "ok" if parsed_count else "empty"
+    rows.sort(key=lambda row: _safe_float(row.get("_priority")) or 0.0, reverse=True)
+    for row in rows:
+        row.pop("_priority", None)
+    return rows[:limit], sources
+
+
+def _build_broker_research_news_fallback(ctx: dict, limit: int) -> Dict[str, Any]:
     try:
         xml_text = _http_text_get(ctx, _news_url(ctx, _broker_research_query()), timeout=14)
     except Exception as exc:
@@ -723,7 +972,31 @@ def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         title="BROKER RESEARCH",
         items=rows[:limit],
         summary={"upgrades": upgrades, "cuts": cuts, "topSymbol": rows[0]["label"] if rows else None, "rankBy": "rating action + target revision + recency"},
-        sources={"googleNews": "ok" if rows else "empty", "yahoo": "ok" if quote_cache else "empty"},
+        sources={"googleNewsFallback": "ok" if rows else "empty", "yahoo": "ok" if quote_cache else "empty"},
+    )
+
+
+def build_broker_research_payload(ctx: dict, limit: int) -> Dict[str, Any]:
+    rows, sources = _build_broker_rows_from_configured_sources(ctx, limit)
+    if rows:
+        upgrades = sum(1 for row in rows if "UPGRADE" in (row.get("tags") or []))
+        cuts = sum(1 for row in rows if any(tag in {"DOWNGRADE", "PT CUT"} for tag in (row.get("tags") or [])))
+        return _payload(
+            "broker-research-watch",
+            title="BROKER RESEARCH",
+            items=rows,
+            summary={"upgrades": upgrades, "cuts": cuts, "topSymbol": rows[0]["label"], "rankBy": "original report + target revision + recency"},
+            sources=sources or {"brokerResearchFeeds": "empty"},
+        )
+    if _setting_bool(ctx, "finance_broker_research_news_fallback"):
+        return _build_broker_research_news_fallback(ctx, limit)
+    return _payload(
+        "broker-research-watch",
+        title="BROKER RESEARCH",
+        items=[],
+        status="empty",
+        summary={"reason": "No original broker research feed configured", "requiredEnv": "POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS"},
+        sources=sources or {"brokerResearchFeeds": "missing"},
     )
 
 
