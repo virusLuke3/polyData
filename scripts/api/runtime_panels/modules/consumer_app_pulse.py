@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 PANEL_ID = "consumer-app-pulse"
 ROUTE = "/runtime/tech/consumer-app-pulse"
-DEFAULT_LIMIT = 12
+DEFAULT_LIMIT = 28
 MIN_LIMIT = 3
-MAX_LIMIT = 24
+MAX_LIMIT = 36
 
 
 def get_snapshot(ctx: Dict[str, Any], *, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
