@@ -814,11 +814,13 @@ def build_crypto_etf_payload(ctx: dict, limit: int, external: Dict[str, Any]) ->
         flow = _safe_float(item.get("flowProxyUsd"))
         change = _safe_float(item.get("changePercent"))
         symbol = str(item.get("symbol") or "ETF")
+        issuer = str(item.get("issuer") or ("BTC ETF" if symbol not in {"ETHA", "FETH"} else "ETH ETF"))
         rows.append(
             {
                 "id": symbol,
                 "label": symbol,
-                "symbol": str(item.get("issuer") or ("BTC ETF" if symbol not in {"ETHA", "FETH"} else "ETH ETF")),
+                "symbol": _short_etf_issuer(issuer),
+                "issuer": issuer,
                 "metric": flow,
                 "metricLabel": _format_usd(flow),
                 "metricUnit": "FLOW",
@@ -1045,3 +1047,29 @@ def _category_label(value: str) -> str:
         "crossAsset": "Cross-Asset",
     }
     return labels.get(value, value)
+
+
+def _short_etf_issuer(value: Any) -> str:
+    issuer = str(value or "").strip()
+    lowered = issuer.lower()
+    if "ishares" in lowered:
+        return "BlackRock"
+    if "fidelity" in lowered:
+        return "Fidelity"
+    if "grayscale" in lowered:
+        return "Grayscale"
+    if "bitwise" in lowered:
+        return "Bitwise"
+    if "ark" in lowered or "21shares" in lowered:
+        return "ARK/21Shares"
+    if "vaneck" in lowered:
+        return "VanEck"
+    if "franklin" in lowered:
+        return "Franklin"
+    if "invesco" in lowered:
+        return "Invesco"
+    if "valkyrie" in lowered:
+        return "Valkyrie"
+    if "wisdomtree" in lowered:
+        return "WisdomTree"
+    return issuer or "ETF"

@@ -904,21 +904,22 @@
 }
 
 .wm-finance-etf {
-  padding: 8px 12px 6px;
+  padding: 8px 10px 5px;
 }
 
 .wm-finance-etf-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  padding: 8px 7px;
+  grid-template-columns: 0.9fr 1fr 1fr 0.75fr;
+  gap: 5px;
+  padding: 8px 7px 7px;
   background: rgba(255, 255, 255, 0.046);
+  border-radius: 8px;
 }
 
 .wm-finance-etf-summary span {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 4px;
   color: rgba(235, 235, 235, 0.42);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -937,16 +938,15 @@
 
 .wm-finance-etf-table {
   margin-top: 8px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: hidden;
 }
 
 .wm-finance-etf-head,
 .wm-finance-etf-row {
-  min-width: 760px;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 0.65fr 2.8fr 0.9fr 0.75fr 0.65fr;
-  gap: 6px;
+  grid-template-columns: minmax(42px, 0.62fr) minmax(76px, 1.25fr) minmax(70px, 1fr) minmax(54px, 0.78fr) minmax(48px, 0.7fr);
+  gap: 5px;
   align-items: center;
 }
 
@@ -959,7 +959,7 @@
 }
 
 .wm-finance-etf-row {
-  min-height: 38px;
+  min-height: 33px;
   border-top: 1px solid rgba(255, 255, 255, 0.075);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -986,10 +986,10 @@
 }
 
 .wm-finance-etf-row span:nth-child(2) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1;
 }
 
 .wm-finance-etf-row em {
@@ -998,22 +998,30 @@
 }
 
 .wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-list {
-  overflow-x: auto;
-  scrollbar-width: thin;
+  padding: 8px 12px 5px;
+  overflow: hidden;
 }
 
 .wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-row {
-  min-width: 560px;
-  grid-template-columns: minmax(110px, 1fr) minmax(270px, auto);
+  min-width: 0;
+  min-height: 42px;
+  grid-template-columns: minmax(64px, 0.7fr) minmax(160px, auto);
+  gap: 6px;
 }
 
 .wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-value {
-  grid-template-columns: minmax(190px, auto) minmax(55px, auto);
+  grid-template-columns: minmax(136px, auto) minmax(48px, auto);
+  gap: 6px;
 }
 
 .wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-value strong {
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.wm-finance-watch-panel[data-panel-id="stablecoin-monitor"] .wm-finance-row-foot {
+  display: none;
 }
 
 .wm-finance-empty {
