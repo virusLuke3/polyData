@@ -1418,11 +1418,30 @@
   text-decoration: underline;
 }
 
+.wm-tech-feed-metric {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: #efefef;
+  font-size: 9.5px;
+  font-weight: 880;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-tech-feed-metric em {
+  margin-left: 6px;
+  color: rgba(235, 235, 235, 0.52);
+  font-style: normal;
+  font-weight: 760;
+}
+
 .wm-tech-cap-row {
   min-width: 0;
-  min-height: 54px;
+  min-height: 48px;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) minmax(86px, auto) minmax(48px, auto);
+  grid-template-columns: 34px minmax(92px, 1fr) minmax(86px, auto) minmax(48px, auto);
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
@@ -1487,6 +1506,14 @@
   font-weight: 720;
   line-height: 1;
   white-space: nowrap;
+}
+
+.wm-tech-cap-value em.tone-up {
+  color: #24f284;
+}
+
+.wm-tech-cap-value em.tone-down {
+  color: #ff4d55;
 }
 
 .wm-tech-cap-row > b {

@@ -40,7 +40,7 @@ function itemKey(item: RuntimeTechPanelItem, index: number) {
 }
 
 function tags(item: RuntimeTechPanelItem) {
-  return (item.tags || []).slice(0, 3).map((tag) => (
+  return (item.tags || []).filter((tag) => String(tag).toUpperCase() !== 'TOP FREE').slice(0, 3).map((tag) => (
     <span className={`wm-tech-tag tag-${String(tag).toLowerCase().replace(/\W+/g, '-')}`} key={tag}>{tag}</span>
   ));
 }
@@ -74,6 +74,12 @@ function TechFeedRow({ item }: { item: RuntimeTechPanelItem }) {
       <div className="wm-tech-feed-foot">
         <span>{formatRelative(item.publishedAt || undefined)}</span>
         {item.url ? <b>READ SOURCE</b> : null}
+        {item.metricLabel ? (
+          <span className={`wm-tech-feed-metric ${toneClass(item.tone)}`}>
+            {item.metricLabel}
+            {item.secondaryLabel ? <em>{item.secondaryLabel}</em> : null}
+          </span>
+        ) : null}
       </div>
     </>
   );
@@ -89,12 +95,10 @@ function MarketCapRow({ item }: { item: RuntimeTechPanelItem }) {
       <div className="wm-tech-cap-rank">#{item.rank || '--'}</div>
       <div className="wm-tech-cap-main">
         <strong>{item.label || item.symbol}</strong>
-        <span>{item.symbol} · {item.metricUnit || 'MKT CAP'}</span>
-        <div>{tags(item)}</div>
       </div>
       <div className="wm-tech-cap-value">
         <strong>{item.metricLabel || '--'}</strong>
-        <em>{item.secondaryLabel || '--'}</em>
+        <em className={toneClass(item.tone)}>{item.secondaryLabel || '--'}</em>
       </div>
       <b className={toneClass(item.tone)}>{item.changeLabel || '--'}</b>
     </article>

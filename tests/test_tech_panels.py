@@ -35,13 +35,47 @@ RSS_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </channel></rss>
 """
 
+OPENROUTER_MODELS = {
+    "data": [
+        {
+            "id": "qwen/qwen3.7-max",
+            "canonical_slug": "qwen/qwen3.7-max-20260520",
+            "name": "Qwen: Qwen3.7 Max",
+            "created": 1779376861,
+            "description": "Flagship Qwen model for agent-centric workloads.",
+            "context_length": 1000000,
+            "pricing": {"prompt": "0.0000025", "completion": "0.0000075"},
+        },
+        {
+            "id": "x-ai/grok-build-0.1",
+            "canonical_slug": "x-ai/grok-build-0.1-20260520",
+            "name": "xAI: Grok Build 0.1",
+            "created": 1779298123,
+            "description": "Fast coding model.",
+            "context_length": 256000,
+            "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+        },
+    ]
+}
+
+OPENROUTER_RANKINGS_RSC = """0:{"a":"$@1","f":"","q":"","i":false}
+1:[{"date":"2026-05-23 00:00:00","variant_permaslug":"qwen/qwen3.7-max-20260520","total_completion_tokens":1000000000,"total_prompt_tokens":2000000000,"count":120000,"change":0.22},{"date":"2026-05-23 00:00:00","variant_permaslug":"x-ai/grok-build-0.1-20260520","total_completion_tokens":400000000,"total_prompt_tokens":600000000,"count":42000,"change":null}]
+"""
+
 
 def _ctx():
     def http_text_get(url, timeout=12, headers=None):
         assert "news.google.com" in url
         return RSS_XML
 
+    def http_text_post(url, data="", timeout=12, headers=None):
+        assert "openrouter.ai/rankings" in url
+        assert "Next-Action" in (headers or {})
+        return OPENROUTER_RANKINGS_RSC
+
     def http_json_get(url, params=None, timeout=12, headers=None):
+        if "openrouter.ai/api/v1/models" in url:
+            return OPENROUTER_MODELS
         assert "apps/top-free" in url
         return {
             "feed": {
@@ -74,6 +108,7 @@ def _ctx():
             tech_app_store_top_free_url="https://rss.applemarketingtools.com/api/v2/us/apps/top-free/25/apps.json",
         ),
         "http_text_get": http_text_get,
+        "http_text_post": http_text_post,
         "http_json_get": http_json_get,
         "get_yahoo_market_snapshot": yahoo,
         "utc_now_iso": lambda: "2026-05-24T00:00:00Z",
@@ -90,8 +125,11 @@ def test_ai_model_race_payload_extracts_entity_and_tags():
     payload = tech_panels_service.build_tech_panel_payload(_ctx(), "ai-model-race", limit=6)
 
     assert payload["status"] == "ok"
-    assert payload["items"][0]["label"] == "OpenAI"
-    assert "RELEASE" in payload["items"][0]["tags"]
+    assert payload["sources"]["openRouterUsage"] == "ok"
+    assert payload["sources"]["openRouterModels"] == "ok"
+    assert payload["items"][0]["source"] == "OpenRouter Usage"
+    assert payload["items"][0]["metricLabel"] == "3.00B TOK"
+    assert any("NEW MODEL" in item["tags"] for item in payload["items"])
     assert payload["summary"]["watchlist"][0]["count"] >= 1
 
 
@@ -130,4 +168,5 @@ def test_consumer_app_pulse_combines_app_store_and_news():
     assert payload["status"] == "ok"
     assert payload["sources"]["appStore"] == "ok"
     assert payload["items"][0]["source"] == "App Store"
+    assert "TOP FREE" not in payload["items"][0]["tags"]
     assert any(item["label"] == "TikTok" for item in payload["items"])

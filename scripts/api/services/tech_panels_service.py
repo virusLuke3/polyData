@@ -23,6 +23,9 @@ TECH_PANEL_IDS = (
     "big-tech-market-cap",
     "consumer-app-pulse",
 )
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings?view=week"
+OPENROUTER_MODEL_RANKINGS_ACTION = "40824635c5eb77626bdf6795ffbf382c0862b321e1"
 
 AI_ENTITIES = (
     ("OpenAI", "OPENAI", ("openai", "chatgpt", "gpt")),
@@ -133,6 +136,18 @@ def _format_usd(value: Any) -> str:
     return f"{sign}${number:.0f}"
 
 
+def _format_compact_number(value: Any) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "--"
+    sign = "-" if number < 0 else ""
+    number = abs(number)
+    for suffix, divisor in (("T", 1_000_000_000_000), ("B", 1_000_000_000), ("M", 1_000_000), ("K", 1_000)):
+        if number >= divisor:
+            return f"{sign}{number / divisor:.2f}{suffix}" if suffix in {"T", "B"} else f"{sign}{number / divisor:.1f}{suffix}"
+    return f"{sign}{number:,.0f}"
+
+
 def _tone(value: Any) -> str:
     number = _safe_float(value)
     if number is None:
@@ -176,6 +191,29 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[
     response = requests.get(url, timeout=timeout, headers=headers)
     response.raise_for_status()
     return response.text
+
+
+def _http_text_post(ctx: dict, url: str, *, data: str, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
+    poster = ctx.get("http_text_post")
+    if callable(poster):
+        return poster(url, data=data, timeout=timeout, headers=headers)
+    if requests is None:
+        raise RuntimeError("requests package is required")
+    response = requests.post(url, data=data, timeout=timeout, headers=headers)
+    response.raise_for_status()
+    return response.text
+
+
+def _http_json_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    getter = ctx.get("http_json_get")
+    if callable(getter):
+        return getter(url, timeout=timeout, headers=headers)
+    if requests is None:
+        raise RuntimeError("requests package is required")
+    response = requests.get(url, timeout=timeout, headers=headers)
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
 
 
 def _news_url(ctx: dict, query: str) -> str:
@@ -325,14 +363,182 @@ def _entity_summary(rows: List[Dict[str, Any]], entities: tuple) -> List[Dict[st
     return summary_rows
 
 
+def _provider_from_model_id(value: Any) -> str:
+    model_id = str(value or "").strip()
+    if "/" not in model_id:
+        return "AI"
+    provider = model_id.split("/", 1)[0]
+    return provider.replace("-", " ").replace("_", " ").upper()[:14]
+
+
+def _openrouter_model_url(model_id: Any) -> str:
+    return f"https://openrouter.ai/{str(model_id or '').strip()}"
+
+
+def _format_model_price(pricing: Any) -> str:
+    if not isinstance(pricing, dict):
+        return "PRICE --"
+    prompt = _safe_float(pricing.get("prompt"))
+    completion = _safe_float(pricing.get("completion"))
+    if prompt == 0 and completion == 0:
+        return "FREE"
+    if prompt is None and completion is None:
+        return "PRICE --"
+    prompt_label = f"${(prompt or 0) * 1_000_000:.2f}"
+    completion_label = f"${(completion or 0) * 1_000_000:.2f}"
+    return f"{prompt_label}/{completion_label} 1M"
+
+
+def _parse_openrouter_rsc_json(text: str) -> Any:
+    decoder = json.JSONDecoder()
+    for line in str(text or "").splitlines():
+        if ":" not in line:
+            continue
+        prefix, payload = line.split(":", 1)
+        if not prefix.isdigit():
+            continue
+        payload = payload.strip()
+        if not payload or payload[0] not in "[{":
+            continue
+        try:
+            value, _offset = decoder.raw_decode(payload)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _openrouter_models(ctx: dict) -> List[Dict[str, Any]]:
+    payload = _http_json_get(
+        ctx,
+        OPENROUTER_MODELS_URL,
+        timeout=14,
+        headers={"User-Agent": "polydata-tech-panels/1.0", "Accept": "application/json"},
+    )
+    rows = payload.get("data") if isinstance(payload, dict) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _openrouter_latest_model_rows(models: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    sorted_models = sorted(models, key=lambda item: int(_safe_float(item.get("created")) or 0), reverse=True)
+    for model in sorted_models[:limit]:
+        model_id = str(model.get("id") or model.get("canonical_slug") or "").strip()
+        if not model_id:
+            continue
+        created = _safe_float(model.get("created"))
+        published_at = datetime.fromtimestamp(created, timezone.utc).isoformat().replace("+00:00", "Z") if created else None
+        context_length = _safe_float(model.get("context_length"))
+        rows.append(
+            {
+                "id": f"openrouter-model:{model_id}",
+                "label": _provider_from_model_id(model_id),
+                "symbol": "MODEL",
+                "title": str(model.get("name") or model_id),
+                "summary": _strip_html(model.get("description"))[:180],
+                "source": "OpenRouter Models",
+                "url": _openrouter_model_url(model_id),
+                "publishedAt": published_at,
+                "metric": context_length,
+                "metricLabel": "NEW",
+                "metricUnit": "MODEL",
+                "secondaryLabel": f"CTX {_format_compact_number(context_length)}",
+                "tags": ["NEW MODEL", "OPENROUTER"],
+                "tone": "up",
+            }
+        )
+    return rows
+
+
+def _openrouter_usage_rows(ctx: dict, models: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    response = _http_text_post(
+        ctx,
+        OPENROUTER_RANKINGS_URL,
+        data=json.dumps(["week"]),
+        timeout=16,
+        headers={
+            "User-Agent": "polydata-tech-panels/1.0",
+            "Accept": "text/x-component",
+            "Content-Type": "text/plain;charset=UTF-8",
+            "Next-Action": OPENROUTER_MODEL_RANKINGS_ACTION,
+        },
+    )
+    raw_rows = _parse_openrouter_rsc_json(response)
+    model_lookup = {
+        str(model.get("canonical_slug") or model.get("id") or "").lower(): model
+        for model in models
+        if model.get("canonical_slug") or model.get("id")
+    }
+    totals: Dict[str, Dict[str, Any]] = {}
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        slug = str(row.get("variant_permaslug") or row.get("model_permaslug") or "").strip()
+        if not slug:
+            continue
+        total_tokens = (_safe_float(row.get("total_prompt_tokens")) or 0) + (_safe_float(row.get("total_completion_tokens")) or 0)
+        if total_tokens <= 0:
+            continue
+        bucket = totals.setdefault(slug, {"tokens": 0.0, "count": 0.0, "change": None, "date": row.get("date")})
+        bucket["tokens"] += total_tokens
+        bucket["count"] += _safe_float(row.get("count")) or 0
+        if row.get("change") is not None:
+            bucket["change"] = row.get("change")
+    ranked = sorted(totals.items(), key=lambda pair: pair[1]["tokens"], reverse=True)
+    rows: List[Dict[str, Any]] = []
+    for rank, (slug, aggregate) in enumerate(ranked[:limit], start=1):
+        base_slug = re.sub(r"-20\d{6}$", "", slug)
+        model = model_lookup.get(slug.lower()) or model_lookup.get(base_slug.lower()) or {}
+        title = str(model.get("name") or base_slug.replace("/", ": ").replace("-", " "))
+        change = _safe_float(aggregate.get("change"))
+        rows.append(
+            {
+                "id": f"openrouter-usage:{slug}",
+                "label": _provider_from_model_id(slug),
+                "symbol": "USAGE",
+                "title": f"#{rank} {title}",
+                "summary": f"{_format_compact_number(aggregate.get('count'))} requests on OpenRouter weekly leaderboard",
+                "source": "OpenRouter Usage",
+                "url": _openrouter_model_url(base_slug),
+                "metric": aggregate["tokens"],
+                "metricLabel": f"{_format_compact_number(aggregate['tokens'])} TOK",
+                "metricUnit": "TOKENS",
+                "secondaryLabel": f"{_format_compact_number(aggregate.get('count'))} REQ",
+                "tags": ["USAGE", "OPENROUTER"],
+                "tone": _tone(change) if change is not None else "watch",
+                "rank": rank,
+                "change": change,
+            }
+        )
+    return rows
+
+
 def build_ai_model_race_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    sources = {"googleNewsRss": "empty"}
+    sources = {"openRouterModels": "empty", "openRouterUsage": "empty", "googleNewsRss": "empty"}
     error_summary = None
+    models: List[Dict[str, Any]] = []
+    rows: List[Dict[str, Any]] = []
     try:
-        rows = _parse_rss_items(_http_text_get(ctx, _news_url(ctx, AI_NEWS_QUERY), timeout=14), panel_id="ai-model-race", limit=limit)
-        sources["googleNewsRss"] = "ok" if rows else "empty"
+        models = _openrouter_models(ctx)
+        model_rows = _openrouter_latest_model_rows(models, max(4, limit // 2))
+        sources["openRouterModels"] = "ok" if model_rows else "empty"
+        rows.extend(model_rows)
     except Exception as exc:
-        rows = []
+        error_summary = str(exc)
+        sources["openRouterModels"] = "error"
+    try:
+        usage_rows = _openrouter_usage_rows(ctx, models, max(4, limit // 2))
+        sources["openRouterUsage"] = "ok" if usage_rows else "empty"
+        rows = usage_rows + rows
+    except Exception as exc:
+        error_summary = str(exc)
+        sources["openRouterUsage"] = "error"
+    try:
+        news_rows = _parse_rss_items(_http_text_get(ctx, _news_url(ctx, AI_NEWS_QUERY), timeout=14), panel_id="ai-model-race", limit=max(3, limit // 3))
+        sources["googleNewsRss"] = "ok" if news_rows else "empty"
+        rows.extend(news_rows)
+    except Exception as exc:
         error_summary = str(exc)
         sources["googleNewsRss"] = "error"
     summary_rows = _entity_summary(rows, AI_ENTITIES)
@@ -340,7 +546,7 @@ def build_ai_model_race_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         "ai-model-race",
         title="AI MODEL RACE",
         items=rows[:limit],
-        summary={"watchlist": summary_rows, "query": AI_NEWS_QUERY, "error": error_summary},
+        summary={"watchlist": summary_rows, "query": AI_NEWS_QUERY, "error": error_summary, "openRouterRows": len(rows)},
         sources=sources,
     )
 
@@ -439,7 +645,7 @@ def _fetch_app_store_rows(ctx: dict, limit: int) -> List[Dict[str, Any]]:
                 "metricLabel": f"#{index}",
                 "metricUnit": "RANK",
                 "secondaryLabel": artist[:28] if artist else "TOP FREE",
-                "tags": ["APP STORE", "TOP FREE"],
+                "tags": ["APP STORE"],
                 "tone": "up" if index <= 5 else "neutral",
             }
         )
