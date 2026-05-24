@@ -27,6 +27,7 @@ import { panel as cryptoFearGreed } from './crypto-fear-greed';
 import { panel as cryptoEtfFlow } from './crypto-etf-flow';
 import { panel as stablecoinMonitor } from './stablecoin-monitor';
 import { panel as blockchainPolicyNews } from './blockchain-policy-news';
+import { panel as tradePolicyRadar } from './trade-policy-radar';
 import { panel as geoSanctionsShock } from './geo-sanctions-shock';
 import { panel as cpiReleaseCommandCenter } from './cpi-release-command-center';
 import { panel as cpiComponentsPressureRegistry } from './cpi-components-pressure-registry';
@@ -90,6 +91,7 @@ export const PANEL_MODULES: PanelModule[] = [
   cryptoEtfFlow,
   stablecoinMonitor,
   blockchainPolicyNews,
+  tradePolicyRadar,
   geoSanctionsShock,
   cpiReleaseCommandCenter,
   cpiComponentsPressureRegistry,
