@@ -983,7 +983,7 @@ def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
 
 
 def get_tech_panel_snapshot(ctx: dict, panel_id: str, limit: int = 10) -> Dict[str, Any]:
-    limit = max(3, min(36, int(limit or 10)))
+    limit = max(3, min(60, int(limit or 10)))
     settings = ctx.get("SETTINGS")
     ttl_seconds = int(getattr(settings, "tech_runtime_ttl_seconds", TECH_PANEL_TTL_SECONDS) or TECH_PANEL_TTL_SECONDS)
     seeded = _read_seeded_snapshot(ctx, panel_id, ttl_seconds)
