@@ -144,7 +144,7 @@
 .wm-transmission-row {
   position: relative;
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) minmax(58px, auto);
+  grid-template-columns: 3px minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
   padding: 8px 8px 8px 0;
@@ -167,9 +167,18 @@
   min-width: 0;
 }
 
+.wm-transmission-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .wm-transmission-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
@@ -192,15 +201,15 @@
 }
 
 .wm-transmission-main > strong {
-  display: block;
-  margin-top: 2px;
+  display: -webkit-box;
+  margin-top: 4px;
   overflow: hidden;
   color: var(--wm-text);
   font-size: 12px;
   font-weight: 800;
   line-height: 1.22;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .wm-transmission-main p {
@@ -238,9 +247,17 @@
   font-style: normal;
 }
 
+.wm-transmission-exposure-col small {
+  color: #6f7774;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1.1;
+}
+
 .wm-transmission-exposure {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(30px, 1fr) auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -268,7 +285,9 @@
 }
 
 .wm-transmission-exposure em {
+  grid-column: 1 / -1;
   color: var(--wm-text-dim);
+  font-size: 8px;
 }
 
 .wm-transmission-exposure i,
@@ -304,7 +323,8 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 70px;
   text-align: right;
 }
 
@@ -317,7 +337,7 @@
 }
 
 .wm-transmission-value span {
-  max-width: 84px;
+  max-width: 96px;
   overflow: hidden;
   color: var(--wm-text-dim);
   font-size: 9px;
@@ -377,14 +397,15 @@
 }
 
 @media (max-width: 760px) {
-  .wm-transmission-row {
-    grid-template-columns: 3px minmax(0, 1fr);
-  }
-
+  .wm-transmission-topline,
   .wm-transmission-value {
-    grid-column: 2;
     align-items: flex-start;
     text-align: left;
+  }
+
+  .wm-transmission-topline {
+    flex-direction: column;
+    gap: 5px;
   }
 
   .wm-transmission-columns {

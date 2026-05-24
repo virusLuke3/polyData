@@ -72,22 +72,29 @@ function ExposureTag({ exposure }: { exposure: RuntimeEquityExposure }) {
       : direction === 'spread'
         ? 'SPREAD'
         : 'WEAK';
+  const confidence = String(exposure.confidence || 'low').toUpperCase();
+  const score = formatScore(exposure.score);
   return (
-    <span className={`wm-transmission-exposure ${toneClass(direction)} ${confidenceClass(exposure.confidence)}`}>
+    <span
+      className={`wm-transmission-exposure ${toneClass(direction)} ${confidenceClass(exposure.confidence)}`}
+      title={`${exposure.ticker} ${label} ${score} ${confidence}`}
+    >
       <b>{exposure.ticker}</b>
-      <em>{label}</em>
-      <i>{formatScore(exposure.score)}</i>
+      <i>{score}</i>
+      <em>{confidence}</em>
     </span>
   );
 }
 
 function ExposureColumn({ title, items, empty }: { title: string; items?: RuntimeEquityExposure[]; empty: string }) {
   const visible = (items || []).slice(0, 3);
+  const hiddenCount = Math.max(0, (items || []).length - visible.length);
   return (
     <div className="wm-transmission-exposure-col">
       <span>{title}</span>
       <div>
         {visible.length ? visible.map((item) => <ExposureTag exposure={item} key={`${title}-${item.ticker}`} />) : <em>{empty}</em>}
+        {hiddenCount ? <small>+{hiddenCount} more</small> : null}
       </div>
     </div>
   );
@@ -116,23 +123,25 @@ function TransmissionRow({ chain }: { chain: RuntimeTransmissionChain }) {
     <article className={`wm-transmission-row ${toneClass(chain.tone)}`}>
       <div className="wm-transmission-rail" />
       <div className="wm-transmission-main">
-        <div className="wm-transmission-meta">
-          <span>{chain.commodityId}</span>
-          <b>{chain.lagLabel || 'lag model'}</b>
-          <em className={confidenceClass(chain.confidence)}>{String(chain.confidence || 'low').toUpperCase()}</em>
+        <div className="wm-transmission-topline">
+          <div className="wm-transmission-meta">
+            <span>{chain.commodityId}</span>
+            <b>{chain.lagLabel || 'lag model'}</b>
+            <em className={confidenceClass(chain.confidence)}>{String(chain.confidence || 'low').toUpperCase()}</em>
+          </div>
+          <div className="wm-transmission-value">
+            <strong className={toneClass(chain.tone)}>{shock}</strong>
+            <span>{chain.demandRegime || 'mixed demand'}</span>
+          </div>
         </div>
-        <strong>{chain.chainLabel}</strong>
-        <p>{chain.formula || 'commodity move * exposure * pass-through * pricing power'}</p>
+        <strong title={chain.chainLabel}>{chain.chainLabel}</strong>
+        <p title={chain.formula || undefined}>{chain.formula || 'commodity move * exposure * pass-through * pricing power'}</p>
         <div className="wm-transmission-columns">
           <ExposureColumn title="WINNERS" items={chain.winners} empty="none" />
           <ExposureColumn title="LOSERS" items={chain.losers} empty="none" />
           <ExposureColumn title="SPREAD" items={chain.spreadWatch} empty="not modeled" />
         </div>
         <LinkedMarketStrip chain={chain} />
-      </div>
-      <div className="wm-transmission-value">
-        <strong className={toneClass(chain.tone)}>{shock}</strong>
-        <span>{chain.demandRegime || 'mixed demand'}</span>
       </div>
     </article>
   );
