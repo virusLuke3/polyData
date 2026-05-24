@@ -36,6 +36,7 @@ FINANCE_WATCH_PANEL_IDS = (
 DEFILLAMA_YIELDS_URL = "https://yields.llama.fi/pools"
 ALTERNATIVE_FNG_URL = "https://api.alternative.me/fng/"
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 
 GLOBAL_INDEX_SYMBOLS = (
     ("S&P 500", "^GSPC", "US"),
@@ -51,6 +52,45 @@ GLOBAL_INDEX_SYMBOLS = (
     ("DAX", "^GDAXI", "DE"),
     ("CAC", "^FCHI", "FR"),
 )
+
+CRYPTO_PERP_ORDER = (
+    "BTC",
+    "ETH",
+    "SOL",
+    "BNB",
+    "XRP",
+    "DOGE",
+    "ADA",
+    "AVAX",
+    "LINK",
+    "TRX",
+    "DOT",
+    "BCH",
+    "SUI",
+    "NEAR",
+    "APT",
+)
+
+RELIABLE_DEFI_PROJECTS = {
+    "aave-v3": 120,
+    "aave": 118,
+    "pendle": 116,
+    "uniswap-v3": 114,
+    "uniswap-v4": 112,
+    "uniswap": 110,
+    "curve-dex": 108,
+    "curve": 108,
+    "compound-v3": 106,
+    "compound": 104,
+    "morpho-blue": 102,
+    "morpho": 100,
+    "makerdao": 98,
+    "sky-lending": 96,
+    "ether.fi": 94,
+    "lido": 92,
+}
+
+TRADFI_PERP_CLASS_PRIORITY = {"INDEX": 4, "COMMODITY": 3, "STOCK": 2, "PRIVATE": 1}
 
 NEWS_QUERIES = {
     "defi-security-watch": '("DeFi" OR "crypto protocol") (exploit OR hack OR vulnerability OR attack OR audit OR governance risk)',
@@ -103,11 +143,14 @@ def _tone(value: Any, *, inverted: bool = False) -> str:
 def _http_json_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12) -> Any:
     getter = ctx.get("http_json_get")
     if callable(getter):
-        return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/json"})
+        try:
+            return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/json"})
+        except Exception:
+            pass
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = True
     try:
         response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/json"})
         response.raise_for_status()
@@ -119,11 +162,14 @@ def _http_json_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = No
 def _http_text_get(ctx: dict, url: str, *, timeout: int = 12) -> str:
     getter = ctx.get("http_text_get")
     if callable(getter):
-        return getter(url, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"})
+        try:
+            return getter(url, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"})
+        except Exception:
+            pass
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = True
     try:
         response = session.get(url, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"})
         response.raise_for_status()
@@ -134,6 +180,42 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12) -> str:
 
 def _news_url(query: str) -> str:
     return f"{GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
+
+
+def _fetch_yahoo_snapshot(ctx: dict, symbol: str, *, interval: str = "30m", range_name: str = "5d") -> Optional[Dict[str, Any]]:
+    try:
+        quote = ctx["get_yahoo_market_snapshot"](symbol, interval=interval, range_name=range_name, ttl_seconds=300)
+    except Exception:
+        quote = None
+    if isinstance(quote, dict) and quote.get("price") is not None:
+        return quote
+    payload = _http_json_get(
+        ctx,
+        YAHOO_CHART_URL.format(symbol=symbol),
+        params={"range": range_name, "interval": "1d" if range_name != "1d" else "5m"},
+        timeout=12,
+    )
+    result = (payload.get("chart") or {}).get("result") if isinstance(payload, dict) else []
+    chart = result[0] if isinstance(result, list) and result else {}
+    quote_rows = (chart.get("indicators") or {}).get("quote") or []
+    quote_data = quote_rows[0] if quote_rows and isinstance(quote_rows[0], dict) else {}
+    timestamps = chart.get("timestamp") or []
+    closes = [value for value in (quote_data.get("close") or []) if value is not None]
+    volumes = [value for value in (quote_data.get("volume") or []) if value is not None]
+    if not closes:
+        return None
+    price = _safe_float(closes[-1])
+    previous = _safe_float(closes[-2]) if len(closes) >= 2 else None
+    points = []
+    for index, value in enumerate(closes[-24:]):
+        timestamp = timestamps[index] if index < len(timestamps) else None
+        points.append({"timestamp": timestamp, "value": value})
+    return {
+        "price": price,
+        "changePercent": ((price - previous) / previous * 100) if price is not None and previous not in (None, 0) else None,
+        "volume24h": _safe_float(volumes[-1]) if volumes else None,
+        "points": points,
+    }
 
 
 def _parse_rss_items(xml_text: str, *, panel_id: str, limit: int) -> List[Dict[str, Any]]:
@@ -200,6 +282,8 @@ def _news_tags(panel_id: str, title: str, description: str) -> List[str]:
         ("COURT", ("court", "judge", "lawsuit")),
         ("ENFORCE", ("enforcement", "charged", "settlement")),
         ("STABLE", ("stablecoin",)),
+        ("GOV", ("governance", "proposal", "dao")),
+        ("BRIDGE", ("bridge", "cross-chain", "cross chain")),
     )
     tags = [label for label, needles in pairs if any(needle in text for needle in needles)]
     if panel_id == "defi-security-watch":
@@ -241,16 +325,24 @@ def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
             continue
         tvl = _safe_float(pool.get("tvlUsd"))
         apy = _safe_float(pool.get("apy"))
-        if tvl is None or apy is None or tvl < 1_000_000 or apy <= 0 or apy > 80:
+        project = str(pool.get("project") or "Protocol")
+        project_key = project.lower().strip()
+        protocol_score = RELIABLE_DEFI_PROJECTS.get(project_key, 0)
+        if tvl is None or apy is None or tvl < 5_000_000 or apy <= 0 or apy > 60:
+            continue
+        if protocol_score <= 0 and tvl < 50_000_000:
             continue
         symbol = str(pool.get("symbol") or pool.get("underlyingTokens") or "").upper()
-        project = str(pool.get("project") or "Protocol")
-        tags = ["APY"]
+        stable_bonus = 18 if pool.get("stablecoin") else 0
+        moderate_apy_bonus = max(0.0, 30.0 - abs(float(apy) - 8.0))
+        risk_penalty = 45 if apy > 30 else 18 if apy > 18 else 0
+        reliability = protocol_score + stable_bonus + math.log10(max(tvl, 1.0)) * 8 + moderate_apy_bonus - risk_penalty
+        tags = ["TVL"]
         if pool.get("stablecoin"):
             tags.append("STABLE")
-        if "ETH" in symbol:
-            tags.append("ETH")
-        if apy >= 20:
+        if project_key in RELIABLE_DEFI_PROJECTS:
+            tags.append(project.split("-")[0].upper()[:8])
+        if apy >= 25:
             tags.append("RISK")
         rows.append(
             {
@@ -264,11 +356,12 @@ def build_defi_yields_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 "secondaryLabel": _format_usd(tvl),
                 "change": _safe_float(pool.get("apyPct30D") or pool.get("apyPct7D")),
                 "tags": tags[:4],
-                "tone": "up" if apy < 25 else "watch",
+                "tone": "up" if apy < 18 else "watch",
+                "reliabilityScore": reliability,
             }
         )
-    rows.sort(key=lambda item: (_safe_float(item.get("metric")) or 0.0), reverse=True)
-    return _payload("defi-yield-monitor", title="DEFI YIELDS", items=rows[:limit], summary={"topLabel": rows[0]["label"] if rows else None}, sources={"defillamaYields": "ok" if rows else "empty"})
+    rows.sort(key=lambda item: (_safe_float(item.get("reliabilityScore")) or 0.0, _safe_float(item.get("secondary")) or 0.0), reverse=True)
+    return _payload("defi-yield-monitor", title="DEFI YIELDS", items=rows[:limit], summary={"topLabel": rows[0]["label"] if rows else None, "rankBy": "protocol reliability + TVL"}, sources={"defillamaYields": "ok" if rows else "empty"})
 
 
 def build_news_payload(ctx: dict, panel_id: str, title: str, limit: int) -> Dict[str, Any]:
@@ -279,18 +372,25 @@ def build_news_payload(ctx: dict, panel_id: str, title: str, limit: int) -> Dict
 
 
 def build_crypto_perps_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    base = crypto_funding_service.get_crypto_funding_watch_snapshot(ctx, limit=max(limit, 12))
+    requested_limit = max(limit, len(CRYPTO_PERP_ORDER), 24)
+    base = crypto_funding_service.get_crypto_funding_watch_snapshot(ctx, limit=requested_limit)
+    asset_map = {str(asset.get("asset") or asset.get("symbol") or "").upper(): asset for asset in (base.get("assets") or []) if isinstance(asset, dict)}
+    ordered_assets = [asset_map[symbol] for symbol in CRYPTO_PERP_ORDER if symbol in asset_map]
+    extras = [asset for symbol, asset in asset_map.items() if symbol not in CRYPTO_PERP_ORDER]
     rows: List[Dict[str, Any]] = []
-    for asset in (base.get("assets") or [])[:limit]:
+    for asset in (ordered_assets + extras)[:limit]:
         if not isinstance(asset, dict):
             continue
-        funding = _safe_float(asset.get("maxAbsFundingPercent"))
+        funding = _safe_float(asset.get("consensusFundingPercent") if asset.get("consensusFundingPercent") is not None else asset.get("maxAbsFundingPercent"))
         bias = str(asset.get("bias") or "mixed")
         signed = funding
         if funding is not None and bias == "shorts-pay":
             signed = -abs(funding)
         elif funding is not None:
             signed = abs(funding)
+        quotes = [quote for quote in (asset.get("quotes") or []) if isinstance(quote, dict)]
+        mark = next((_safe_float(quote.get("markPrice")) for quote in quotes if _safe_float(quote.get("markPrice")) is not None), None)
+        exchange = str(quotes[0].get("exchange") or "PERP") if quotes else "PERP"
         rows.append(
             {
                 "id": str(asset.get("symbol") or asset.get("asset")),
@@ -299,8 +399,9 @@ def build_crypto_perps_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 "metric": signed,
                 "metricLabel": f"{signed:+.4f}%" if signed is not None else "--",
                 "metricUnit": "FUND",
-                "secondaryLabel": _short_time(asset.get("nextFundingTime")),
-                "tags": [_bias_tag(bias), "RESET" if asset.get("nextFundingTime") else "PERP"],
+                "secondary": mark,
+                "secondaryLabel": _format_price(mark),
+                "tags": [exchange.upper()[:8], _bias_tag(bias)],
                 "tone": "down" if signed and signed < 0 else ("up" if signed and signed > 0 else "neutral"),
             }
         )
@@ -316,9 +417,11 @@ def build_tradfi_perps_payload(ctx: dict, limit: int, external: Dict[str, Any]) 
         mark = _safe_float(item.get("markPx"))
         oracle = _safe_float(item.get("oraclePx"))
         basis_bps = _safe_float(item.get("basisBps"))
+        change = _safe_float(item.get("changePercent") if item.get("changePercent") is not None else item.get("funding"))
         if basis_bps is None and mark is not None and oracle not in (None, 0):
             basis_bps = ((mark - float(oracle)) / float(oracle)) * 10000
         asset_class = str(item.get("assetClass") or "perp").upper()
+        venue = str(item.get("venue") or item.get("source") or "PERP").upper()
         rows.append(
             {
                 "id": str(item.get("symbol") or item.get("display")),
@@ -328,23 +431,21 @@ def build_tradfi_perps_payload(ctx: dict, limit: int, external: Dict[str, Any]) 
                 "metricLabel": _format_price(mark),
                 "metricUnit": "MARK",
                 "secondary": basis_bps,
-                "secondaryLabel": f"{basis_bps:+.0f} bps" if basis_bps is not None else "--",
-                "change": _safe_float(item.get("funding")),
-                "tags": [asset_class, "BASIS" if basis_bps is not None else "PERP"],
-                "tone": _tone(basis_bps),
+                "secondaryLabel": f"{basis_bps:+.0f} bps" if basis_bps is not None and abs(basis_bps) > 0 else (_format_usd(item.get("dayNotional")) if item.get("dayNotional") is not None else "--"),
+                "change": change,
+                "changeLabel": _format_pct(change),
+                "tags": [venue[:8], asset_class],
+                "tone": _tone(change if change is not None else basis_bps),
             }
         )
-    rows.sort(key=lambda item: abs(_safe_float(item.get("secondary")) or 0.0), reverse=True)
+    rows.sort(key=lambda item: (TRADFI_PERP_CLASS_PRIORITY.get(str(item.get("symbol") or "").upper(), 0), abs(_safe_float(item.get("change")) or _safe_float(item.get("secondary")) or 0.0)), reverse=True)
     return _payload("tradfi-perp-radar", title="TRADFI PERPS", items=rows[:limit], sources={"financeExternal": source.get("status") or "seed"})
 
 
 def build_global_indices_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for label, symbol, region in GLOBAL_INDEX_SYMBOLS[:limit]:
-        try:
-            snapshot = ctx["get_yahoo_market_snapshot"](symbol, interval="30m", range_name="5d", ttl_seconds=300)
-        except Exception:
-            snapshot = None
+        snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d")
         if not isinstance(snapshot, dict):
             continue
         change = _safe_float(snapshot.get("changePercent"))
@@ -368,17 +469,18 @@ def build_global_indices_payload(ctx: dict, limit: int) -> Dict[str, Any]:
 
 
 def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    raw = _http_json_get(ctx, ALTERNATIVE_FNG_URL, params={"limit": 1, "format": "json"}, timeout=12)
+    raw = _http_json_get(ctx, ALTERNATIVE_FNG_URL, params={"limit": 2, "format": "json"}, timeout=12)
     data = (raw.get("data") or []) if isinstance(raw, dict) else []
     item = data[0] if data and isinstance(data[0], dict) else {}
+    previous = data[1] if len(data) > 1 and isinstance(data[1], dict) else {}
     score = _safe_float(item.get("value"))
+    prev_score = _safe_float(previous.get("value"))
+    delta = score - prev_score if score is not None and prev_score is not None else None
     label = str(item.get("value_classification") or "Neutral").upper()
+    regime = _fear_greed_regime(score)
     drivers = []
-    for symbol in ("BTC-USD", "ETH-USD"):
-        try:
-            quote = ctx["get_yahoo_market_snapshot"](symbol, interval="5m", range_name="1d", ttl_seconds=60)
-        except Exception:
-            quote = None
+    for symbol in ("BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"):
+        quote = _fetch_yahoo_snapshot(ctx, symbol, interval="5m", range_name="1d")
         if isinstance(quote, dict):
             drivers.append(
                 {
@@ -393,7 +495,7 @@ def build_fear_greed_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 }
             )
     payload = _payload("crypto-fear-greed", title="FEAR & GREED", items=drivers[:limit], summary={"score": score, "classification": label}, sources={"alternativeMe": "ok" if score is not None else "empty"}, status="ok" if score is not None else "empty")
-    payload["headline"] = {"label": label, "score": score, "tone": "up" if score and score >= 55 else ("down" if score and score <= 45 else "neutral")}
+    payload["headline"] = {"label": label, "score": score, "previousScore": prev_score, "delta": delta, "regime": regime, "tone": "up" if score and score >= 55 else ("down" if score and score <= 45 else "neutral")}
     return payload
 
 
@@ -410,17 +512,22 @@ def build_crypto_etf_payload(ctx: dict, limit: int, external: Dict[str, Any]) ->
             {
                 "id": symbol,
                 "label": symbol,
-                "symbol": "BTC ETF" if symbol not in {"ETHA", "FETH"} else "ETH ETF",
+                "symbol": str(item.get("issuer") or ("BTC ETF" if symbol not in {"ETHA", "FETH"} else "ETH ETF")),
                 "metric": flow,
                 "metricLabel": _format_usd(flow),
                 "metricUnit": "FLOW",
+                "secondary": item.get("volume"),
+                "secondaryLabel": _format_volume(item.get("volume")),
                 "change": change,
                 "changeLabel": _format_pct(change),
                 "tags": ["INFLOW" if flow and flow > 0 else "OUTFLOW" if flow and flow < 0 else "PROXY"],
                 "tone": _tone(flow),
             }
         )
-    return _payload("crypto-etf-flow", title="CRYPTO ETF", items=rows[:limit], summary={"netFlowProxyUsd": source.get("netFlowProxyUsd")}, sources={"financeExternal": source.get("status") or "seed"})
+    total_volume = sum(_safe_float(row.get("secondary")) or 0.0 for row in rows)
+    inflows = sum(1 for row in rows if (_safe_float(row.get("metric")) or 0.0) > 0)
+    outflows = sum(1 for row in rows if (_safe_float(row.get("metric")) or 0.0) < 0)
+    return _payload("crypto-etf-flow", title="CRYPTO ETF", items=rows[:limit], summary={"netFlowProxyUsd": source.get("netFlowProxyUsd"), "totalVolume": total_volume, "inflowCount": inflows, "outflowCount": outflows}, sources={"financeExternal": source.get("status") or "seed"})
 
 
 def build_stablecoin_payload(ctx: dict, limit: int, external: Dict[str, Any]) -> Dict[str, Any]:
@@ -543,6 +650,18 @@ def _format_usd(value: Any) -> str:
     return f"{sign}${number:.0f}"
 
 
+def _format_volume(value: Any) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "--"
+    sign = "-" if number < 0 else ""
+    number = abs(number)
+    for suffix, divisor in (("B", 1_000_000_000), ("M", 1_000_000), ("K", 1_000)):
+        if number >= divisor:
+            return f"{sign}{number / divisor:.1f}{suffix}"
+    return f"{sign}{number:.0f}"
+
+
 def _format_price(value: Any, digits: int = 2) -> str:
     number = _safe_float(value)
     if number is None:
@@ -582,3 +701,18 @@ def _bias_tag(value: str) -> str:
     if value == "shorts-pay":
         return "SHORTS PAY"
     return "MIXED"
+
+
+def _fear_greed_regime(score: Any) -> str:
+    value = _safe_float(score)
+    if value is None:
+        return "NEUTRAL"
+    if value <= 20:
+        return "CRISIS / RISK-OFF"
+    if value <= 35:
+        return "STRESSED / DEFENSIVE"
+    if value <= 50:
+        return "FRAGILE / HEDGED"
+    if value <= 65:
+        return "STABLE / NORMAL"
+    return "STRONG / RISK-ON"

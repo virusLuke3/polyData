@@ -4,6 +4,6 @@ export const panel = createFinanceWatchPanel({
   id: 'defi-yield-monitor',
   title: 'DEFI YIELDS',
   description: 'Protocol APY and TVL watch board.',
-  question: 'Shows seeded DeFiLlama yield pools ranked by APY with TVL and risk tags.',
+  question: 'Shows seeded DeFiLlama pools ranked by reliable protocol coverage, TVL depth, and sustainable APY.',
   limit: 10,
 });

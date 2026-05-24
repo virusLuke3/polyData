@@ -1381,6 +1381,9 @@ export type RuntimeFinanceWatchPayload = {
   headline?: {
     label?: string | null;
     score?: number | string | null;
+    previousScore?: number | string | null;
+    delta?: number | string | null;
+    regime?: string | null;
     tone?: string | null;
   } | null;
   sources?: Record<string, string>;

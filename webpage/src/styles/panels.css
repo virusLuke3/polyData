@@ -435,7 +435,7 @@
 .wm-finance-grid-list {
   position: relative;
   min-width: 0;
-  padding: 7px 13px 6px;
+  padding: 7px 12px 6px;
 }
 
 .wm-finance-list.compact {
@@ -444,9 +444,9 @@
 
 .wm-finance-row {
   min-width: 0;
-  min-height: 56px;
+  min-height: 55px;
   display: grid;
-  grid-template-columns: minmax(86px, 1fr) minmax(128px, auto);
+  grid-template-columns: minmax(82px, 1fr) minmax(118px, auto);
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
@@ -461,8 +461,8 @@
 .wm-finance-main strong {
   overflow: hidden;
   color: #e8e8e8;
-  font-size: 13px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 740;
   line-height: 1.08;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -475,7 +475,7 @@
 .wm-finance-grid-tile span {
   color: rgba(235, 235, 235, 0.48);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 720;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -484,7 +484,7 @@
 .wm-finance-value {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(58px, auto) minmax(48px, auto);
+  grid-template-columns: minmax(56px, auto) minmax(44px, auto);
   align-items: baseline;
   justify-content: end;
   gap: 7px;
@@ -496,8 +496,8 @@
 .wm-finance-value strong {
   overflow: hidden;
   color: #e8e8e8;
-  font-size: 14px;
-  font-weight: 780;
+  font-size: 13px;
+  font-weight: 800;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -505,7 +505,7 @@
 
 .wm-finance-value em {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 710;
   line-height: 1;
@@ -530,7 +530,7 @@
   background: rgba(255, 255, 255, 0.035);
   color: #9da3a0;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 850;
   line-height: 1;
 }
@@ -539,7 +539,6 @@
 .wm-finance-tag.tag-hack,
 .wm-finance-tag.tag-exploit,
 .wm-finance-tag.tag-enforce,
-.wm-finance-tag.tag-outflow,
 .wm-finance-tag.tag-watch {
   border-color: rgba(255, 72, 72, 0.72);
   color: #ff5c5c;
@@ -547,7 +546,9 @@
 
 .wm-finance-tag.tag-inflow,
 .wm-finance-tag.tag-ok,
-.wm-finance-tag.tag-apy {
+.wm-finance-tag.tag-apy,
+.wm-finance-tag.tag-stable,
+.wm-finance-tag.tag-tvl {
   border-color: rgba(36, 242, 132, 0.42);
   color: #24f284;
 }
@@ -557,7 +558,12 @@
 .wm-finance-tag.tag-s-1,
 .wm-finance-tag.tag-f-1,
 .wm-finance-tag.tag-risk,
-.wm-finance-tag.tag-basis {
+.wm-finance-tag.tag-basis,
+.wm-finance-tag.tag-audit,
+.wm-finance-tag.tag-gov,
+.wm-finance-tag.tag-bridge,
+.wm-finance-tag.tag-economic,
+.wm-finance-tag.tag-outflow {
   border-color: rgba(255, 197, 61, 0.52);
   color: #ffc53d;
 }
@@ -565,7 +571,7 @@
 .wm-finance-feed-row {
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   padding: 10px 0 11px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
   color: inherit;
@@ -593,7 +599,7 @@
   min-width: 0;
   overflow: hidden;
   color: #69d8f3;
-  font-size: 12px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -602,11 +608,11 @@
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   color: #e7e7e7;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 760;
-  line-height: 1.22;
+  line-height: 1.24;
 }
 
 .wm-finance-feed-row > em {
@@ -615,7 +621,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: rgba(235, 235, 235, 0.62);
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 620;
   line-height: 1.28;
@@ -628,13 +634,13 @@
 
 .wm-finance-grid-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
 .wm-finance-grid-tile {
   min-width: 0;
-  min-height: 76px;
+  min-height: 70px;
   display: grid;
   align-content: center;
   gap: 6px;
@@ -645,7 +651,7 @@
 .wm-finance-grid-tile strong {
   overflow: hidden;
   color: #e8e8e8;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -662,41 +668,215 @@
 
 .wm-finance-grid-tile b {
   color: #f0f0f0;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .wm-finance-grid-tile em {
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
   font-weight: 740;
 }
 
 .wm-finance-sentiment {
-  padding: 8px 13px 6px;
+  padding: 8px 12px 6px;
 }
 
-.wm-finance-sentiment-head {
+.wm-finance-sentiment-gauge {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 10px;
-  padding: 9px 0 10px;
+  place-items: center;
+  gap: 3px;
+  padding: 8px 0 6px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
 }
 
-.wm-finance-sentiment-head strong {
-  color: #e8e8e8;
+.wm-finance-sentiment-gauge > b {
+  color: #24c878;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wm-finance-gauge-arc {
+  position: relative;
+  width: min(220px, 88%);
+  height: 112px;
+  overflow: hidden;
+}
+
+.wm-finance-gauge-arc .zone {
+  position: absolute;
+  left: 50%;
+  bottom: -78px;
+  width: 162px;
+  height: 162px;
+  margin-left: -81px;
+  border: 26px solid transparent;
+  border-radius: 50%;
+  clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%);
+}
+
+.wm-finance-gauge-arc .z1 {
+  border-top-color: #b7352d;
+  border-left-color: #b7352d;
+  transform: rotate(-18deg);
+}
+
+.wm-finance-gauge-arc .z2 {
+  border-top-color: #e98519;
+  transform: rotate(18deg);
+}
+
+.wm-finance-gauge-arc .z3 {
+  border-top-color: #e3c407;
+  transform: rotate(54deg);
+}
+
+.wm-finance-gauge-arc .z4 {
+  border-top-color: #2abf74;
+  transform: rotate(90deg);
+}
+
+.wm-finance-gauge-arc .z5 {
+  border-top-color: #24985b;
+  border-right-color: #24985b;
+  transform: rotate(126deg);
+}
+
+.wm-finance-gauge-arc i {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  width: 72px;
+  height: 2px;
+  margin-left: -1px;
+  background: #24c878;
+  transform-origin: 1px 1px;
+}
+
+.wm-finance-gauge-arc i::after {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #24c878;
+  content: "";
+}
+
+.wm-finance-gauge-arc strong,
+.wm-finance-gauge-arc em {
+  position: absolute;
+  left: 0;
+  right: 0;
+  color: #24c878;
+  text-align: center;
+}
+
+.wm-finance-gauge-arc strong {
+  bottom: 28px;
   font-family: var(--font-mono);
   font-size: 27px;
-  font-weight: 850;
+  font-weight: 900;
   line-height: 1;
 }
 
-.wm-finance-sentiment-head span {
-  color: #e8e8e8;
-  font-size: 14px;
+.wm-finance-gauge-arc em {
+  bottom: 12px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 820;
+}
+
+.wm-finance-sentiment-gauge small {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.wm-finance-etf {
+  padding: 8px 12px 6px;
+}
+
+.wm-finance-etf-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 7px;
+  background: rgba(255, 255, 255, 0.046);
+}
+
+.wm-finance-etf-summary span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  color: rgba(235, 235, 235, 0.42);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 760;
+  text-align: center;
+}
+
+.wm-finance-etf-summary b {
+  overflow: hidden;
+  color: #eeeeee;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-etf-table {
+  margin-top: 8px;
+}
+
+.wm-finance-etf-head,
+.wm-finance-etf-row {
+  display: grid;
+  grid-template-columns: 0.7fr 1.4fr 1fr 0.8fr 0.7fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.wm-finance-etf-head {
+  padding: 0 0 5px;
+  color: rgba(235, 235, 235, 0.42);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.wm-finance-etf-row {
+  min-height: 31px;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-finance-etf-row b,
+.wm-finance-etf-row em,
+.wm-finance-etf-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-finance-etf-row b {
+  color: #f0f0f0;
+  font-size: 12px;
+}
+
+.wm-finance-etf-row span {
+  color: rgba(235, 235, 235, 0.48);
+  font-style: normal;
+}
+
+.wm-finance-etf-row em {
+  font-style: normal;
   font-weight: 780;
-  text-transform: uppercase;
 }
 
 .wm-finance-empty {

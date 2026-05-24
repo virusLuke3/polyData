@@ -4,6 +4,6 @@ export const panel = createFinanceWatchPanel({
   id: 'tradfi-perp-radar',
   title: 'TRADFI PERPS',
   description: 'Tokenized stock, index, and commodity perp radar.',
-  question: 'Ranks seeded TradFi perp proxies by mark/reference basis and funding pressure.',
+  question: 'Tracks traditional market perpetual contracts and reference perps such as index, gold, oil, and ETF-linked swaps.',
   limit: 10,
 });

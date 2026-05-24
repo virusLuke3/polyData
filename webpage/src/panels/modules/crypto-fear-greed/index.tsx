@@ -4,7 +4,7 @@ export const panel = createFinanceWatchPanel({
   id: 'crypto-fear-greed',
   title: 'FEAR & GREED',
   description: 'Crypto sentiment gauge with price drivers.',
-  question: 'Shows the Alternative.me crypto Fear & Greed score with BTC and ETH momentum drivers.',
+  question: 'Shows a gauge-style crypto sentiment regime with previous-score delta and major crypto momentum drivers.',
   mode: 'sentiment',
   limit: 6,
 });

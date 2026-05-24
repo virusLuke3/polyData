@@ -15,6 +15,8 @@ FINANCE_EXTERNAL_CACHE_KEY = "v1"
 FINANCE_EXTERNAL_TTL_SECONDS = 15 * 60
 
 HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
+OKX_MARKET_TICKER_URL = "https://www.okx.com/api/v5/market/ticker"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 DEFILLAMA_STABLECOINS_URL = "https://stablecoins.llama.fi/stablecoins"
 CFTC_LEGACY_COT_URL = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
 
@@ -24,18 +26,28 @@ ETF_FLOW_SYMBOLS: Tuple[Tuple[str, str], ...] = (
     ("GBTC", "Grayscale Bitcoin Trust"),
     ("BITB", "Bitwise Bitcoin ETF"),
     ("ARKB", "ARK 21Shares Bitcoin ETF"),
+    ("HODL", "VanEck Bitcoin Trust"),
+    ("BRRR", "Valkyrie Bitcoin Fund"),
+    ("EZBC", "Franklin Bitcoin ETF"),
+    ("BTCO", "Invesco Galaxy Bitcoin ETF"),
+    ("BTCW", "WisdomTree Bitcoin Fund"),
     ("ETHA", "iShares Ethereum Trust"),
+    ("FETH", "Fidelity Ethereum Fund"),
 )
 
 TRADFI_PERP_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
-    ("BTC", "Bitcoin", "crypto"),
-    ("ETH", "Ethereum", "crypto"),
-    ("SOL", "Solana", "crypto"),
-    ("MSTR", "MicroStrategy", "stock"),
-    ("COIN", "Coinbase", "stock"),
-    ("HOOD", "Robinhood", "stock"),
-    ("SPY", "S&P 500", "index"),
-    ("QQQ", "Nasdaq 100", "index"),
+    ("SPY-USDT-SWAP", "SPY-PERP", "index"),
+    ("XAU-USDT-SWAP", "GOLD-PERP", "commodity"),
+    ("SPACEX-USDT-SWAP", "SPACEX-PERP", "private"),
+)
+
+TRADFI_REFERENCE_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
+    ("ES=F", "S&P500-PERP", "index"),
+    ("NQ=F", "NASDAQ-PERP", "index"),
+    ("YM=F", "DOW-PERP", "index"),
+    ("RTY=F", "RUSSELL-PERP", "index"),
+    ("GC=F", "GOLD-PERP", "commodity"),
+    ("CL=F", "WTI-PERP", "commodity"),
 )
 
 COT_MARKETS: Tuple[Tuple[str, str, str], ...] = (
@@ -83,11 +95,14 @@ def _nested_usd(row: Dict[str, Any], key: str) -> Optional[float]:
 def _http_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 12) -> Any:
     getter = ctx.get("http_json_get")
     if callable(getter):
-        return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        try:
+            return getter(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        except Exception:
+            pass
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = True
     try:
         response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
         response.raise_for_status()
@@ -99,17 +114,50 @@ def _http_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = None, t
 def _http_post(ctx: dict, url: str, *, json_payload: Dict[str, Any], timeout: int = 12) -> Any:
     poster = ctx.get("http_json_post")
     if callable(poster):
-        return poster(url, json_payload=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        try:
+            return poster(url, json_payload=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        except Exception:
+            pass
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
-    session.trust_env = False
+    session.trust_env = True
     try:
         response = session.post(url, json=json_payload, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
         response.raise_for_status()
         return response.json() if response.content else None
     finally:
         session.close()
+
+
+def _fetch_yahoo_snapshot(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
+    try:
+        quote = ctx["get_yahoo_market_snapshot"](symbol, interval="30m", range_name="5d", ttl_seconds=300)
+    except Exception:
+        quote = None
+    if isinstance(quote, dict) and quote.get("price") is not None:
+        return quote
+    payload = _http_get(
+        ctx,
+        YAHOO_CHART_URL.format(symbol=symbol),
+        params={"range": "5d", "interval": "1d"},
+        timeout=12,
+    )
+    result = (payload.get("chart") or {}).get("result") if isinstance(payload, dict) else []
+    chart = result[0] if isinstance(result, list) and result else {}
+    quote_rows = (chart.get("indicators") or {}).get("quote") or []
+    quote_data = quote_rows[0] if quote_rows and isinstance(quote_rows[0], dict) else {}
+    closes = [value for value in (quote_data.get("close") or []) if value is not None]
+    volumes = [value for value in (quote_data.get("volume") or []) if value is not None]
+    if not closes:
+        return None
+    price = _safe_float(closes[-1])
+    previous = _safe_float(closes[-2]) if len(closes) >= 2 else None
+    return {
+        "price": price,
+        "changePercent": _pct_change(price, previous),
+        "volume24h": _safe_float(volumes[-1]) if volumes else None,
+    }
 
 
 def read_finance_external_sources(ctx: dict) -> Dict[str, Any]:
@@ -166,13 +214,75 @@ def fetch_hyperliquid_perp_source(ctx: dict) -> Dict[str, Any]:
     return {"status": _source_status(rows), "items": rows, "sourceUrl": HYPERLIQUID_INFO_URL}
 
 
+def fetch_okx_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    for inst_id, display, asset_class in TRADFI_PERP_SYMBOLS:
+        try:
+            payload = _http_get(ctx, OKX_MARKET_TICKER_URL, params={"instId": inst_id}, timeout=12)
+        except Exception:
+            payload = None
+        data = payload.get("data") if isinstance(payload, dict) else []
+        ticker = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
+        mark = _safe_float(ticker.get("last"))
+        open_24h = _safe_float(ticker.get("open24h"))
+        change_pct = _pct_change(mark, open_24h)
+        if mark is None:
+            continue
+        rows.append(
+            {
+                "symbol": inst_id,
+                "display": display,
+                "assetClass": asset_class,
+                "markPx": mark,
+                "oraclePx": None,
+                "spotPx": mark,
+                "basisBps": None,
+                "funding": change_pct,
+                "openInterest": None,
+                "dayNotional": _safe_float(ticker.get("volCcy24h")),
+                "changePercent": change_pct,
+                "source": "okx-swap",
+                "venue": "OKX",
+                "alerts": ["OKX", "PERP"],
+            }
+        )
+    return {"status": _source_status(rows), "items": rows, "sourceUrl": OKX_MARKET_TICKER_URL}
+
+
+def fetch_reference_tradfi_perp_source(ctx: dict) -> Dict[str, Any]:
+    rows: List[Dict[str, Any]] = []
+    for yahoo_symbol, display, asset_class in TRADFI_REFERENCE_SYMBOLS:
+        quote = _fetch_yahoo_snapshot(ctx, yahoo_symbol)
+        if not isinstance(quote, dict):
+            continue
+        price = _safe_float(quote.get("price"))
+        if price is None:
+            continue
+        rows.append(
+            {
+                "symbol": yahoo_symbol,
+                "display": display,
+                "assetClass": asset_class,
+                "markPx": price,
+                "oraclePx": price,
+                "spotPx": price,
+                "basisBps": 0.0,
+                "funding": _safe_float(quote.get("changePercent")),
+                "openInterest": None,
+                "dayNotional": _safe_float(quote.get("volume24h")),
+                "changePercent": _safe_float(quote.get("changePercent")),
+                "source": "yahoo-reference",
+                "venue": "REFERENCE",
+                "alerts": ["REF", "PERP"],
+            }
+        )
+    return {"status": _source_status(rows), "items": rows, "sourceUrl": "https://query1.finance.yahoo.com/v8/finance/chart"}
+
+
 def fetch_etf_flow_source(ctx: dict) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     for symbol, issuer in ETF_FLOW_SYMBOLS:
-        try:
-            quote = ctx["get_yahoo_market_snapshot"](symbol, interval="30m", range_name="5d", ttl_seconds=300)
-        except Exception:
-            quote = None
+        quote = _fetch_yahoo_snapshot(ctx, symbol)
         if not isinstance(quote, dict):
             continue
         change_pct = _safe_float(quote.get("changePercent"))
@@ -348,6 +458,22 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
             return {"status": "error", "items": [], "error": str(exc)}
 
     hyperliquid = capture("hyperliquid", fetch_hyperliquid_perp_source)
+    okx_tradfi = capture("okxTradfiPerps", fetch_okx_tradfi_perp_source)
+    reference_tradfi = capture("referenceTradfiPerps", fetch_reference_tradfi_perp_source)
+    tradfi_items = []
+    seen_tradfi = set()
+    for source in (okx_tradfi, reference_tradfi):
+        for item in source.get("items") or []:
+            key = str(item.get("display") or item.get("symbol") or "")
+            if key and key not in seen_tradfi:
+                tradfi_items.append(item)
+                seen_tradfi.add(key)
+    tradfi_perps = {
+        "status": _source_status(tradfi_items),
+        "items": tradfi_items,
+        "sourceUrl": OKX_MARKET_TICKER_URL,
+        "sources": {"okx": okx_tradfi.get("status"), "reference": reference_tradfi.get("status")},
+    }
     etf_flow = capture("etfFlow", fetch_etf_flow_source)
     if not (etf_flow.get("items") or []):
         etf_flow = build_etf_flow_proxy_from_perps(hyperliquid)
@@ -367,7 +493,7 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
         "cacheMode": "seeded",
         "sources": sources,
         "errors": errors,
-        "tradfiPerps": hyperliquid,
+        "tradfiPerps": tradfi_perps,
         "etfFlow": etf_flow,
         "cot": cot,
         "stablecoin": stablecoin,

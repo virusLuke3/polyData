@@ -6,7 +6,7 @@ import { formatRelative } from '../shared/formatters';
 import type { PanelRenderMap } from '../types';
 import { runtimePanelFromRenderer } from './helpers';
 
-type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment';
+type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment' | 'etf';
 
 type FinancePanelConfig = {
   id: string;
@@ -112,11 +112,26 @@ function GridTile({ item }: { item: RuntimeFinanceWatchItem }) {
 function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
   const headline = payload?.headline || {};
   const score = headline.score ?? '--';
+  const delta = headline.delta;
+  const deltaLabel = typeof delta === 'number' ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} vs prev` : null;
+  const deltaTone = typeof delta === 'number' && delta >= 0 ? 'up' : 'down';
+  const scoreNumber = Number(score);
+  const angle = Number.isFinite(scoreNumber) ? Math.max(0, Math.min(100, scoreNumber)) * 1.8 - 90 : 0;
   return (
     <div className="wm-finance-sentiment">
-      <section className={`wm-finance-sentiment-head ${toneClass(headline.tone)}`}>
-        <strong>{score}</strong>
-        <span>{headline.label || 'NEUTRAL'}</span>
+      <section className={`wm-finance-sentiment-gauge ${toneClass(headline.tone)}`}>
+        <b>{headline.regime || 'NEUTRAL'}</b>
+        <div className="wm-finance-gauge-arc">
+          <span className="zone z1" />
+          <span className="zone z2" />
+          <span className="zone z3" />
+          <span className="zone z4" />
+          <span className="zone z5" />
+          <i style={{ transform: `rotate(${angle}deg)` }} />
+          <strong>{score}</strong>
+          <em>{headline.label || 'NEUTRAL'}</em>
+        </div>
+        {deltaLabel ? <small className={toneClass(deltaTone)}>{deltaLabel}</small> : null}
       </section>
       <div className="wm-finance-list compact">
         {(payload?.items || []).map((item, index) => <QuoteRow item={item} key={itemKey(item, index)} />)}
@@ -125,9 +140,52 @@ function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | nul
   );
 }
 
+function compactMoney(value: unknown) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return '--';
+  const sign = number < 0 ? '-' : '';
+  const abs = Math.abs(number);
+  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
+function EtfView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
+  const items = payload?.items || [];
+  const summary = payload?.summary || {};
+  const net = Number(summary.netFlowProxyUsd || 0);
+  const dirClass = toneClass(net > 0 ? 'up' : net < 0 ? 'down' : 'neutral');
+  return (
+    <div className="wm-finance-etf">
+      <div className="wm-finance-etf-summary">
+        <span>NET FLOW<b className={dirClass}>{net > 0 ? 'INFLOW' : net < 0 ? 'OUTFLOW' : 'NEUTRAL'}</b></span>
+        <span>EST FLOW<b>{compactMoney(summary.netFlowProxyUsd)}</b></span>
+        <span>TOTAL VOL<b>{compactMoney(summary.totalVolume)}</b></span>
+        <span>ETFS<b>{summary.inflowCount || 0}↑ {summary.outflowCount || 0}↓</b></span>
+      </div>
+      <div className="wm-finance-etf-table">
+        <div className="wm-finance-etf-head">
+          <span>CODE</span><span>ISSUER</span><span>EST FLOW</span><span>VOLUME</span><span>CHG</span>
+        </div>
+        {items.map((item, index) => (
+          <article className="wm-finance-etf-row" key={itemKey(item, index)}>
+            <b>{item.label}</b>
+            <span>{item.symbol}</span>
+            <em className={toneClass(item.tone)}>{item.metricLabel || '--'}</em>
+            <span>{item.secondaryLabel || '--'}</span>
+            <em className={toneClass(item.tone)}>{item.changeLabel || '--'}</em>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FinanceWatchView({ payload, mode }: { payload?: RuntimeFinanceWatchPayload | null; mode: FinancePanelMode }) {
   const items = payload?.items || [];
   if (mode === 'sentiment') return <SentimentView payload={payload} />;
+  if (mode === 'etf') return <EtfView payload={payload} />;
   if (!items.length) {
     return (
       <div className="wm-finance-empty">
