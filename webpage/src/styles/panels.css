@@ -430,6 +430,79 @@
   background: rgba(95, 105, 124, 0.62);
 }
 
+.wm-finance-watch-panel.is-dynamic.refresh-pulse-0::after,
+.wm-finance-watch-panel.is-dynamic.refresh-pulse-1::after {
+  animation: wm-finance-panel-refresh 1500ms ease-out both;
+}
+
+.wm-finance-row.is-fresh,
+.wm-finance-feed-row.is-fresh,
+.wm-finance-grid-tile.is-fresh,
+.wm-finance-etf-row.is-fresh {
+  position: relative;
+  overflow: hidden;
+  animation: wm-finance-item-refresh 1200ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.wm-finance-row.is-fresh::before,
+.wm-finance-feed-row.is-fresh::before,
+.wm-finance-grid-tile.is-fresh::before,
+.wm-finance-etf-row.is-fresh::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #24f284;
+  box-shadow: 0 0 18px rgba(36, 242, 132, 0.5);
+}
+
+.wm-finance-row.is-fresh::after,
+.wm-finance-feed-row.is-fresh::after,
+.wm-finance-grid-tile.is-fresh::after,
+.wm-finance-etf-row.is-fresh::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(36, 242, 132, 0.16), rgba(36, 242, 132, 0.035) 42%, transparent 78%);
+  opacity: 0;
+  pointer-events: none;
+  animation: wm-finance-item-scan 1400ms ease-out both;
+}
+
+@keyframes wm-finance-panel-refresh {
+  0% {
+    border-color: rgba(36, 242, 132, 0.88);
+    box-shadow:
+      inset 1px 0 0 rgba(36, 242, 132, 0.42),
+      inset -1px 0 0 rgba(57, 96, 143, 0.38),
+      inset 0 -1px 0 rgba(36, 242, 132, 0.4),
+      0 0 20px rgba(36, 242, 132, 0.18);
+  }
+  100% {
+    border-color: rgba(207, 229, 255, 0.11);
+  }
+}
+
+@keyframes wm-finance-item-refresh {
+  0% {
+    transform: translateX(-4px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes wm-finance-item-scan {
+  0% {
+    opacity: 0.92;
+    transform: translateX(-24%);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(18%);
+  }
+}
+
 .wm-finance-list,
 .wm-finance-feed-list,
 .wm-finance-grid-list {
@@ -1312,7 +1385,17 @@
 @media (prefers-reduced-motion: reduce) {
   .wm-panel-loading-sweep,
   .wm-panel-loading-dot,
-  .wm-panel-loading-dots span {
+  .wm-panel-loading-dots span,
+  .wm-finance-watch-panel.is-dynamic.refresh-pulse-0::after,
+  .wm-finance-watch-panel.is-dynamic.refresh-pulse-1::after,
+  .wm-finance-row.is-fresh,
+  .wm-finance-feed-row.is-fresh,
+  .wm-finance-grid-tile.is-fresh,
+  .wm-finance-etf-row.is-fresh,
+  .wm-finance-row.is-fresh::after,
+  .wm-finance-feed-row.is-fresh::after,
+  .wm-finance-grid-tile.is-fresh::after,
+  .wm-finance-etf-row.is-fresh::after {
     animation: none;
   }
 }

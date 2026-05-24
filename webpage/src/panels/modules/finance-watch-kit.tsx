@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFinanceWatchPanel } from '@/services/api';
 import type { RuntimeFinanceWatchItem, RuntimeFinanceWatchPayload } from '@/types';
@@ -39,6 +39,24 @@ function itemKey(item: RuntimeFinanceWatchItem, index: number) {
   return String(item.id || item.url || item.title || item.label || index);
 }
 
+function itemSignature(item: RuntimeFinanceWatchItem) {
+  return [
+    item.id,
+    item.url,
+    item.title,
+    item.label,
+    item.metricLabel,
+    item.secondaryLabel,
+    item.changeLabel,
+    item.publishedAt,
+    item.summary,
+  ].map((value) => String(value ?? '')).join('::');
+}
+
+function itemFreshClass(item: RuntimeFinanceWatchItem, index: number, freshKeys?: Set<string>) {
+  return freshKeys?.has(itemKey(item, index)) ? ' is-fresh' : '';
+}
+
 function FinanceTags({ tags }: { tags?: string[] }) {
   return (
     <>
@@ -57,9 +75,9 @@ function ValueBlock({ item }: { item: RuntimeFinanceWatchItem }) {
   );
 }
 
-function QuoteRow({ item }: { item: RuntimeFinanceWatchItem }) {
+function QuoteRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
   return (
-    <article className="wm-finance-row">
+    <article className={`wm-finance-row${fresh ? ' is-fresh' : ''}`}>
       <div className="wm-finance-main">
         <strong>{item.label || item.title || 'Finance item'}</strong>
         <span>{item.symbol || item.metricUnit || '--'}</span>
@@ -73,7 +91,7 @@ function QuoteRow({ item }: { item: RuntimeFinanceWatchItem }) {
   );
 }
 
-function FeedRow({ item }: { item: RuntimeFinanceWatchItem }) {
+function FeedRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
   const content = (
     <>
       <div className="wm-finance-feed-meta">
@@ -91,14 +109,14 @@ function FeedRow({ item }: { item: RuntimeFinanceWatchItem }) {
     </>
   );
   if (item.url) {
-    return <a className="wm-finance-feed-row" href={item.url} target="_blank" rel="noreferrer">{content}</a>;
+    return <a className={`wm-finance-feed-row${fresh ? ' is-fresh' : ''}`} href={item.url} target="_blank" rel="noreferrer">{content}</a>;
   }
-  return <article className="wm-finance-feed-row">{content}</article>;
+  return <article className={`wm-finance-feed-row${fresh ? ' is-fresh' : ''}`}>{content}</article>;
 }
 
-function GridTile({ item }: { item: RuntimeFinanceWatchItem }) {
+function GridTile({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fresh?: boolean }) {
   return (
-    <article className={`wm-finance-grid-tile ${toneClass(item.tone)}`}>
+    <article className={`wm-finance-grid-tile ${toneClass(item.tone)}${fresh ? ' is-fresh' : ''}`}>
       <span>{item.symbol || item.metricUnit || '--'}</span>
       <strong>{item.label || '--'}</strong>
       <div>
@@ -117,7 +135,7 @@ function summaryList<T>(payload: RuntimeFinanceWatchPayload | null | undefined, 
   return Array.isArray(value) ? value as T[] : [];
 }
 
-function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
+function SentimentView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; freshKeys?: Set<string> }) {
   const headline = payload?.headline || {};
   const score = headline.score ?? '--';
   const delta = headline.delta;
@@ -171,7 +189,7 @@ function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | nul
         </div>
       ) : null}
       <div className="wm-finance-list compact">
-        {(payload?.items || []).map((item, index) => <QuoteRow item={item} key={itemKey(item, index)} />)}
+        {(payload?.items || []).map((item, index) => <QuoteRow item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}
       </div>
     </div>
   );
@@ -188,7 +206,7 @@ function compactMoney(value: unknown) {
   return `${sign}$${abs.toFixed(0)}`;
 }
 
-function EtfView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
+function EtfView({ payload, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; freshKeys?: Set<string> }) {
   const items = payload?.items || [];
   const summary = payload?.summary || {};
   const net = Number(summary.netFlowProxyUsd || 0);
@@ -206,7 +224,7 @@ function EtfView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
           <span>CODE</span><span>ISSUER</span><span>EST FLOW</span><span>VOLUME</span><span>CHG</span>
         </div>
         {items.map((item, index) => (
-          <article className="wm-finance-etf-row" key={itemKey(item, index)}>
+          <article className={`wm-finance-etf-row${itemFreshClass(item, index, freshKeys)}`} key={itemKey(item, index)}>
             <b>{item.label}</b>
             <span>{item.symbol}</span>
             <em className={toneClass(item.tone)}>{item.metricLabel || '--'}</em>
@@ -219,10 +237,10 @@ function EtfView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
   );
 }
 
-function FinanceWatchView({ payload, mode }: { payload?: RuntimeFinanceWatchPayload | null; mode: FinancePanelMode }) {
+function FinanceWatchView({ payload, mode, freshKeys }: { payload?: RuntimeFinanceWatchPayload | null; mode: FinancePanelMode; freshKeys?: Set<string> }) {
   const items = payload?.items || [];
-  if (mode === 'sentiment') return <SentimentView payload={payload} />;
-  if (mode === 'etf') return <EtfView payload={payload} />;
+  if (mode === 'sentiment') return <SentimentView payload={payload} freshKeys={freshKeys} />;
+  if (mode === 'etf') return <EtfView payload={payload} freshKeys={freshKeys} />;
   if (!items.length) {
     return (
       <div className="wm-finance-empty">
@@ -232,18 +250,53 @@ function FinanceWatchView({ payload, mode }: { payload?: RuntimeFinanceWatchPayl
     );
   }
   if (mode === 'feed') {
-    return <div className="wm-finance-feed-list">{items.map((item, index) => <FeedRow item={item} key={itemKey(item, index)} />)}</div>;
+    return <div className="wm-finance-feed-list">{items.map((item, index) => <FeedRow item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;
   }
   if (mode === 'grid') {
-    return <div className="wm-finance-grid-list">{items.map((item, index) => <GridTile item={item} key={itemKey(item, index)} />)}</div>;
+    return <div className="wm-finance-grid-list">{items.map((item, index) => <GridTile item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;
   }
-  return <div className="wm-finance-list">{items.map((item, index) => <QuoteRow item={item} key={itemKey(item, index)} />)}</div>;
+  return <div className="wm-finance-list">{items.map((item, index) => <QuoteRow item={item} fresh={freshKeys?.has(itemKey(item, index))} key={itemKey(item, index)} />)}</div>;
 }
 
 function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; payload?: RuntimeFinanceWatchPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
+  const [freshKeys, setFreshKeys] = useState<Set<string>>(new Set());
+  const [updatePulse, setUpdatePulse] = useState(0);
+  const previousSignaturesRef = useRef<Record<string, string>>({});
+  const previousGeneratedAtRef = useRef<string | undefined>(undefined);
   const mode = config.mode || 'rows';
   const count = useMemo(() => payload?.items?.length || 0, [payload?.items]);
+  const items = payload?.items || [];
+  const itemStamp = useMemo(() => items.map((item, index) => `${itemKey(item, index)}=${itemSignature(item)}`).join('|'), [items]);
+
+  useEffect(() => {
+    if (!payload) return;
+    const nextSignatures: Record<string, string> = {};
+    items.forEach((item, index) => {
+      nextSignatures[itemKey(item, index)] = itemSignature(item);
+    });
+    const previous = previousSignaturesRef.current;
+    const previousGeneratedAt = previousGeneratedAtRef.current;
+    const hasPrevious = Object.keys(previous).length > 0;
+    const changed = hasPrevious ? Object.keys(nextSignatures).filter((key) => previous[key] !== nextSignatures[key]) : [];
+    previousSignaturesRef.current = nextSignatures;
+    previousGeneratedAtRef.current = payload.generatedAt;
+    const generatedAtChanged = Boolean(previousGeneratedAt && payload.generatedAt && previousGeneratedAt !== payload.generatedAt);
+    if (!changed.length) {
+      setFreshKeys((current) => current.size ? new Set() : current);
+      if (generatedAtChanged) setUpdatePulse((value) => value + 1);
+      return;
+    }
+    setFreshKeys(new Set(changed));
+    setUpdatePulse((value) => value + 1);
+  }, [itemStamp, payload?.generatedAt]);
+
+  useEffect(() => {
+    if (!freshKeys.size) return undefined;
+    const timer = window.setTimeout(() => setFreshKeys(new Set()), 14000);
+    return () => window.clearTimeout(timer);
+  }, [freshKeys]);
+
   return (
     <Panel
       title={config.title}
@@ -257,10 +310,10 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
           <p>{config.question}</p>
         </div>
       ) : null}
-      className={`wm-market-panel wm-finance-watch-panel mode-${mode}`}
+      className={`wm-market-panel wm-finance-watch-panel mode-${mode}${updatePulse > 0 ? ` is-dynamic refresh-pulse-${updatePulse % 2}` : ''}`}
       dataPanelId={config.id}
     >
-      <FinanceWatchView payload={payload} mode={mode} />
+      <FinanceWatchView payload={payload} mode={mode} freshKeys={freshKeys} />
     </Panel>
   );
 }
