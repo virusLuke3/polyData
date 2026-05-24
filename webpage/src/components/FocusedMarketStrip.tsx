@@ -237,6 +237,8 @@ function buildTimedLinePath(
     bottom,
     min,
     max,
+    minTs: domainMinTs,
+    maxTs: domainMaxTs,
   }: {
     width: number;
     height: number;
@@ -246,6 +248,8 @@ function buildTimedLinePath(
     bottom: number;
     min: number;
     max: number;
+    minTs?: number;
+    maxTs?: number;
   },
 ) {
   if (points.length < 2) return '';
@@ -254,8 +258,8 @@ function buildTimedLinePath(
     .filter((point) => Number.isFinite(point.ts) && Number.isFinite(point.price))
     .sort((leftPoint, rightPoint) => leftPoint.ts - rightPoint.ts);
   if (stamped.length < 2) return '';
-  const minTs = stamped[0]?.ts ?? 0;
-  const maxTs = stamped[stamped.length - 1]?.ts ?? minTs;
+  const minTs = Number.isFinite(domainMinTs) ? Number(domainMinTs) : (stamped[0]?.ts ?? 0);
+  const maxTs = Number.isFinite(domainMaxTs) ? Number(domainMaxTs) : (stamped[stamped.length - 1]?.ts ?? minTs);
   const tsSpan = Math.max(maxTs - minTs, 1);
   const valueSpan = max - min || 1;
   const plotWidth = width - left - right;
@@ -267,6 +271,50 @@ function buildTimedLinePath(
       return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(' ');
+}
+
+function rangeWindowMs(range?: string | null) {
+  switch (String(range || '').toLowerCase()) {
+    case '1h':
+      return 60 * 60 * 1000;
+    case '6h':
+      return 6 * 60 * 60 * 1000;
+    case '1d':
+      return 24 * 60 * 60 * 1000;
+    case '1w':
+      return 7 * 24 * 60 * 60 * 1000;
+    case '1m':
+      return 30 * 24 * 60 * 60 * 1000;
+    default:
+      return null;
+  }
+}
+
+function normalizeTimedPointsForRange(
+  points: Array<{ timestamp: string; price: number }>,
+  range?: string | null,
+) {
+  const clean = points
+    .map((point) => ({ ...point, ts: new Date(point.timestamp).getTime() }))
+    .filter((point) => Number.isFinite(point.ts) && Number.isFinite(point.price))
+    .sort((leftPoint, rightPoint) => leftPoint.ts - rightPoint.ts);
+  if (!clean.length) return [];
+  const windowMs = rangeWindowMs(range);
+  if (!windowMs) return clean.map(({ ts: _ts, ...point }) => point);
+  const lastTs = clean[clean.length - 1]?.ts ?? Date.now();
+  const startTs = lastTs - windowMs;
+  const inWindow = clean.filter((point) => point.ts >= startTs);
+  const base = inWindow.length ? inWindow : [clean[clean.length - 1]!];
+  const first = base[0]!;
+  const last = base[base.length - 1]!;
+  const padded = [...base];
+  if (first.ts > startTs) {
+    padded.unshift({ ...first, timestamp: new Date(startTs).toISOString(), ts: startTs });
+  }
+  if (last.ts < lastTs) {
+    padded.push({ ...last, timestamp: new Date(lastTs).toISOString(), ts: lastTs });
+  }
+  return padded.map(({ ts: _ts, ...point }) => point);
 }
 
 function buildAreaPath(
@@ -340,7 +388,7 @@ type EventOutcomeCard = MarketGroupOutcome & {
   change: number;
 };
 
-function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedOutcomeKey: string | null) {
+function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedOutcomeKey: string | null, activeRange?: string | null) {
   const series = (chart?.series || []).filter((entry) => (entry.points || []).length > 1);
   if (!series.length) return emptyState('Fresh market: waiting for event price history to print.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
@@ -356,22 +404,30 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
     .map((entry, index) => ({
       entry,
       color: entry.color || POLYMARKET_SERIES_COLORS[index % POLYMARKET_SERIES_COLORS.length],
-      points: (entry.points || [])
-        .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
-        .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
+      points: normalizeTimedPointsForRange(
+        (entry.points || [])
+          .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
+          .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
+        activeRange,
+      ),
     }))
     .filter((entry) => entry.points.length > 1);
+  const allStamped = cleanSeries
+    .flatMap((entry) => entry.points.map((point) => new Date(point.timestamp).getTime()))
+    .filter((value) => Number.isFinite(value));
+  const domainMinTs = allStamped.length ? Math.min(...allStamped) : undefined;
+  const domainMaxTs = allStamped.length ? Math.max(...allStamped) : undefined;
   const selectedClean = cleanSeries.find((entry) => entry.entry.outcomeKey === selectedSeries?.outcomeKey) || cleanSeries[0] || null;
   const selectedPath = selectedClean
-    ? buildTimedLinePath(selectedClean.points, { width, height, left, right, top, bottom, min, max })
+    ? buildTimedLinePath(selectedClean.points, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs })
     : '';
   const selectedColor = selectedClean?.color || selectedSeries?.color || '#4377ff';
   const lastPoint = selectedClean?.points?.[selectedClean.points.length - 1] || null;
   const lastPointX = lastPoint && selectedClean
     ? (() => {
         const stamped = selectedClean.points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
-        const minTs = stamped[0] ?? 0;
-        const maxTs = stamped[stamped.length - 1] ?? minTs;
+        const minTs = domainMinTs ?? stamped[0] ?? 0;
+        const maxTs = domainMaxTs ?? stamped[stamped.length - 1] ?? minTs;
         return left + ((new Date(lastPoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * (width - left - right);
       })()
     : null;
@@ -402,14 +458,14 @@ function renderEventDetailChart(chart: MarketGroupChartPayload | null, selectedO
         })}
         <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
         {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points, color }) => {
-          const path = buildTimedLinePath(points, { width, height, left, right, top, bottom, min, max });
+          const path = buildTimedLinePath(points, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs });
           if (!path) return null;
           const endpoint = points[points.length - 1];
           const endpointX = endpoint
             ? (() => {
                 const stamped = points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
-                const minTs = stamped[0] ?? 0;
-                const maxTs = stamped[stamped.length - 1] ?? minTs;
+                const minTs = domainMinTs ?? stamped[0] ?? 0;
+                const maxTs = domainMaxTs ?? stamped[stamped.length - 1] ?? minTs;
                 return left + ((new Date(endpoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * plotWidth;
               })()
             : null;
@@ -477,27 +533,46 @@ function eventChartLegend(
   );
 }
 
-function renderDetailChart(chart: ChartPayload | null) {
+function renderDetailChart(chart: ChartPayload | null, activeRange?: string | null) {
   const points = chart?.points || [];
   if (!points.length) return emptyState('No market history loaded yet.');
   const { width, height, left, right, top, bottom } = FOCUS_CHART;
   const tickLabel = (value: number) => (chart?.kind === 'underlying-price' ? formatUnderlyingValue(value) : `${Math.round(value * 100)}.0%`);
 
   if (chart?.kind !== 'underlying-price') {
-    const yes = points.map((point) => Number(point.yesPrice)).filter((value) => Number.isFinite(value));
-    const no = points.map((point) => Number(point.noPrice)).filter((value) => Number.isFinite(value));
+    const yesTimed = normalizeTimedPointsForRange(
+      points
+        .map((point) => ({ timestamp: String(point.timestamp || ''), price: Number(point.yesPrice) }))
+        .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
+      activeRange || chart?.range,
+    );
+    const noTimed = normalizeTimedPointsForRange(
+      points
+        .map((point) => ({ timestamp: String(point.timestamp || ''), price: Number(point.noPrice) }))
+        .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
+      activeRange || chart?.range,
+    );
+    const yes = yesTimed.map((point) => point.price);
+    const no = noTimed.map((point) => point.price);
     if (yes.length < 2) return emptyState('No probability history loaded yet.');
     const merged = [...yes, ...(no.length === yes.length ? no : [])];
     const { min, max } = polymarketProbabilityScale(merged);
-    const yesPath = buildLinePath(yes, { width, height, left, right, top, bottom, min, max });
-    const noPath = buildLinePath(no.length === yes.length ? no : yes.map((value) => 1 - value), { width, height, left, right, top, bottom, min, max });
+    const allStamped = [...yesTimed, ...noTimed]
+      .map((point) => new Date(point.timestamp).getTime())
+      .filter((value) => Number.isFinite(value));
+    const domainMinTs = allStamped.length ? Math.min(...allStamped) : undefined;
+    const domainMaxTs = allStamped.length ? Math.max(...allStamped) : undefined;
+    const yesPath = buildTimedLinePath(yesTimed, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs });
+    const fallbackNoTimed = yesTimed.map((point) => ({ ...point, price: 1 - point.price }));
+    const noSeries = no.length === yes.length ? noTimed : fallbackNoTimed;
+    const noPath = buildTimedLinePath(noSeries, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs });
     const ticks = buildHorizontalTicks(min, max, 5);
     const lastYes = yes[yes.length - 1] ?? 0;
     const lastNo = (no.length === yes.length ? no[no.length - 1] : 1 - lastYes) ?? 0;
     const span = max - min || 1;
     const plotHeight = height - top - bottom;
     const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
-    const timeTicks = chartTimeTicks(points.map((point) => ({ timestamp: String(point.timestamp || '') })), 5);
+    const timeTicks = chartTimeTicks(yesTimed.map((point) => ({ timestamp: String(point.timestamp || '') })), 5);
     const plotWidth = width - left - right;
 
     return (
@@ -524,9 +599,9 @@ function renderDetailChart(chart: ChartPayload | null) {
           })}
           <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
           <path d={yesPath} className="wm-focus-chart-line yes" />
-          {no.length === yes.length ? <path d={noPath} className="wm-focus-chart-line no" /> : null}
+          {noPath ? <path d={noPath} className="wm-focus-chart-line no" /> : null}
           <circle cx={width - right} cy={projectY(lastYes)} r="4.4" className="wm-focus-chart-endpoint selected" style={{ fill: '#4377ff' }} />
-          {no.length === yes.length ? <circle cx={width - right} cy={projectY(lastNo)} r="3.8" className="wm-focus-chart-endpoint no-dot" /> : null}
+          {noPath ? <circle cx={width - right} cy={projectY(lastNo)} r="3.8" className="wm-focus-chart-endpoint no-dot" /> : null}
         </svg>
       </div>
     );
@@ -682,6 +757,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
+  const marketTitle = detail?.title || selectedGroup?.title || focusedMarket?.title || 'No market selected.';
+  const selectedOutcomeLabel = selectedOutcome?.label || focusedMarket?.title || 'Selected outcome';
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -741,17 +818,24 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                     detail?.createdAt || selectedGroup?.createdAt || focusedMarket?.createdAt || marketStats?.createdAt || null,
                   )}</i>
                 </div>
-                <strong className="wm-focus-title">{detail?.title || selectedGroup?.title || focusedMarket?.title || 'No market selected.'}</strong>
+                <strong className="wm-focus-title">{marketTitle}</strong>
               </div>
               <div className="wm-focus-price-hero">
                 <strong>{formatPercent(liveDisplayedYesPrice)}</strong>
                 <span className={suppressTerminalSnapshot ? 'flat' : signedClass(displayedChange)}>
-                  {suppressTerminalSnapshot ? 'No live quote' : `${selectedOutcome?.label || 'Selected'} ${formatSignedPercent(displayedChange)}`}
+                  {suppressTerminalSnapshot ? 'No live quote' : formatSignedPercent(displayedChange)}
                 </span>
               </div>
             </div>
 
             <div className="wm-focus-chart-card">
+              <div className="wm-focus-chart-marketbar">
+                <div>
+                  <span>{eventCategory}</span>
+                  <strong>{marketTitle}</strong>
+                </div>
+                <em>{selectedOutcomeLabel}</em>
+              </div>
               <div className="wm-focus-chart-topline">
                 <div className="wm-focus-chart-tabs" aria-label="chart range">
                   <button type="button" className="ghost">Past</button>
@@ -772,26 +856,26 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   <span>24h <strong>{formatCompact(displayedTrades)}</strong></span>
                 </div>
               </div>
-              {detail ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
-                ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
-                if (outcome.marketId != null) {
-                  ctx.setSelectedMarketId(Number(outcome.marketId));
-                } else {
-                  ctx.setSelectedMarketId(null);
-                }
-              }) : null}
               <div className={`wm-focus-detail-grid${shouldShowOutcomeRail ? '' : ' compact'}`}>
                 <div className="wm-focus-chart-wrap">
                   {detail
                     ? (
                         hasEventHistory
-                          ? renderEventDetailChart(eventChart, activeOutcomeKey)
+                          ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange)
                           : showFocusedOutcomeFallback
-                            ? renderDetailChart(displayChart)
+                            ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange)
                             : emptyState('No event price history is available for this market yet.')
                       )
-                    : (chartPoints.length ? renderDetailChart(displayChart) : emptyState('No local price history is available for this market.'))}
+                    : (chartPoints.length ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange) : emptyState('No local price history is available for this market.'))}
                 </div>
+                {detail ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
+                  ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
+                  if (outcome.marketId != null) {
+                    ctx.setSelectedMarketId(Number(outcome.marketId));
+                  } else {
+                    ctx.setSelectedMarketId(null);
+                  }
+                }) : null}
                 {shouldShowOutcomeRail ? (
                   <aside className="wm-focus-outcome-rail" aria-label="outcomes">
                     {detail
