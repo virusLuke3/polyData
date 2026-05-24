@@ -281,7 +281,7 @@ function tooltipFor(point: WeatherMapPoint) {
     <div class="wm-weather-deck-tooltip">
       <strong>${escapeHtml(point.city)}</strong>
       <br>${escapeHtml(point.condition)} · ${escapeHtml(temp)}
-      <br>PMKT ${escapeHtml(point.topBinLabel || 'No event')} · ${escapeHtml(point.quoteCoverage)} · ${escapeHtml(price)}${escapeHtml(bidAsk)}
+      <br>Quote ${escapeHtml(point.topBinLabel || 'No event')} · ${escapeHtml(point.quoteCoverage)} · ${escapeHtml(price)}${escapeHtml(bidAsk)}
       <br>${escapeHtml(compactPriceSource(point.priceSource))} · ${escapeHtml(compactBookStatus(point.bookStatus))}
     </div>
   `;
