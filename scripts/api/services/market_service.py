@@ -946,6 +946,19 @@ def _get_market_chart_serving_payload(ctx: dict, market_id: int, range_name: str
     }
 
 
+def _is_usable_market_chart_serving(payload: Optional[Dict[str, Any]]) -> bool:
+    if not payload:
+        return False
+    status = str(payload.get("historyStatus") or "").strip().lower()
+    if status == "ok":
+        return True
+    points = payload.get("points")
+    if not isinstance(points, list) or len(points) <= 2:
+        return False
+    _, distinct_count = _chart_point_stats(points)
+    return distinct_count > 1 and status not in {"missing", "snapshot", "flat"}
+
+
 def get_market_price_summary(
     ctx: dict,
     market_id: int,
@@ -1082,7 +1095,7 @@ def get_market_chart_payload(
     include_runtime_series: bool = True,
 ) -> Dict[str, Any]:
     serving_payload = _get_market_chart_serving_payload(ctx, market_id, range_name, interval)
-    if serving_payload is not None:
+    if _is_usable_market_chart_serving(serving_payload):
         return serving_payload
     if market is None and price is None:
         cache_key = json.dumps(
@@ -1091,7 +1104,7 @@ def get_market_chart_payload(
                 "range": str(range_name or "1d").strip().lower(),
                 "interval": str(interval or "5m").strip().lower(),
                 "includeRuntimeSeries": bool(include_runtime_series),
-                "v": 5,
+                "v": 6,
             },
             sort_keys=True,
             ensure_ascii=True,
@@ -1134,37 +1147,8 @@ def get_market_chart_payload(
     latest_decimal = _decimal_from_any(latest)
     recent_volume = _decimal_from_any(price.get("volume24h")) or Decimal("0")
     recent_trades = int(price.get("tradeCount24h") or 0)
-    if recent_volume <= 0 and recent_trades <= 0:
-        if latest_decimal is not None:
-            timestamp = price.get("updatedAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            points = [
-                {"timestamp": timestamp, "yesPrice": latest, "noPrice": price.get("latestNoPrice")},
-                {
-                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    "yesPrice": latest,
-                    "noPrice": price.get("latestNoPrice"),
-                },
-            ]
-            return {
-                "marketId": market_id,
-                "localMarketId": market_id,
-                "range": "snapshot",
-                "interval": "snapshot",
-                "kind": "probability",
-                "historyStatus": "snapshot",
-                "points": points,
-            }
-        return {
-            "marketId": market_id,
-            "localMarketId": market_id,
-            "range": range_name,
-            "interval": interval,
-            "kind": "probability",
-            "historyStatus": "missing",
-            "points": [],
-        }
     points: List[Dict[str, Any]] = []
-    if not points:
+    if recent_volume > 0 or recent_trades > 0:
         limit = 400
         if range_name == "7d":
             limit = 700
@@ -2051,7 +2035,7 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
 
     detail_chart = detail_payload.get("chart") if isinstance(detail_payload.get("chart"), dict) else None
     detail_chart_points = detail_chart.get("points") if isinstance(detail_chart, dict) else []
-    chart = detail_chart if isinstance(detail_chart_points, list) and detail_chart_points else None
+    chart = detail_chart if isinstance(detail_chart_points, list) and _is_usable_market_chart_serving(detail_chart) else None
     if chart is None:
         chart = get_market_chart_payload(
             ctx,
@@ -2060,7 +2044,7 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             interval="5m",
             market=market,
             price=price,
-            include_runtime_series=False,
+            include_runtime_series=True,
         )
     oracle_payload = detail_payload.get("oracle") or get_market_oracle_payload(ctx, market_id, market=market)
     diagnostics = dict(detail_payload.get("diagnostics") or {})
