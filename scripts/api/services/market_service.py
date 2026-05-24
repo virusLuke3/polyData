@@ -959,6 +959,33 @@ def _is_usable_market_chart_serving(payload: Optional[Dict[str, Any]]) -> bool:
     return distinct_count > 1 and status not in {"missing", "snapshot", "flat"}
 
 
+def _last_chart_price(chart: Optional[Dict[str, Any]]) -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
+    if not isinstance(chart, dict):
+        return None, None, None
+    points = chart.get("points")
+    if not isinstance(points, list) or not points:
+        return None, None, None
+    last = points[-1]
+    if not isinstance(last, dict):
+        return None, None, None
+    return last.get("yesPrice"), last.get("noPrice"), last.get("timestamp")
+
+
+def _merge_chart_latest_price(price: Dict[str, Any], chart: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    latest_yes, latest_no, updated_at = _last_chart_price(chart)
+    if latest_yes in (None, ""):
+        return price
+    merged = dict(price or {})
+    merged["latestPrice"] = latest_yes
+    merged["latestYesPrice"] = latest_yes
+    if latest_no not in (None, ""):
+        merged["latestNoPrice"] = latest_no
+    if updated_at:
+        merged["updatedAt"] = updated_at
+    merged["priceSource"] = "chart-history"
+    return merged
+
+
 def get_market_price_summary(
     ctx: dict,
     market_id: int,
@@ -1165,11 +1192,6 @@ def get_market_chart_payload(
             clob_count, clob_distinct_count = _chart_point_stats(clob_points)
             if clob_count > point_count and (clob_distinct_count > distinct_count or distinct_count <= 1):
                 points = clob_points
-    if points and latest_decimal is not None:
-        last_point = points[-1] or {}
-        last_decimal = _decimal_from_any(last_point.get("yesPrice"))
-        if last_decimal is not None and abs(last_decimal - latest_decimal) > Decimal("0.25"):
-            points = []
     effective_range = range_name
     effective_interval = interval
     if not points and latest not in (None, ""):
@@ -2046,6 +2068,7 @@ def get_market_workspace_payload(ctx: dict, market_id: int) -> Dict[str, Any]:
             price=price,
             include_runtime_series=True,
         )
+    price = _merge_chart_latest_price(price, chart)
     oracle_payload = detail_payload.get("oracle") or get_market_oracle_payload(ctx, market_id, market=market)
     diagnostics = dict(detail_payload.get("diagnostics") or {})
     if diagnostics:

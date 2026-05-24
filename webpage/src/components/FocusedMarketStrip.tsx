@@ -623,6 +623,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
+  const chartLatestPoint = (chart?.points || []).length ? chart?.points?.[chart.points.length - 1] : null;
   const lob = executionAvailable ? (tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null)) : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const marketStats = marketLookup(ctx.markets, ctx.selectedMarketId);
@@ -643,11 +644,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const shouldShowOutcomeRail = detail
     ? (detail.outcomes || []).length > 1
     : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
-  const displayedYesPrice = selectedOutcome?.yesPrice ?? price?.latestYesPrice ?? price?.latestPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
+  const displayedYesPrice = chartLatestPoint?.yesPrice ?? price?.latestYesPrice ?? price?.latestPrice ?? selectedOutcome?.yesPrice ?? focusedMarket?.latestYesPrice ?? focusedMarket?.latestPrice;
   const displayedChange = selectedOutcome?.change24h ?? price?.change24h;
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
   const displayedTrades = selectedOutcome?.tradeCount24h ?? price?.tradeCount24h ?? marketStats?.tradeCount24h;
-  const displayedNoPrice = selectedOutcome?.noPrice ?? price?.latestNoPrice;
+  const displayedNoPrice = chartLatestPoint?.noPrice ?? price?.latestNoPrice ?? selectedOutcome?.noPrice;
   const chartStatus = String(chart?.historyStatus || '').toLowerCase();
   const chartPointCount = chart?.points?.length || 0;
   const chartRenderable = Boolean(
