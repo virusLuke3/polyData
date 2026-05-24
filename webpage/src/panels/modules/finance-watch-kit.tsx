@@ -98,7 +98,7 @@ function FeedRow({ item }: { item: RuntimeFinanceWatchItem }) {
 
 function GridTile({ item }: { item: RuntimeFinanceWatchItem }) {
   return (
-    <article className="wm-finance-grid-tile">
+    <article className={`wm-finance-grid-tile ${toneClass(item.tone)}`}>
       <span>{item.symbol || item.metricUnit || '--'}</span>
       <strong>{item.label || '--'}</strong>
       <div>
@@ -109,6 +109,14 @@ function GridTile({ item }: { item: RuntimeFinanceWatchItem }) {
   );
 }
 
+type FngMetric = { label?: string; value?: string; tone?: string };
+type FngCategory = { id?: string; label?: string; score?: number; weight?: number; contribution?: number; tone?: string; degraded?: boolean };
+
+function summaryList<T>(payload: RuntimeFinanceWatchPayload | null | undefined, key: string): T[] {
+  const value = payload?.summary?.[key];
+  return Array.isArray(value) ? value as T[] : [];
+}
+
 function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | null }) {
   const headline = payload?.headline || {};
   const score = headline.score ?? '--';
@@ -117,6 +125,8 @@ function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | nul
   const deltaTone = typeof delta === 'number' && delta >= 0 ? 'up' : 'down';
   const scoreNumber = Number(score);
   const angle = Number.isFinite(scoreNumber) ? Math.max(0, Math.min(100, scoreNumber)) * 1.8 - 90 : 0;
+  const metrics = summaryList<FngMetric>(payload, 'headerMetrics');
+  const categories = summaryList<FngCategory>(payload, 'categories');
   return (
     <div className="wm-finance-sentiment">
       <section className={`wm-finance-sentiment-gauge ${toneClass(headline.tone)}`}>
@@ -133,6 +143,33 @@ function SentimentView({ payload }: { payload?: RuntimeFinanceWatchPayload | nul
         </div>
         {deltaLabel ? <small className={toneClass(deltaTone)}>{deltaLabel}</small> : null}
       </section>
+      {metrics.length ? (
+        <div className="wm-finance-fng-metrics">
+          {metrics.map((metric) => (
+            <span key={metric.label}>
+              <b className={toneClass(metric.tone)}>{metric.value || '--'}</b>
+              <em>{metric.label}</em>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {categories.length ? (
+        <div className="wm-finance-fng-categories">
+          {categories.map((category) => {
+            const scoreValue = Number(category.score || 0);
+            return (
+              <article key={category.id || category.label}>
+                <div>
+                  <strong>{category.label}</strong>
+                  <b className={toneClass(category.tone)}>{category.score}</b>
+                </div>
+                <span><i className={toneClass(category.tone)} style={{ width: `${Math.max(0, Math.min(100, scoreValue))}%` }} /></span>
+                <em>{Math.round(Number(category.weight || 0) * 100)}% weight · +{category.contribution} pts{category.degraded ? ' · degraded' : ''}</em>
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
       <div className="wm-finance-list compact">
         {(payload?.items || []).map((item, index) => <QuoteRow item={item} key={itemKey(item, index)} />)}
       </div>

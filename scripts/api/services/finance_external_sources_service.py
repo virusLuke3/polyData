@@ -38,6 +38,21 @@ ETF_FLOW_SYMBOLS: Tuple[Tuple[str, str], ...] = (
 TRADFI_PERP_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("SPY-USDT-SWAP", "SPY-PERP", "index"),
     ("XAU-USDT-SWAP", "GOLD-PERP", "commodity"),
+    ("CL-USDT-SWAP", "WTI-PERP", "commodity"),
+    ("IWM-USDT-SWAP", "RUSSELL-ETF-PERP", "index"),
+    ("EWJ-USDT-SWAP", "JAPAN-ETF-PERP", "index"),
+    ("EWY-USDT-SWAP", "KOREA-ETF-PERP", "index"),
+    ("NVDA-USDT-SWAP", "NVDA-PERP", "stock"),
+    ("AMD-USDT-SWAP", "AMD-PERP", "stock"),
+    ("AAPL-USDT-SWAP", "AAPL-PERP", "stock"),
+    ("MSFT-USDT-SWAP", "MSFT-PERP", "stock"),
+    ("AMZN-USDT-SWAP", "AMZN-PERP", "stock"),
+    ("GOOGL-USDT-SWAP", "GOOGL-PERP", "stock"),
+    ("META-USDT-SWAP", "META-PERP", "stock"),
+    ("TSLA-USDT-SWAP", "TSLA-PERP", "stock"),
+    ("COIN-USDT-SWAP", "COIN-PERP", "stock"),
+    ("MSTR-USDT-SWAP", "MSTR-PERP", "stock"),
+    ("HOOD-USDT-SWAP", "HOOD-PERP", "stock"),
     ("SPACEX-USDT-SWAP", "SPACEX-PERP", "private"),
 )
 
@@ -497,8 +512,8 @@ def build_finance_external_sources_payload(ctx: dict) -> Dict[str, Any]:
         "etfFlow": etf_flow,
         "cot": cot,
         "stablecoin": stablecoin,
-        "summary": {
-            "perpCount": len(hyperliquid.get("items") or []),
+            "summary": {
+            "perpCount": len(tradfi_perps.get("items") or []),
             "etfCount": len(etf_flow.get("items") or []),
             "cotCount": len(cot.get("items") or []),
             "stablecoinCount": len(stablecoin.get("items") or []),
