@@ -6,5 +6,5 @@ export const panel = createTechPanel({
   description: 'AI lab release, benchmark, pricing, valuation, outage, and regulation signal feed.',
   question: 'Tracks model-release, benchmark, pricing, valuation, outage, and regulatory signals for AI prediction markets.',
   mode: 'model-race',
-  limit: 12,
+  limit: 36,
 });

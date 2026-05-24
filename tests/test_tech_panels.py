@@ -76,12 +76,30 @@ def _ctx():
     def http_json_get(url, params=None, timeout=12, headers=None):
         if "openrouter.ai/api/v1/models" in url:
             return OPENROUTER_MODELS
-        assert "apps/top-free" in url
+        assert "itunes.apple.com" in url
+        if "topgrossingapplications" in url:
+            title = "iTunes Store: Top Grossing Apps"
+            names = [("ChatGPT", "OpenAI"), ("YouTube", "Google")]
+        elif "genre=6014" in url:
+            title = "iTunes Store: Top Free Applications in Games"
+            names = [("Roblox", "Roblox Corporation"), ("Block Blast!", "Hungry Studio")]
+        elif "genre=6009" in url:
+            title = "iTunes Store: Top Free Applications in News"
+            names = [("X", "X Corp."), ("Reddit", "reddit")]
+        else:
+            title = "iTunes Store: Top Free Apps"
+            names = [("ChatGPT", "OpenAI"), ("TikTok", "TikTok Ltd.")]
         return {
             "feed": {
-                "results": [
-                    {"id": "1", "name": "ChatGPT", "artistName": "OpenAI", "url": "https://apps.apple.com/app/1"},
-                    {"id": "2", "name": "TikTok", "artistName": "TikTok Ltd.", "url": "https://apps.apple.com/app/2"},
+                "title": {"label": title},
+                "entry": [
+                    {
+                        "im:name": {"label": name},
+                        "im:artist": {"label": artist},
+                        "id": {"attributes": {"im:id": str(index)}},
+                        "link": {"attributes": {"href": f"https://apps.apple.com/app/{index}"}},
+                    }
+                    for index, (name, artist) in enumerate(names, start=1)
                 ]
             }
         }
@@ -122,15 +140,17 @@ def test_tech_runtime_panels_are_registered():
 
 
 def test_ai_model_race_payload_extracts_entity_and_tags():
-    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "ai-model-race", limit=6)
+    payload = tech_panels_service.build_tech_panel_payload(_ctx(), "ai-model-race", limit=36)
 
     assert payload["status"] == "ok"
     assert payload["sources"]["openRouterUsage"] == "ok"
-    assert payload["sources"]["openRouterModels"] == "ok"
-    assert payload["items"][0]["source"] == "OpenRouter Usage"
-    assert payload["items"][0]["metricLabel"] == "3.00B TOK"
-    assert any("NEW MODEL" in item["tags"] for item in payload["items"])
-    assert payload["summary"]["watchlist"][0]["count"] >= 1
+    assert payload["sources"]["productSignal"] == "ok"
+    assert payload["sources"]["apiPrice"] == "ok"
+    assert [item["symbol"] for item in payload["summary"]["watchlist"]] == ["NEWS", "USAGE", "PRODUCT SIGNAL", "API PRICE"]
+    usage_items = [item for item in payload["items"] if item.get("category") == "USAGE"]
+    assert usage_items[0]["source"] == "OpenRouter Usage"
+    assert usage_items[0]["metricLabel"] == "3.00B TOK"
+    assert any("API PRICE" in item["tags"] for item in payload["items"])
 
 
 def test_big_tech_market_cap_payload_ranks_by_market_cap():
@@ -166,7 +186,8 @@ def test_consumer_app_pulse_combines_app_store_and_news():
     payload = tech_panels_service.build_tech_panel_payload(_ctx(), "consumer-app-pulse", limit=6)
 
     assert payload["status"] == "ok"
-    assert payload["sources"]["appStore"] == "ok"
-    assert payload["items"][0]["source"] == "App Store"
+    assert payload["sources"]["appStoreCharts"] == "ok"
+    assert payload["summary"]["appStoreSourceCount"] >= 20
+    assert [item["symbol"] for item in payload["summary"]["watchlist"]] == ["DOWNLOADS", "GAMES", "NEWS", "GROSSING"]
     assert "TOP FREE" not in payload["items"][0]["tags"]
-    assert any(item["label"] == "TikTok" for item in payload["items"])
+    assert {"DOWNLOADS", "GAMES", "NEWS", "GROSSING"}.issubset({item["category"] for item in payload["items"]})
