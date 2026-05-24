@@ -160,8 +160,8 @@ function pointFillColor(point: WeatherMapPoint): [number, number, number, number
 
 function pointLineColor(point: WeatherMapPoint, selectedCityId?: string | null): [number, number, number, number] {
   if (point.id === selectedCityId) return [255, 245, 190, 255];
-  if (point.marketTone === 'market') return [255, 176, 35, 245];
-  if (point.marketTone === 'watch') return [190, 154, 255, 225];
+  if (point.temperatureTone === 'hot') return [255, 190, 120, 245];
+  if (point.temperatureTone === 'cool') return [128, 234, 220, 235];
   return [255, 255, 255, 85];
 }
 
@@ -332,7 +332,13 @@ function WeatherHtmlLabels({
   );
 }
 
+function clampFallbackZoom(value: number) {
+  return Math.max(1, Math.min(3.6, value));
+}
+
 function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { points: WeatherMapPoint[]; selectedCityId?: string | null; onSelectCity?: (cityId: string) => void }) {
+  const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const dragRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   const { graticulePath, worldPath, projectedPoints } = useMemo(() => {
     const projection = geoEquirectangular();
     const world = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
@@ -349,9 +355,68 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
     };
   }, [points]);
 
+  const handlePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
+    (event.currentTarget as SVGSVGElement).setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const svg = event.currentTarget as SVGSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const scaleX = FALLBACK_W / Math.max(1, rect.width);
+    const scaleY = FALLBACK_H / Math.max(1, rect.height);
+    const dx = (event.clientX - drag.lastX) * scaleX;
+    const dy = (event.clientY - drag.lastY) * scaleY;
+    if (Math.abs(dx) + Math.abs(dy) > 1.5) drag.moved = true;
+    drag.lastX = event.clientX;
+    drag.lastY = event.clientY;
+    setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
+  };
+
+  const endPointerDrag = (event: PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const svg = event.currentTarget as SVGSVGElement;
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+    window.setTimeout(() => {
+      dragRef.current = null;
+    }, 0);
+  };
+
+  const handleWheel = (event: WheelEvent) => {
+    event.preventDefault();
+    const svg = event.currentTarget as SVGSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((event.clientX - rect.left) / Math.max(1, rect.width)) * FALLBACK_W;
+    const svgY = ((event.clientY - rect.top) / Math.max(1, rect.height)) * FALLBACK_H;
+    const zoomDelta = event.deltaY < 0 ? 1.16 : 0.86;
+    setView((current) => {
+      const nextZoom = clampFallbackZoom(current.zoom * zoomDelta);
+      const baseX = (svgX - current.x) / current.zoom;
+      const baseY = (svgY - current.y) / current.zoom;
+      return {
+        zoom: nextZoom,
+        x: svgX - baseX * nextZoom,
+        y: svgY - baseY * nextZoom,
+      };
+    });
+  };
+
   return (
     <div className="wm-weather-static-fallback" data-weather-map-fallback="true">
-      <svg viewBox={`0 0 ${FALLBACK_W} ${FALLBACK_H}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <svg
+        viewBox={`0 0 ${FALLBACK_W} ${FALLBACK_H}`}
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endPointerDrag}
+        onPointerCancel={endPointerDrag}
+        onWheel={handleWheel}
+      >
         <defs>
           <radialGradient id="weatherFallbackSea" cx="50%" cy="46%" r="70%">
             <stop offset="0%" stopColor="#101a1f" />
@@ -359,25 +424,43 @@ function WeatherStaticFallback({ points, selectedCityId, onSelectCity }: { point
           </radialGradient>
         </defs>
         <rect x="0" y="0" width={FALLBACK_W} height={FALLBACK_H} fill="url(#weatherFallbackSea)" />
-        <path className="wm-weather-static-grid" d={graticulePath} />
-        <path className="wm-weather-static-land" d={worldPath} />
-        {projectedPoints.map((point) => {
-          const selected = point.id === selectedCityId;
-          const showLabel = shouldShowLabel(point, selectedCityId);
-          return (
-            <g key={`static-${point.id}`} className={`wm-weather-static-point ${point.temperatureTone} ${point.marketTone} ${selected ? 'selected' : ''}`}>
-              <circle className="ring" cx={point.x} cy={point.y} r={selected ? 11 : 8} />
-              <circle className="dot" cx={point.x} cy={point.y} r={selected ? 5 : 4} onClick={() => onSelectCity?.(point.id)} />
-              {showLabel ? (
-                <g transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}>
-                  <rect x="-4" y="-13" width={Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8)} height="27" rx="3" />
-                  <text x="0" y="-2">{point.city}</text>
-                  <text x="0" y="10" className="sub">{point.sublabel}</text>
-                </g>
-              ) : null}
-            </g>
-          );
-        })}
+        <g transform={`translate(${view.x} ${view.y}) scale(${view.zoom})`}>
+          <path className="wm-weather-static-grid" d={graticulePath} />
+          <path className="wm-weather-static-land" d={worldPath} />
+          {projectedPoints.map((point) => {
+            const selected = point.id === selectedCityId;
+            const showLabel = shouldShowLabel(point, selectedCityId);
+            return (
+              <g key={`static-${point.id}`} className={`wm-weather-static-point ${point.temperatureTone} ${selected ? 'selected' : ''}`}>
+                <circle className="ring" cx={point.x} cy={point.y} r={selected ? 11 : 8} />
+                <circle
+                  className="dot"
+                  cx={point.x}
+                  cy={point.y}
+                  r={selected ? 5 : 4}
+                  onClick={() => {
+                    if (dragRef.current?.moved) return;
+                    onSelectCity?.(point.id);
+                  }}
+                />
+                {showLabel ? (
+                  <g
+                    className="label-hit"
+                    transform={`translate(${point.x + point.labelDx} ${point.y + point.labelDy})`}
+                    onClick={() => {
+                      if (dragRef.current?.moved) return;
+                      onSelectCity?.(point.id);
+                    }}
+                  >
+                    <rect x="-4" y="-13" width={Math.max(58, Math.max(point.city.length, point.sublabel.length) * 8)} height="27" rx="3" />
+                    <text x="0" y="-2">{point.city}</text>
+                    <text x="0" y="10" className="sub">{point.sublabel}</text>
+                  </g>
+                ) : null}
+              </g>
+            );
+          })}
+        </g>
       </svg>
     </div>
   );
@@ -530,7 +613,6 @@ export function WeatherDeckMap({ items, selectedCityId = null, onSelectCity, hei
       <div className="wm-weather-deck-legend" aria-hidden="true">
         <span><i className="hot" />HOT</span>
         <span><i className="cool" />COOL</span>
-        <span><i className="market" />PMKT QUOTE</span>
       </div>
       <div className="wm-weather-deck-status">{showWebglLayer ? 'WebGL' : 'SVG'}</div>
     </div>

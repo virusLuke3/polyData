@@ -8864,8 +8864,15 @@ body.panel-resize-active iframe {
   inset: 0;
   z-index: 1;
   background: #030405;
+  cursor: grab;
   opacity: 1;
   transition: opacity 180ms ease;
+  user-select: none;
+  touch-action: none;
+}
+
+.wm-weather-static-fallback:active {
+  cursor: grabbing;
 }
 
 .wm-weather-deck-map.map-ready.has-screen-points .wm-weather-static-fallback {
@@ -8882,6 +8889,7 @@ body.panel-resize-active iframe {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 
 .wm-weather-static-grid {
@@ -8905,21 +8913,30 @@ body.panel-resize-active iframe {
 .wm-weather-static-point .dot {
   fill: #ffa620;
   stroke: #ffe7a3;
-  stroke-width: 1.2;
+  stroke-width: 1.6;
   cursor: pointer;
+}
+
+.wm-weather-static-point.hot .ring {
+  stroke: rgba(255, 121, 72, 0.55);
 }
 
 .wm-weather-static-point.hot .dot {
   fill: #ff7948;
+  stroke: #ffd1ad;
+}
+
+.wm-weather-static-point.cool .ring {
+  stroke: rgba(72, 215, 190, 0.55);
 }
 
 .wm-weather-static-point.cool .dot {
   fill: #48d7be;
+  stroke: #bdfdf5;
 }
 
-.wm-weather-static-point.watch .ring,
-.wm-weather-static-point.market .ring {
-  stroke: rgba(190, 154, 255, 0.52);
+.wm-weather-static-point.neutral .ring {
+  stroke: rgba(255, 168, 0, 0.36);
 }
 
 .wm-weather-static-point.selected .ring {
@@ -8929,6 +8946,10 @@ body.panel-resize-active iframe {
 .wm-weather-static-point rect {
   fill: rgba(0, 0, 0, 0.76);
   stroke: rgba(255, 168, 0, 0.18);
+}
+
+.wm-weather-static-point .label-hit {
+  cursor: pointer;
 }
 
 .wm-weather-static-point text {
@@ -9000,9 +9021,12 @@ body.panel-resize-active iframe {
   color: #80eadc;
 }
 
-.wm-weather-html-label.market,
-.wm-weather-html-label.watch {
-  border-color: rgba(190, 154, 255, 0.48);
+.wm-weather-html-label.hot {
+  border-color: rgba(255, 121, 72, 0.42);
+}
+
+.wm-weather-html-label.cool {
+  border-color: rgba(72, 215, 190, 0.42);
 }
 
 .wm-weather-html-label.selected {
@@ -9069,11 +9093,6 @@ body.panel-resize-active iframe {
 
 .wm-weather-deck-legend i.cool {
   background: #48d7be;
-}
-
-.wm-weather-deck-legend i.market {
-  background: #ffb023;
-  outline: 2px solid rgba(190, 154, 255, 0.65);
 }
 
 .wm-weather-deck-tooltip {
