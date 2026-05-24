@@ -263,11 +263,14 @@ def _http_json_get(ctx: dict, url: str, *, params: Optional[Dict[str, Any]] = No
         session.close()
 
 
-def _http_text_get(ctx: dict, url: str, *, timeout: int = 12) -> str:
+def _http_text_get(ctx: dict, url: str, *, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
+    request_headers = {"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"}
+    if headers:
+        request_headers.update(headers)
     getter = ctx.get("http_text_get")
     if callable(getter):
         try:
-            return getter(url, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"})
+            return getter(url, timeout=timeout, headers=request_headers)
         except Exception:
             pass
     if requests is None:
@@ -275,7 +278,7 @@ def _http_text_get(ctx: dict, url: str, *, timeout: int = 12) -> str:
     session = requests.Session()
     session.trust_env = True
     try:
-        response = session.get(url, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/rss+xml,application/xml,text/xml"})
+        response = session.get(url, timeout=timeout, headers=request_headers)
         response.raise_for_status()
         return response.text
     finally:
@@ -600,6 +603,27 @@ def _extract_anchor_links(html: str, base_url: str) -> List[Dict[str, str]]:
             continue
         label = _strip_html(match.group(2))
         rows.append({"url": href, "label": label})
+    return rows
+
+
+def _research_headers() -> Dict[str, str]:
+    return {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+
+def _rss_links(xml_text: str) -> List[Dict[str, str]]:
+    try:
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError:
+        return []
+    rows: List[Dict[str, str]] = []
+    for item in root.findall(".//item"):
+        url = _coalesce_url(item.findtext("link"), item.findtext("guid"))
+        if not url:
+            continue
+        rows.append({"url": url, "label": _strip_html(item.findtext("title"))})
     return rows
 
 
@@ -960,11 +984,13 @@ def _build_broker_rows_from_open_sources(
     for provider, source_url, allowed_domains in _open_research_sources(ctx):
         source_key = provider
         try:
-            listing_html = _http_text_get(ctx, source_url, timeout=16)
+            listing_html = _http_text_get(ctx, source_url, timeout=16, headers=_research_headers())
         except Exception:
             sources[source_key] = "error"
             continue
-        candidates = _candidate_links_for_provider(provider, listing_html, source_url, max_candidates_per_source)
+        stripped_listing = listing_html.lstrip()
+        candidates = _rss_links(stripped_listing) if stripped_listing.startswith("<?xml") or stripped_listing.startswith("<rss") else _candidate_links_for_provider(provider, listing_html, source_url, max_candidates_per_source)
+        candidates = candidates[:max_candidates_per_source]
         parsed_count = 0
         for candidate in candidates:
             candidate_url = candidate["url"]
@@ -972,7 +998,7 @@ def _build_broker_rows_from_open_sources(
             report_url = candidate_url
             if ".pdf" not in candidate_url.lower():
                 try:
-                    detail_html = _http_text_get(ctx, candidate_url, timeout=12)
+                    detail_html = _http_text_get(ctx, candidate_url, timeout=12, headers=_research_headers())
                 except Exception:
                     detail_html = ""
                 pdf_url = _extract_first_pdf_url(detail_html, candidate_url) if detail_html else ""
