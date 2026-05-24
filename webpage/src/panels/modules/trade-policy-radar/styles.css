@@ -8,8 +8,8 @@
   overflow-y: auto;
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0)),
-    rgba(9, 10, 10, 0.78);
-  scrollbar-color: rgba(92, 101, 120, 0.62) rgba(6, 7, 8, 0.2);
+    rgba(10, 11, 11, 0.78);
+  scrollbar-color: rgba(92, 101, 120, 0.64) rgba(6, 7, 8, 0.18);
   scrollbar-width: thin;
 }
 
@@ -19,7 +19,7 @@
 
 .wm-trade-policy-radar-panel .wm-panel-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(95, 105, 124, 0.68);
+  background: rgba(95, 105, 124, 0.7);
 }
 
 .wm-trade-terminal {
@@ -33,7 +33,7 @@
   gap: 18px;
   min-width: 0;
   margin-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .wm-trade-tabs button {
@@ -42,10 +42,9 @@
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: rgba(235, 235, 235, 0.42);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 880;
+  color: rgba(235, 235, 235, 0.44);
+  font-size: 13px;
+  font-weight: 850;
   letter-spacing: 0;
   line-height: 1;
   cursor: pointer;
@@ -55,79 +54,45 @@
 .wm-trade-tabs button:hover,
 .wm-trade-tabs button.active {
   border-bottom-color: #ededed;
-  color: #f0f0f0;
+  color: #f3f3ef;
 }
 
-.wm-trade-kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-  margin-bottom: 8px;
-}
-
-.wm-trade-kpi-strip span {
-  display: grid;
+.wm-trade-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  gap: 3px;
-  padding: 7px 8px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  background: rgba(255, 255, 255, 0.035);
-  font-family: var(--font-mono);
-}
-
-.wm-trade-kpi-strip b,
-.wm-trade-kpi-strip em {
-  overflow: hidden;
+  padding: 2px 0 8px;
   color: rgba(235, 235, 235, 0.48);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 850;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.wm-trade-kpi-strip strong {
+.wm-trade-section-head span {
+  color: #f2f2ee;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wm-trade-section-head em {
   overflow: hidden;
-  color: #f0f0f0;
-  font-size: 17px;
-  font-weight: 920;
-  line-height: 1;
+  color: rgba(235, 235, 235, 0.42);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wm-trade-kpi-strip .tone-up strong,
-.wm-trade-policy-radar-panel .tone-up {
-  color: #24f284;
-}
-
-.wm-trade-kpi-strip .tone-down strong,
-.wm-trade-policy-radar-panel .tone-down {
-  color: #ff4d55;
-}
-
-.wm-trade-kpi-strip .tone-watch strong,
-.wm-trade-policy-radar-panel .tone-watch {
-  color: #ffc53d;
-}
-
-.wm-trade-kpi-strip .tone-neutral strong,
-.wm-trade-policy-radar-panel .tone-neutral {
-  color: rgba(235, 235, 235, 0.72);
-}
-
-.wm-trade-news-list,
-.wm-trade-rate-table,
-.wm-trade-chain-table {
+.wm-trade-news-list {
   min-width: 0;
 }
 
 .wm-trade-news-row {
   display: grid;
   min-width: 0;
-  gap: 5px;
-  padding: 10px 0 11px;
+  gap: 7px;
+  padding: 11px 0 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
 }
 
@@ -139,19 +104,17 @@
   gap: 6px;
   overflow: hidden;
   color: rgba(235, 235, 235, 0.48);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 760;
+  font-size: 9.5px;
+  font-weight: 780;
   letter-spacing: 0;
-  text-transform: uppercase;
 }
 
 .wm-trade-news-meta b {
   overflow: hidden;
   min-width: 0;
   color: #54d9f3;
-  font-size: 10.5px;
-  font-weight: 880;
+  font-size: 11px;
+  font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -159,9 +122,9 @@
 .wm-trade-news-meta em {
   overflow: hidden;
   color: rgba(235, 235, 235, 0.45);
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-style: normal;
-  font-weight: 850;
+  font-weight: 780;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -180,8 +143,7 @@
   padding: 2px 6px;
   border: 1px solid rgba(75, 84, 92, 0.82);
   color: #a8aaa7;
-  font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 9px;
   font-style: normal;
   font-weight: 900;
   line-height: 1;
@@ -189,23 +151,58 @@
 
 .wm-trade-tag.tone-up {
   border-color: rgba(36, 242, 132, 0.42);
+  color: #24f284;
 }
 
 .wm-trade-tag.tone-down {
   border-color: rgba(255, 72, 72, 0.72);
+  color: #ff4d55;
 }
 
 .wm-trade-tag.tone-watch {
   border-color: rgba(255, 197, 61, 0.56);
+  color: #ffc53d;
 }
 
 .wm-trade-news-row > strong {
   display: -webkit-box;
   overflow: hidden;
   color: #eeeeee;
-  font-size: 12.5px;
-  font-weight: 790;
-  line-height: 1.24;
+  font-size: 13px;
+  font-weight: 820;
+  line-height: 1.28;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-trade-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wm-trade-facts div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.wm-trade-facts span {
+  display: block;
+  margin-bottom: 4px;
+  color: rgba(235, 235, 235, 0.4);
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.wm-trade-facts b {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(238, 238, 238, 0.8);
+  font-size: 10.5px;
+  font-weight: 720;
+  line-height: 1.26;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -214,150 +211,50 @@
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: rgba(235, 235, 235, 0.58);
-  font-size: 10px;
-  font-weight: 650;
+  color: rgba(235, 235, 235, 0.67);
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.36;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.wm-trade-readout {
+  display: grid;
+  gap: 4px;
+  padding: 8px 9px;
+  border-left: 3px solid rgba(36, 242, 132, 0.75);
+  background: rgba(36, 242, 132, 0.055);
+}
+
+.wm-trade-readout span {
+  color: rgba(235, 235, 235, 0.44);
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.wm-trade-readout b {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(238, 238, 238, 0.84);
+  font-size: 10.5px;
+  font-weight: 760;
   line-height: 1.3;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.wm-trade-news-foot b {
-  color: #8bdcf4;
-  text-decoration: underline;
-}
-
-.wm-trade-readout {
-  margin-top: 3px;
-  padding: 7px 8px;
-  border: 1px solid rgba(25, 204, 235, 0.22);
-  background: rgba(25, 204, 235, 0.045);
-  color: rgba(235, 235, 235, 0.64);
-  font-size: 10px;
-  font-weight: 680;
-  line-height: 1.35;
-}
-
-.wm-trade-rate-head,
-.wm-trade-rate-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(64px, 0.55fr) minmax(64px, 0.55fr);
-  align-items: center;
-  min-width: 0;
-  gap: 10px;
-}
-
-.wm-trade-rate-head {
-  padding: 6px 0 8px;
+.wm-trade-news-foot {
+  justify-content: space-between;
   color: rgba(235, 235, 235, 0.42);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 900;
-  text-transform: uppercase;
 }
 
-.wm-trade-rate-row {
-  min-height: 58px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
-}
-
-.wm-trade-rate-row div {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.wm-trade-rate-row strong,
-.wm-trade-chain-main strong {
+.wm-trade-news-foot b {
   overflow: hidden;
-  color: #eeeeee;
-  font-size: 12.5px;
-  font-weight: 820;
-  line-height: 1.05;
+  color: #8bdcf4;
+  font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wm-trade-rate-row em,
-.wm-trade-chain-main em {
-  overflow: hidden;
-  color: rgba(235, 235, 235, 0.45);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 760;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.wm-trade-rate-row b {
-  color: #eeeeee;
-  font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 920;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.wm-trade-rate-row span {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 900;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.wm-trade-rate-row i {
-  grid-column: 1 / -1;
-  margin-top: -4px;
-  color: rgba(235, 235, 235, 0.38);
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  font-style: normal;
-  font-weight: 760;
-  text-transform: uppercase;
-}
-
-.wm-trade-chain-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(78px, 0.85fr) minmax(78px, 0.85fr);
-  min-width: 0;
-  gap: 9px;
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.075);
-}
-
-.wm-trade-chain-main,
-.wm-trade-chain-pair {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.wm-trade-chain-pair span {
-  color: rgba(235, 235, 235, 0.4);
-  font-family: var(--font-mono);
-  font-size: 8.5px;
-  font-weight: 900;
-}
-
-.wm-trade-chain-pair b {
-  overflow: hidden;
-  color: rgba(235, 235, 235, 0.68);
-  font-size: 10px;
-  font-weight: 760;
-  line-height: 1.22;
-  text-overflow: ellipsis;
-}
-
-.wm-trade-chain-row p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: rgba(235, 235, 235, 0.62);
-  font-size: 10.5px;
-  font-weight: 720;
-  line-height: 1.35;
 }
 
 @container (max-width: 520px) {
@@ -366,19 +263,11 @@
   }
 
   .wm-trade-tabs {
-    gap: 12px;
+    gap: 14px;
     overflow-x: auto;
   }
 
-  .wm-trade-kpi-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .wm-trade-chain-row {
+  .wm-trade-facts {
     grid-template-columns: 1fr;
-  }
-
-  .wm-trade-chain-row p {
-    grid-column: auto;
   }
 }

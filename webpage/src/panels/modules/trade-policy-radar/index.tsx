@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '../helpers';
@@ -7,143 +7,168 @@ import './styles.css';
 type TabId = 'events' | 'tariffs' | 'flows' | 'remedies' | 'ntm' | 'materials';
 type Tone = 'up' | 'down' | 'watch' | 'neutral';
 
-type PolicyEvent = {
+type PolicyItem = {
   id: string;
+  tab: TabId;
   source: string;
-  sourceClass: string;
   category: string;
   tag: string;
-  tagTone: Tone;
+  tone: Tone;
   title: string;
-  summary: string;
-  age: string;
-  readout: string;
-};
-
-type RateRow = {
+  region: string;
+  measure: string;
+  products: string;
+  impact: string;
   market: string;
-  code: string;
-  value: string;
-  change: string;
-  tone: Tone;
-  meta: string;
+  updated: string;
 };
 
-type ChainRow = {
-  commodity: string;
-  policy: string;
-  upstream: string;
-  downstream: string;
-  readout: string;
-  tone: Tone;
-};
-
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: 'events', label: '事件' },
-  { id: 'tariffs', label: '关税' },
-  { id: 'flows', label: '贸易流' },
-  { id: 'remedies', label: '救济' },
-  { id: 'ntm', label: '非关税' },
-  { id: 'materials', label: '原料' },
+const TABS: Array<{ id: TabId; label: string; hint: string }> = [
+  { id: 'events', label: '事件', hint: '先看政策动作' },
+  { id: 'tariffs', label: '关税', hint: '官方税率基准' },
+  { id: 'flows', label: '贸易流', hint: '谁依赖谁' },
+  { id: 'remedies', label: '救济', hint: '反倾销反补贴' },
+  { id: 'ntm', label: '非关税', hint: '许可标准配额' },
+  { id: 'materials', label: '原料', hint: '出口限制' },
 ];
 
-const KPI_ROWS = [
-  { label: 'EVENTS', value: '12', meta: '30D', tone: 'watch' },
-  { label: 'RESTRICTIVE', value: '67%', meta: 'GTA LENS', tone: 'down' },
-  { label: 'INPUT SHOCK', value: '4', meta: 'HS6 WATCH', tone: 'up' },
-  { label: 'PMKT LINK', value: '8', meta: 'ACTIVE MKTS', tone: 'neutral' },
-] satisfies Array<{ label: string; value: string; meta: string; tone: Tone }>;
+const DEFAULT_TAB_META = TABS[0] as { id: TabId; label: string; hint: string };
 
-const EVENTS: PolicyEvent[] = [
+const POLICY_ITEMS: PolicyItem[] = [
   {
-    id: 'ev-batteries',
-    source: 'GLOBAL TRADE ALERT',
-    sourceClass: 'GTA',
-    category: 'CLEAN ENERGY',
-    tag: 'TARIFF',
-    tagTone: 'down',
-    title: 'US/EU clean-energy tariff pressure keeps battery and EV supply-chain risk elevated',
-    summary: 'EVs, solar modules, batteries and steel remain the cleanest policy-to-margin transmission path.',
-    age: '2H AGO',
-    readout: '上游金属、本土替代链偏强；下游整车与组件毛利率承压。',
-  },
-  {
-    id: 'ev-minerals',
-    source: 'OECD',
-    sourceClass: 'OECD',
-    category: 'RAW MATERIALS',
-    tag: 'EXPORT',
-    tagTone: 'watch',
-    title: 'Nickel, cobalt and lithium export restrictions are the upstream cost shock to monitor',
-    summary: 'Export taxes, quotas and licensing regimes can reprice battery inputs before official trade data updates.',
-    age: '7H AGO',
-    readout: '先看资源国、矿业股、精炼产能，再看电池与储能成本。',
-  },
-  {
-    id: 'ev-ntm',
-    source: 'WTO I-TIP',
-    sourceClass: 'I-TIP',
-    category: 'TBT / SPS',
-    tag: 'NTM',
-    tagTone: 'neutral',
-    title: 'Non-tariff barriers matter most for food, pharma, chemicals and auto parts',
-    summary: 'TBT/SPS, import licensing and quantity limits usually show up as delays, compliance cost and supplier shifts.',
-    age: '11H AGO',
-    readout: '不一定直接加税，但会改变库存周期、交付时间和区域供应商。',
-  },
-  {
-    id: 'ev-remedy',
-    source: 'WTO REMEDIES',
-    sourceClass: 'REMEDY',
-    category: 'AD / CVD',
-    tag: 'PROBE',
-    tagTone: 'down',
-    title: 'Trade-remedy investigations are the fastest margin shock for steel, solar and chemicals',
-    summary: 'Anti-dumping and countervailing duties can turn an investigation headline into a pricing event quickly.',
-    age: '1D AGO',
-    readout: '钢铁、光伏、化工、轮胎、铝材需要单独盯调查状态。',
-  },
-];
-
-const TARIFF_ROWS: RateRow[] = [
-  { market: 'WTO MFN BASE', code: 'US / CN', value: '3.4%', change: '+0.0pp', tone: 'neutral', meta: 'official baseline' },
-  { market: 'EFFECTIVE RATE', code: 'US IMPORTS', value: '11.8%', change: '+8.4pp', tone: 'down', meta: 'policy layer' },
-  { market: 'BOUND DUTY', code: 'EU STEEL', value: '0-2%', change: 'stable', tone: 'neutral', meta: 'legal ceiling' },
-  { market: 'RTA CHECK', code: 'ASEAN', value: 'mixed', change: 'watch', tone: 'watch', meta: 'preferential rates' },
-];
-
-const FLOW_ROWS: ChainRow[] = [
-  {
-    commodity: 'Nickel / Cobalt / Lithium',
-    policy: 'export tax / quota / license',
-    upstream: 'miners / refiners',
-    downstream: 'battery / EV / storage',
-    readout: '资源端弹性更高，下游先看毛利率压缩。',
+    id: 'event-clean-energy',
+    tab: 'events',
+    source: '全球贸易预警',
+    category: '清洁能源',
+    tag: '关税',
     tone: 'down',
+    title: '美国和欧盟继续围绕电动车、太阳能组件、电池加码贸易限制',
+    region: '美国 / 欧盟 / 中国',
+    measure: '新增关税、反补贴调查、原产地规则收紧',
+    products: '电动车、太阳能组件、锂电池、钢铝材料',
+    impact: '本土替代链和上游金属受益，进口依赖的整车和组件厂毛利率承压。',
+    market: '清洁能源补贴、太阳能关税、电动车销量、锂电池价格相关市场',
+    updated: '2小时前',
   },
   {
-    commodity: 'Steel / Aluminum',
-    policy: 'AD / CVD / safeguard',
-    upstream: 'domestic producers',
-    downstream: 'autos / machinery / packaging',
-    readout: '本土产能受保护，进口依赖制造商成本上升。',
+    id: 'event-chip-control',
+    tab: 'events',
+    source: '各国政府公告',
+    category: '半导体',
+    tag: '出口管制',
     tone: 'watch',
+    title: '先进芯片、光刻设备和云算力限制继续影响半导体供应链',
+    region: '美国 / 中国 / 日本 / 荷兰',
+    measure: '出口许可、投资限制、设备销售限制',
+    products: '人工智能芯片、先进制程设备、云计算服务',
+    impact: '设备商订单节奏和国产替代预期会先动，随后传导到云资本开支。',
+    market: '人工智能芯片出口、半导体设备销售、中国科技政策相关市场',
+    updated: '6小时前',
   },
   {
-    commodity: 'Solar / Batteries',
-    policy: 'tariff / origin rule',
-    upstream: 'polysilicon / cells / modules',
-    downstream: 'utilities / installers / clean ETF',
-    readout: '区域替代链受益，终端装机节奏可能被推迟。',
-    tone: 'down',
-  },
-  {
-    commodity: 'Food / Pharma / Chemicals',
-    policy: 'TBT / SPS / licensing',
-    upstream: 'agri / API / base chemicals',
-    downstream: 'retail / healthcare / consumer',
-    readout: '主要体现为通关延迟、合规成本和库存重建。',
+    id: 'tariff-us-china',
+    tab: 'tariffs',
+    source: '世贸组织关税库',
+    category: '官方税率',
+    tag: '税率',
     tone: 'neutral',
+    title: '用官方税率库确认国家和商品编码的法定关税基准',
+    region: '美国 / 中国 / 欧盟',
+    measure: '最惠国税率、约束税率、区域协定税率',
+    products: '钢铁、铝材、汽车零部件、电子产品',
+    impact: '这是测算政策冲击的基准层，不等同于实时新闻，但能判断加税空间。',
+    market: '进口成本、制造业利润率、区域替代链相关市场',
+    updated: '每日校验',
+  },
+  {
+    id: 'tariff-effective',
+    tab: 'tariffs',
+    source: '世贸组织关税库',
+    category: '有效税率',
+    tag: '叠加',
+    tone: 'down',
+    title: '实际进口成本要把基础税率、额外关税和贸易救济税叠加看',
+    region: '美国 / 欧盟',
+    measure: '基础关税 + 额外关税 + 反倾销或反补贴税',
+    products: '光伏组件、钢管、轮胎、化工品',
+    impact: '单看最惠国税率会低估真实成本，叠加税率才对应企业毛利率。',
+    market: '钢铁、光伏、化工、轮胎行业利润率相关市场',
+    updated: '每日校验',
+  },
+  {
+    id: 'flow-battery-chain',
+    tab: 'flows',
+    source: '世界银行贸易数据库',
+    category: '产业链',
+    tag: '贸易流',
+    tone: 'watch',
+    title: '把商品编码映射到进出口流，判断哪个国家和公司真正暴露',
+    region: '印尼 / 中国 / 韩国 / 美国 / 欧盟',
+    measure: '按商品编码追踪出口国、进口国、贸易额和替代来源',
+    products: '镍、钴、锂、电池材料、电池包',
+    impact: '贸易限制先影响资源和精炼环节，再影响电池、储能和整车成本。',
+    market: '镍价、锂价、电动车成本、储能装机相关市场',
+    updated: '月度更新',
+  },
+  {
+    id: 'flow-steel-chain',
+    tab: 'flows',
+    source: '联合国商品贸易库',
+    category: '产业链',
+    tag: '敞口',
+    tone: 'neutral',
+    title: '钢铝贸易流可以拆出上游受益者和下游成本承压者',
+    region: '美国 / 欧盟 / 中国 / 土耳其 / 印度',
+    measure: '进口依赖度、替代供应商、出口目的地集中度',
+    products: '热轧卷、铝材、钢管、机械零部件',
+    impact: '本土钢铝企业可能受保护，下游汽车、机械、包装企业成本上升。',
+    market: '钢铁价格、制造业利润率、汽车成本相关市场',
+    updated: '月度更新',
+  },
+  {
+    id: 'remedy-solar',
+    tab: 'remedies',
+    source: '世贸组织贸易救济库',
+    category: '贸易救济',
+    tag: '反补贴',
+    tone: 'down',
+    title: '光伏、钢铁、化工是反倾销和反补贴调查最敏感的行业',
+    region: '美国 / 欧盟 / 中国 / 东南亚',
+    measure: '反倾销调查、反补贴调查、保障措施',
+    products: '太阳能电池、组件、钢铁、化工中间体',
+    impact: '调查公告本身就可能改变订单和报价，终裁税率会进一步改变利润率。',
+    market: '太阳能关税、钢铁进口限制、化工出口相关市场',
+    updated: '1天前',
+  },
+  {
+    id: 'ntm-food-pharma',
+    tab: 'ntm',
+    source: '世贸组织贸易措施门户',
+    category: '非关税',
+    tag: '标准',
+    tone: 'watch',
+    title: '技术标准、卫生检疫和进口许可会改变食品医药化工的通关速度',
+    region: '欧盟 / 亚洲 / 北美',
+    measure: '技术性贸易壁垒、卫生检疫、进口许可、数量限制',
+    products: '农产品、食品、药品原料、化工品、汽车零部件',
+    impact: '不一定直接加税，但会造成交付延迟、合规成本上升和库存重建。',
+    market: '食品通胀、药品短缺、化工供应链相关市场',
+    updated: '11小时前',
+  },
+  {
+    id: 'materials-critical-minerals',
+    tab: 'materials',
+    source: '经合组织原料限制库',
+    category: '工业原料',
+    tag: '出口限制',
+    tone: 'down',
+    title: '镍、钴、锂、铜、稀土的出口限制会先冲击上游价格',
+    region: '印尼 / 智利 / 刚果（金）/ 中国',
+    measure: '出口税、出口禁令、许可证、配额',
+    products: '镍、钴、锂、铜、稀土、铝、铁矿石',
+    impact: '资源国和矿业股弹性更高，下游电池、电子和新能源制造先看毛利率压缩。',
+    market: '关键矿产价格、电池成本、资源国政策相关市场',
+    updated: '7小时前',
   },
 ];
 
@@ -154,18 +179,23 @@ function toneClass(tone: Tone) {
 function TradePolicyRadarPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('events');
   const [showHelp, setShowHelp] = useState(false);
+  const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || DEFAULT_TAB_META;
+  const activeItems = useMemo(
+    () => POLICY_ITEMS.filter((item) => item.tab === activeTab),
+    [activeTab],
+  );
 
   return (
     <Panel
       title="贸易政策"
-      badge="LIVE"
+      badge="实时"
       status="live"
-      count={12}
+      count={activeItems.length}
       titleControls={(
         <button
           type="button"
           className="wm-panel-help-button"
-          aria-label="Explain trade policy panel"
+          aria-label="说明贸易政策面板"
           aria-expanded={showHelp}
           onClick={() => setShowHelp((current) => !current)}
         >
@@ -174,15 +204,15 @@ function TradePolicyRadarPanel() {
       )}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>贸易政策雷达</strong>
-          <p>事件用 GTA，关税用 WTO，贸易流用 WITS/Comtrade，救济/非关税/原料限制分别映射到行业和 Polymarket 主题。</p>
+          <strong>贸易政策</strong>
+          <p>把政策事件、官方税率、贸易流、贸易救济、非关税措施和原材料出口限制，直接映射到商品、行业和预测市场。</p>
         </div>
       ) : null}
       className="wm-market-panel wm-trade-policy-radar-panel"
       dataPanelId="trade-policy-radar"
     >
       <div className="wm-trade-terminal">
-        <div className="wm-trade-tabs" role="tablist" aria-label="Trade policy views">
+        <div className="wm-trade-tabs" role="tablist" aria-label="贸易政策视图">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -196,95 +226,59 @@ function TradePolicyRadarPanel() {
           ))}
         </div>
 
-        <div className="wm-trade-kpi-strip">
-          {KPI_ROWS.map((row) => (
-            <span className={toneClass(row.tone)} key={row.label}>
-              <b>{row.label}</b>
-              <strong>{row.value}</strong>
-              <em>{row.meta}</em>
-            </span>
-          ))}
+        <div className="wm-trade-section-head">
+          <span>{activeTabMeta.label}</span>
+          <em>{activeTabMeta.hint}</em>
         </div>
 
-        {activeTab === 'events' ? <PolicyNewsList /> : null}
-        {activeTab === 'tariffs' ? <TariffTape /> : null}
-        {activeTab === 'flows' ? <ChainTape rows={FLOW_ROWS} /> : null}
-        {activeTab === 'remedies' ? <PolicyNewsList filter="REMEDY" /> : null}
-        {activeTab === 'ntm' ? <PolicyNewsList filter="I-TIP" /> : null}
-        {activeTab === 'materials' ? <ChainTape rows={FLOW_ROWS.filter((row) => /Nickel|Steel|Solar/.test(row.commodity))} /> : null}
+        <div className="wm-trade-news-list">
+          {activeItems.map((item) => (
+            <PolicyRow item={item} key={item.id} />
+          ))}
+        </div>
       </div>
     </Panel>
   );
 }
 
-function PolicyNewsList({ filter }: { filter?: string }) {
-  const rows = filter ? EVENTS.filter((event) => event.sourceClass === filter) : EVENTS;
+function PolicyRow({ item }: { item: PolicyItem }) {
   return (
-    <div className="wm-trade-news-list">
-      {rows.map((event) => (
-        <article className="wm-trade-news-row" key={event.id}>
-          <div className="wm-trade-news-meta">
-            <span className="wm-trade-dot" />
-            <b>{event.category}</b>
-            <em>{event.source}</em>
-            <i className={`wm-trade-tag ${toneClass(event.tagTone)}`}>{event.tag}</i>
-          </div>
-          <strong>{event.title}</strong>
-          <p>{event.summary}</p>
-          <div className="wm-trade-news-foot">
-            <span>{event.age}</span>
-            <b>READ SOURCE</b>
-          </div>
-          <div className="wm-trade-readout">{event.readout}</div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function TariffTape() {
-  return (
-    <div className="wm-trade-rate-table">
-      <div className="wm-trade-rate-head">
-        <span>CODE</span>
-        <span>RATE</span>
-        <span>MOVE</span>
+    <article className="wm-trade-news-row">
+      <div className="wm-trade-news-meta">
+        <span className="wm-trade-dot" />
+        <b>{item.category}</b>
+        <em>{item.source}</em>
+        <i className={`wm-trade-tag ${toneClass(item.tone)}`}>{item.tag}</i>
       </div>
-      {TARIFF_ROWS.map((row) => (
-        <div className="wm-trade-rate-row" key={`${row.market}-${row.code}`}>
-          <div>
-            <strong>{row.market}</strong>
-            <em>{row.code}</em>
-          </div>
-          <b>{row.value}</b>
-          <span className={toneClass(row.tone)}>{row.change}</span>
-          <i>{row.meta}</i>
-        </div>
-      ))}
-    </div>
+
+      <strong>{item.title}</strong>
+
+      <div className="wm-trade-facts">
+        <Fact label="地区" value={item.region} />
+        <Fact label="措施" value={item.measure} />
+        <Fact label="商品" value={item.products} />
+      </div>
+
+      <p>{item.impact}</p>
+
+      <div className="wm-trade-readout">
+        <span>市场映射</span>
+        <b>{item.market}</b>
+      </div>
+
+      <div className="wm-trade-news-foot">
+        <span>{item.updated}</span>
+        <b>来源：{item.source}</b>
+      </div>
+    </article>
   );
 }
 
-function ChainTape({ rows }: { rows: ChainRow[] }) {
+function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="wm-trade-chain-table">
-      {rows.map((row) => (
-        <article className="wm-trade-chain-row" key={row.commodity}>
-          <div className="wm-trade-chain-main">
-            <strong>{row.commodity}</strong>
-            <em>{row.policy}</em>
-          </div>
-          <div className="wm-trade-chain-pair">
-            <span>UP</span>
-            <b>{row.upstream}</b>
-          </div>
-          <div className="wm-trade-chain-pair">
-            <span>DOWN</span>
-            <b>{row.downstream}</b>
-          </div>
-          <p className={toneClass(row.tone)}>{row.readout}</p>
-        </article>
-      ))}
+    <div>
+      <span>{label}</span>
+      <b>{value}</b>
     </div>
   );
 }
@@ -297,8 +291,8 @@ const renderers: PanelRenderMap = {
 
 export const panel = panelFromRenderer(renderers, {
   id: 'trade-policy-radar',
-  title: 'Trade Policy Radar',
-  eyebrow: 'world',
-  description: 'Trade policy shock radar linking public policy sources to commodities, supply chains, and market implications.',
+  title: '贸易政策',
+  eyebrow: '全球',
+  description: '把公开贸易政策数据源映射到商品、产业链和预测市场。',
   defaultEnabled: true,
 });
