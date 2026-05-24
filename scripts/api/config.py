@@ -30,6 +30,9 @@ from data_sources import (
     FINANCE_CFTC_LEGACY_COT_URL,
     FINANCE_CNN_FNG_URL,
     FINANCE_CNN_FNG_REFERER_URL,
+    FINANCE_BROKER_RESEARCH_EDISON_URL,
+    FINANCE_BROKER_RESEARCH_WATER_TOWER_URL,
+    FINANCE_BROKER_RESEARCH_ZACKS_URL,
     FINANCE_DEFILLAMA_STABLECOINS_URL,
     FINANCE_DEFILLAMA_YIELDS_URL,
     FINANCE_FRED_CSV_URL_TEMPLATE,
@@ -165,6 +168,9 @@ class ApiSettings:
     finance_aaii_sentiment_url: str
     finance_broker_research_feed_urls: tuple[str, ...]
     finance_broker_research_news_fallback: bool
+    finance_broker_research_edison_url: str
+    finance_broker_research_zacks_url: str
+    finance_broker_research_water_tower_url: str
     finance_hyperliquid_info_url: str
     finance_okx_market_ticker_url: str
     finance_defillama_stablecoins_url: str
@@ -305,6 +311,9 @@ def load_api_settings() -> ApiSettings:
         finance_aaii_sentiment_url=_get_str("POLYDATA_FINANCE_AAII_SENTIMENT_URL", FINANCE_AAII_SENTIMENT_URL or "https://www.aaii.com/sentimentsurvey/sent_results"),
         finance_broker_research_feed_urls=_get_csv("POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS", ()),
         finance_broker_research_news_fallback=_get_bool("POLYDATA_FINANCE_BROKER_RESEARCH_NEWS_FALLBACK", False),
+        finance_broker_research_edison_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_EDISON_URL", FINANCE_BROKER_RESEARCH_EDISON_URL or "https://www.edisongroup.com/equity-research/"),
+        finance_broker_research_zacks_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_ZACKS_URL", FINANCE_BROKER_RESEARCH_ZACKS_URL or "https://scr.zacks.com/news/default.aspx"),
+        finance_broker_research_water_tower_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_WATER_TOWER_URL", FINANCE_BROKER_RESEARCH_WATER_TOWER_URL or "https://www.watertowerresearch.com/research"),
         finance_hyperliquid_info_url=_get_str("POLYDATA_FINANCE_HYPERLIQUID_INFO_URL", FINANCE_HYPERLIQUID_INFO_URL or "https://api.hyperliquid.xyz/info"),
         finance_okx_market_ticker_url=_get_str("POLYDATA_FINANCE_OKX_MARKET_TICKER_URL", FINANCE_OKX_MARKET_TICKER_URL or "https://www.okx.com/api/v5/market/ticker"),
         finance_defillama_stablecoins_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL", FINANCE_DEFILLAMA_STABLECOINS_URL or "https://stablecoins.llama.fi/stablecoins"),

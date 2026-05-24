@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urljoin, urlencode, urlparse
 from xml.etree import ElementTree
 
 try:
@@ -585,6 +585,92 @@ def _coalesce_url(*values: Any) -> str:
     return ""
 
 
+def _absolute_url(base_url: str, value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.startswith("#") or text.lower().startswith(("javascript:", "mailto:", "tel:")):
+        return ""
+    return urljoin(base_url, text)
+
+
+def _extract_anchor_links(html: str, base_url: str) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for match in re.finditer(r"<a\b[^>]*?\bhref=[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)</a>", html, flags=re.IGNORECASE):
+        href = _absolute_url(base_url, unescape(match.group(1)))
+        if not href:
+            continue
+        label = _strip_html(match.group(2))
+        rows.append({"url": href, "label": label})
+    return rows
+
+
+def _extract_html_title(html: str) -> str:
+    patterns = (
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+name=["\']title["\'][^>]+content=["\']([^"\']+)["\']',
+        r"<h1[^>]*>([\s\S]*?)</h1>",
+        r"<title[^>]*>([\s\S]*?)</title>",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            return _strip_html(match.group(1))
+    return ""
+
+
+def _extract_html_summary(html: str) -> str:
+    patterns = (
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+        r"<p[^>]*>([\s\S]*?)</p>",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            return _strip_html(match.group(1))
+    return ""
+
+
+def _extract_html_published_at(html: str) -> Optional[str]:
+    patterns = (
+        r'<meta[^>]+property=["\']article:published_time["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<time[^>]+datetime=["\']([^"\']+)["\']',
+        r"\b(\d{4}-\d{2}-\d{2}T[\d:]+(?:Z|[+-]\d{2}:\d{2})?)\b",
+        r"\b(\d{2}/\d{2}/\d{4})\b",
+        r"\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            return _published_iso(match.group(1))
+    return None
+
+
+def _extract_first_pdf_url(html: str, base_url: str) -> str:
+    for anchor in _extract_anchor_links(html, base_url):
+        url = anchor["url"]
+        label = anchor.get("label") or ""
+        if ".pdf" in url.lower() or "download pdf" in label.lower() or label.lower().strip() == "pdf":
+            return url
+    match = re.search(r'https?://[^"\']+?\.pdf(?:\?[^"\']*)?', html, flags=re.IGNORECASE)
+    return match.group(0) if match else ""
+
+
+def _symbol_from_text(text: str) -> str:
+    candidates = (
+        r"^\s*([A-Z][A-Z0-9.]{1,7})\s*:",
+        r"\b(?:NASDAQ|NYSE|NYSEAMERICAN|AMEX|OTC|LON|AIM|TSX|TSXV|ASX|PAR|EPA|FRA|ETR)\s*:\s*([A-Z][A-Z0-9.]{1,7})\b",
+        r"\(([A-Z][A-Z0-9.]{1,7})\)",
+    )
+    blocked = {"PDF", "CEO", "CFO", "FDA", "IPO", "ETF", "USA", "USD", "AI", "Q1", "Q2", "Q3", "Q4"}
+    for pattern in candidates:
+        match = re.search(pattern, text)
+        if match:
+            symbol = match.group(1).upper().strip(".")
+            if symbol not in blocked and 1 < len(symbol) <= 8:
+                return symbol
+    return ""
+
+
 def _broker_number(value: Any) -> Optional[float]:
     if isinstance(value, str):
         value = value.replace("$", "").replace(",", "").strip()
@@ -640,9 +726,12 @@ def _is_news_or_aggregator_url(url: str) -> bool:
     return any(host == domain or host.endswith(f".{domain}") for domain in NEWS_OR_AGGREGATOR_DOMAINS)
 
 
-def _is_original_research_url(url: str) -> bool:
+def _is_original_research_url(url: str, *, allowed_domains: tuple[str, ...] = ()) -> bool:
     if not url.startswith(("http://", "https://")):
         return False
+    host = (urlparse(url).netloc or "").lower()
+    if allowed_domains and any(host == domain or host.endswith(f".{domain}") for domain in allowed_domains):
+        return True
     return not _is_news_or_aggregator_url(url)
 
 
@@ -743,9 +832,14 @@ def _broker_research_row(
 ) -> Optional[Dict[str, Any]]:
     text = f"{title} {summary} {explicit_symbol}"
     match = _find_broker_symbol(text)
-    if not match:
-        return None
-    symbol, company, theme = match
+    if match:
+        symbol, company, theme = match
+    else:
+        symbol = _symbol_from_text(f"{explicit_symbol} {title} {summary}")
+        if not symbol:
+            return None
+        company = symbol
+        theme = "RESEARCH"
     title = title or f"{symbol} broker research"
     summary = summary or title
     broker = _find_broker_name(text, source)
@@ -805,6 +899,109 @@ def _extract_json_research_items(payload: Any) -> List[Dict[str, Any]]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _candidate_links_for_provider(provider: str, html: str, source_url: str, limit: int) -> List[Dict[str, str]]:
+    provider_key = provider.lower()
+    rows: List[Dict[str, str]] = []
+    seen = set()
+    for anchor in _extract_anchor_links(html, source_url):
+        url = anchor["url"]
+        label = anchor.get("label") or ""
+        lower_url = url.lower()
+        lower_label = label.lower()
+        keep = False
+        if provider_key == "edison":
+            keep = (
+                "edisongroup.com" in lower_url
+                and ("/research/" in lower_url or "/insight/" in lower_url or ".pdf" in lower_url)
+                and "/equity-research" not in lower_url
+            )
+        elif provider_key.startswith("zacks"):
+            keep = (
+                "scr.zacks.com" in lower_url
+                and ("/news/news-details/" in lower_url or "/files/news/" in lower_url or ".pdf" in lower_url)
+            )
+        elif provider_key in {"water tower", "watertower"}:
+            keep = (
+                "watertowerresearch.com" in lower_url
+                and ("/research" in lower_url or "/content/" in lower_url or "/reports/" in lower_url or ".pdf" in lower_url)
+                and "login" not in lower_url
+            )
+        else:
+            keep = any(word in lower_url or word in lower_label for word in ("research", "report", "pdf"))
+        if keep and url not in seen:
+            rows.append(anchor)
+            seen.add(url)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _open_research_sources(ctx: dict) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    sources = (
+        ("Edison", _setting(ctx, "finance_broker_research_edison_url"), ("edisongroup.com",)),
+        ("Zacks SCR", _setting(ctx, "finance_broker_research_zacks_url"), ("scr.zacks.com",)),
+        ("Water Tower", _setting(ctx, "finance_broker_research_water_tower_url"), ("watertowerresearch.com",)),
+    )
+    return tuple((name, url, domains) for name, url, domains in sources if url)
+
+
+def _build_broker_rows_from_open_sources(
+    ctx: dict,
+    *,
+    limit: int,
+    rows: List[Dict[str, Any]],
+    sources: Dict[str, str],
+    quote_cache: Dict[str, Dict[str, Any]],
+    seen_urls: set,
+) -> None:
+    max_candidates_per_source = max(4, min(10, limit))
+    for provider, source_url, allowed_domains in _open_research_sources(ctx):
+        source_key = provider
+        try:
+            listing_html = _http_text_get(ctx, source_url, timeout=16)
+        except Exception:
+            sources[source_key] = "error"
+            continue
+        candidates = _candidate_links_for_provider(provider, listing_html, source_url, max_candidates_per_source)
+        parsed_count = 0
+        for candidate in candidates:
+            candidate_url = candidate["url"]
+            detail_html = ""
+            report_url = candidate_url
+            if ".pdf" not in candidate_url.lower():
+                try:
+                    detail_html = _http_text_get(ctx, candidate_url, timeout=12)
+                except Exception:
+                    detail_html = ""
+                pdf_url = _extract_first_pdf_url(detail_html, candidate_url) if detail_html else ""
+                if pdf_url:
+                    report_url = pdf_url
+            if not _is_original_research_url(report_url, allowed_domains=allowed_domains) or report_url in seen_urls:
+                continue
+            page_text = detail_html or listing_html
+            title = _extract_html_title(page_text) or candidate.get("label") or f"{provider} research report"
+            summary = _extract_html_summary(page_text)
+            published_at = _extract_html_published_at(page_text)
+            symbol = _symbol_from_text(f"{title} {summary} {candidate_url} {report_url}")
+            row = _broker_research_row(
+                ctx,
+                title=title,
+                summary=summary,
+                report_url=report_url,
+                source=provider,
+                published_at=published_at,
+                quote_cache=quote_cache,
+                explicit_symbol=symbol,
+            )
+            if row:
+                rows.append(row)
+                seen_urls.add(report_url)
+                parsed_count += 1
+            if len(rows) >= max(limit * 2, 18):
+                break
+        sources[source_key] = "ok" if parsed_count else ("empty" if candidates else "no-links")
 
 
 def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], Dict[str, str]]:
@@ -874,6 +1071,7 @@ def _build_broker_rows_from_configured_sources(ctx: dict, limit: int) -> tuple[L
                     seen_urls.add(report_url)
                     parsed_count += 1
         sources[source_key] = "ok" if parsed_count else "empty"
+    _build_broker_rows_from_open_sources(ctx, limit=limit, rows=rows, sources=sources, quote_cache=quote_cache, seen_urls=seen_urls)
     rows.sort(key=lambda row: _safe_float(row.get("_priority")) or 0.0, reverse=True)
     for row in rows:
         row.pop("_priority", None)
