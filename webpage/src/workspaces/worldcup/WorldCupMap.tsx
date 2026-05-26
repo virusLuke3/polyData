@@ -1,6 +1,4 @@
-import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { geoMercator, geoPath } from 'd3-geo';
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
@@ -45,26 +43,13 @@ type WorldCupMapSize = {
   height: number;
 };
 
-type HostAtlasData = {
-  us: any;
-  canada: any;
-  mexico: any;
-};
-
 type HostCountryKey = 'us' | 'canada' | 'mexico';
 
-type HostAtlasPath = {
-  id: string;
-  d: string;
-  name: string;
-  country: HostCountryKey;
-};
-
-type HostAtlasHover = {
-  country: HostCountryKey;
+type MapRegionHover = {
   region: string;
-  x: number;
-  y: number;
+  country: string;
+  screenX: number;
+  screenY: number;
 };
 
 const IMPORTANT_CITY_IDS = new Set(['mexico-city', 'new-york-new-jersey', 'dallas', 'los-angeles']);
@@ -81,25 +66,17 @@ const COUNTRY_LABELS: WorldCupMapLabel[] = [
 ];
 
 const COUNTRIES_GEOJSON = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
-const US_STATES_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
 const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
 const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
+const WORLDCUP_ATLAS_CENTER: [number, number] = [-99, 31.5];
+const WORLDCUP_ATLAS_ZOOM = 3.12;
 
-const HOST_COUNTRY_LABEL: Record<HostCountryKey, string> = {
-  us: 'UNITED STATES',
-  canada: 'CANADA',
-  mexico: 'MEXICO',
+const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; label: string }> = {
+  '840': { key: 'us', iso2: 'US', label: 'UNITED STATES' },
+  '124': { key: 'canada', iso2: 'CA', label: 'CANADA' },
+  '484': { key: 'mexico', iso2: 'MX', label: 'MEXICO' },
 };
-
-const HOST_ATLAS_BOUNDS = {
-  type: 'Feature',
-  geometry: {
-    type: 'MultiPoint',
-    coordinates: [[-132, 12], [-55, 50]],
-  },
-  properties: {},
-} as any;
 
 function firstSymbolLayerId(map: MapLibreMap) {
   const layers = map.getStyle().layers || [];
@@ -107,7 +84,7 @@ function firstSymbolLayerId(map: MapLibreMap) {
 }
 
 function buildWorldMonitorRasterStyle(): StyleSpecification | string {
-  return '/map-styles/worldcup-happy-dark.json';
+  return buildWorldCupMapStyle();
 }
 
 function buildWorldCupMapStyle(): StyleSpecification {
@@ -183,20 +160,6 @@ function shortKickoff(match: WorldCupMatch) {
   return match.kickoffLocal.replace(',', ' ·');
 }
 
-function createHostAtlasProjection(size: WorldCupMapSize) {
-  const leftInset = Math.min(310, size.width * 0.16);
-  const rightInset = Math.min(420, size.width * 0.21);
-  return geoMercator().fitExtent(
-    [[leftInset, 18], [Math.max(leftInset + 1, size.width - rightInset), Math.max(140, size.height - 8)]],
-    HOST_ATLAS_BOUNDS,
-  );
-}
-
-function projectHostCoordinate(size: WorldCupMapSize, lon: number, lat: number) {
-  const projected = createHostAtlasProjection(size)([lon, lat]);
-  return projected || [Number.NaN, Number.NaN];
-}
-
 function projectPoints(
   map: MapLibreMap | null,
   size: WorldCupMapSize,
@@ -207,7 +170,9 @@ function projectPoints(
   if (!map) return [];
   const { width, height } = size;
   return cities.map((city) => {
-    const [x, y] = projectHostCoordinate(size, city.longitude, city.latitude);
+    const projected = map.project([city.longitude, city.latitude]);
+    const x = projected.x;
+    const y = projected.y;
     const count = matches.filter((match) => match.cityId === city.id).length;
     return {
       city,
@@ -225,7 +190,9 @@ function projectLabels(map: MapLibreMap | null, size: WorldCupMapSize, labels: W
   if (!map) return [];
   const { width, height } = size;
   return labels.map((label) => {
-    const [x, y] = projectHostCoordinate(size, label.lon, label.lat);
+    const projected = map.project([label.lon, label.lat]);
+    const x = projected.x;
+    const y = projected.y;
     return {
       ...label,
       x,
@@ -235,124 +202,203 @@ function projectLabels(map: MapLibreMap | null, size: WorldCupMapSize, labels: W
   });
 }
 
-function buildHostAtlasPaths(data: HostAtlasData | null, size: WorldCupMapSize) {
-  if (!data || size.width < 200 || size.height < 200) return null;
-  const path = geoPath(createHostAtlasProjection(size));
-  const toPath = (item: any) => path(item) || '';
-  const mapRegion = (country: HostCountryKey, prefix: string) => (item: any, index: number): HostAtlasPath => ({
-    id: `${prefix}-${item.id || item.properties?.name || index}`,
-    d: toPath(item),
-    name: item.properties?.name || HOST_COUNTRY_LABEL[country],
-    country,
-  });
+function hostCountriesGeoJson() {
   return {
-    us: data.us.features.map(mapRegion('us', 'us')).filter((item: HostAtlasPath) => item.d),
-    canada: data.canada.features.map(mapRegion('canada', 'ca')).filter((item: HostAtlasPath) => item.d),
-    mexico: data.mexico.features.map(mapRegion('mexico', 'mx')).filter((item: HostAtlasPath) => item.d),
-  };
+    type: 'FeatureCollection',
+    features: (COUNTRIES_GEOJSON.features || [])
+      .filter((item: any) => HOST_COUNTRY_META[String(item.id)])
+      .map((item: any) => {
+        const meta = HOST_COUNTRY_META[String(item.id)]!;
+        return {
+          ...item,
+          properties: {
+            ...(item.properties || {}),
+            hostKey: meta.key,
+            iso2: meta.iso2,
+            name: meta.label,
+          },
+        };
+      }),
+  } as any;
 }
 
-function HostAtlasSvg({ data, size }: { data: HostAtlasData | null; size: WorldCupMapSize }) {
-  const paths = useMemo(() => buildHostAtlasPaths(data, size), [data, size]);
-  const [hover, setHover] = useState<HostAtlasHover | null>(null);
-  const hoveredPaths: HostAtlasPath[] = hover && paths ? paths[hover.country] : [];
-  const moveHover = (event: JSX.TargetedMouseEvent<SVGPathElement>, item: HostAtlasPath) => {
-    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-    setHover({
-      country: item.country,
-      region: item.name,
-      x: rect ? event.clientX - rect.left : event.clientX,
-      y: rect ? event.clientY - rect.top : event.clientY,
+function addLayerSafe(map: MapLibreMap, layer: any, beforeId?: string) {
+  if (map.getLayer(layer.id)) return;
+  try {
+    map.addLayer(layer, beforeId);
+  } catch {
+    if (!map.getLayer(layer.id)) map.addLayer(layer);
+  }
+}
+
+function addSourceSafe(map: MapLibreMap, id: string, data: any) {
+  if (map.getSource(id)) return;
+  map.addSource(id, { type: 'geojson', data });
+}
+
+function setupHostCountryHover(
+  map: MapLibreMap,
+  setRegionHover: (hover: MapRegionHover | null) => void,
+) {
+  if ((map as any).__worldCupHostHoverSetup) return;
+  (map as any).__worldCupHostHoverSetup = true;
+  let hoveredIso2 = '';
+
+  const clearHover = () => {
+    hoveredIso2 = '';
+    map.getCanvas().style.cursor = '';
+    setRegionHover(null);
+    const noMatch: any = ['==', ['get', 'iso2'], ''];
+    if (map.getLayer('wc-country-hover-fill')) map.setFilter('wc-country-hover-fill', noMatch);
+    if (map.getLayer('wc-country-hover-border')) map.setFilter('wc-country-hover-border', noMatch);
+  };
+
+  map.on('mousemove', (event) => {
+    if (!map.getLayer('wc-country-interactive')) return;
+    const features = map.queryRenderedFeatures(event.point, { layers: ['wc-country-interactive'] });
+    const props = features[0]?.properties as Record<string, string> | undefined;
+    const iso2 = props?.iso2 || '';
+    if (!iso2) {
+      if (hoveredIso2) clearHover();
+      return;
+    }
+    if (iso2 !== hoveredIso2) {
+      hoveredIso2 = iso2;
+      const filter: any = ['==', ['get', 'iso2'], iso2];
+      map.setFilter('wc-country-hover-fill', filter);
+      map.setFilter('wc-country-hover-border', filter);
+      map.getCanvas().style.cursor = 'pointer';
+    }
+    const canvasRect = map.getCanvas().getBoundingClientRect();
+    setRegionHover({
+      region: props?.name || iso2,
+      country: iso2,
+      screenX: event.point.x + canvasRect.left,
+      screenY: event.point.y + canvasRect.top,
     });
-  };
-  const renderCountry = (country: HostCountryKey, items: HostAtlasPath[]) => (
-    <g className={`wm-worldcup-host-atlas-country ${country} ${hover?.country === country ? 'hovered' : ''}`}>
-      {items.map((item) => (
-        <path
-          key={item.id}
-          d={item.d}
-          onMouseEnter={(event) => moveHover(event, item)}
-          onMouseMove={(event) => moveHover(event, item)}
-        />
-      ))}
-    </g>
-  );
-  return (
-    <>
-      <svg
-        className={`wm-worldcup-host-atlas-svg ${hover ? 'has-hover' : ''}`}
-        viewBox={`0 0 ${size.width} ${size.height}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="World Cup host country administrative atlas"
-        onMouseLeave={() => setHover(null)}
-      >
-        <rect className="wm-worldcup-host-atlas-water" x="0" y="0" width={size.width} height={size.height} />
-        {paths ? (
-          <g>
-            {renderCountry('canada', paths.canada)}
-            {renderCountry('us', paths.us)}
-            {renderCountry('mexico', paths.mexico)}
-            <g className="wm-worldcup-host-atlas-border">
-              {[...paths.canada, ...paths.us, ...paths.mexico].map((item) => <path key={`line-${item.id}`} d={item.d} />)}
-            </g>
-            {hover ? (
-              <g className="wm-worldcup-host-atlas-hover-border">
-                {hoveredPaths.map((item) => <path key={`hover-${item.id}`} d={item.d} />)}
-              </g>
-            ) : null}
-          </g>
-        ) : null}
-      </svg>
-      {hover ? (
-        <div
-          className="wm-worldcup-host-atlas-tooltip"
-          style={{
-            transform: `translate(${Math.round(hover.x + 14)}px, ${Math.round(hover.y + 14)}px)`,
-          }}
-        >
-          <strong>{hover.region}</strong>
-          <span>{HOST_COUNTRY_LABEL[hover.country]}</span>
-        </div>
-      ) : null}
-    </>
-  );
+  });
+
+  map.on('mouseout', clearHover);
 }
 
-function loadUsStateBoundaries(map: MapLibreMap) {
-  if (map.getSource('us-state-boundaries')) return;
-  fetch(US_STATES_TOPOJSON_URL)
-    .then((response) => response.json())
-    .then((topology) => {
-      if (!map.getStyle() || map.getSource('us-state-boundaries')) return;
-      const states = feature(topology, topology.objects.states) as any;
-      map.addSource('us-state-boundaries', {
-        type: 'geojson',
-        data: states,
-      });
-      const beforeId = firstSymbolLayerId(map);
-      map.addLayer({
-        id: 'us-state-boundary-fill',
-        type: 'fill',
-        source: 'us-state-boundaries',
-        paint: {
-          'fill-color': '#252829',
-          'fill-opacity': 0.05,
-        },
-      }, beforeId);
-      map.addLayer({
-        id: 'us-state-boundary-line',
-        type: 'line',
-        source: 'us-state-boundaries',
-        paint: {
-          'line-color': '#4c5051',
-          'line-opacity': 0.66,
-          'line-dasharray': [3, 3],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.55, 4, 1.25, 6, 1.75],
-        },
-      }, beforeId);
-    })
-    .catch(() => {});
+async function loadHostMapLayers(
+  map: MapLibreMap,
+  setRegionHover: (hover: MapRegionHover | null) => void,
+) {
+  if (!map.getStyle()) return;
+  if ((map as any).__worldCupHostLayersReady || (map as any).__worldCupHostLayersLoading) return;
+  (map as any).__worldCupHostLayersLoading = true;
+  const beforeId = firstSymbolLayerId(map);
+  try {
+    addSourceSafe(map, 'wc-world-countries', COUNTRIES_GEOJSON);
+    addLayerSafe(map, {
+      id: 'wc-world-country-fill',
+      type: 'fill',
+      source: 'wc-world-countries',
+      paint: {
+        'fill-color': '#2a2b2b',
+        'fill-opacity': 0.88,
+      },
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-world-country-border',
+      type: 'line',
+      source: 'wc-world-countries',
+      paint: {
+        'line-color': '#a7abab',
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.38, 3.5, 0.52, 6, 0.72],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.46, 4, 0.82, 6, 1.18],
+      },
+    }, beforeId);
+    addSourceSafe(map, 'wc-host-countries', hostCountriesGeoJson());
+    addLayerSafe(map, {
+      id: 'wc-host-country-fill',
+      type: 'fill',
+      source: 'wc-host-countries',
+      paint: {
+        'fill-color': '#303232',
+        'fill-opacity': 0.38,
+      },
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-country-interactive',
+      type: 'fill',
+      source: 'wc-host-countries',
+      paint: {
+        'fill-color': '#ffffff',
+        'fill-opacity': 0,
+      },
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-country-hover-fill',
+      type: 'fill',
+      source: 'wc-host-countries',
+      paint: {
+        'fill-color': '#ffffff',
+        'fill-opacity': 0.085,
+      },
+      filter: ['==', ['get', 'iso2'], ''],
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-country-border',
+      type: 'line',
+      source: 'wc-host-countries',
+      paint: {
+        'line-color': '#d7dddd',
+        'line-opacity': 0.2,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 4, 1.1, 6, 1.55],
+      },
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-country-hover-border',
+      type: 'line',
+      source: 'wc-host-countries',
+      paint: {
+        'line-color': '#ffffff',
+        'line-opacity': 0.86,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 4, 2.25, 6, 3],
+      },
+      filter: ['==', ['get', 'iso2'], ''],
+    }, beforeId);
+
+    const [usTopology, canada, mexico] = await Promise.all([
+      fetch(LOCAL_US_STATES_TOPOJSON_URL).then((response) => response.json()),
+      fetch(LOCAL_CANADA_PROVINCES_GEOJSON_URL).then((response) => response.json()),
+      fetch(LOCAL_MEXICO_STATES_GEOJSON_URL).then((response) => response.json()),
+    ]);
+    if (!map.getStyle()) return;
+    addSourceSafe(map, 'wc-us-states', feature(usTopology, usTopology.objects.states) as any);
+    addSourceSafe(map, 'wc-canada-provinces', canada);
+    addSourceSafe(map, 'wc-mexico-states', mexico);
+    const adminPaint = {
+      'line-color': '#d5d9d9',
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.42, 3.5, 0.58, 6, 0.76],
+      'line-dasharray': [3, 3],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.54, 4, 0.88, 6, 1.24],
+    };
+    addLayerSafe(map, {
+      id: 'wc-us-state-lines',
+      type: 'line',
+      source: 'wc-us-states',
+      paint: adminPaint,
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-canada-province-lines',
+      type: 'line',
+      source: 'wc-canada-provinces',
+      paint: adminPaint,
+    }, beforeId);
+    addLayerSafe(map, {
+      id: 'wc-mexico-state-lines',
+      type: 'line',
+      source: 'wc-mexico-states',
+      paint: adminPaint,
+    }, beforeId);
+    setupHostCountryHover(map, setRegionHover);
+    (map as any).__worldCupHostLayersReady = true;
+  } finally {
+    (map as any).__worldCupHostLayersLoading = false;
+  }
 }
 
 function LayerPanel() {
@@ -393,7 +439,7 @@ function MapControls({ map }: { map: MapLibreMap | null }) {
     <div className="wm-worldcup-map-controls">
       <button type="button" onClick={() => map?.zoomIn()} aria-label="Zoom in">+</button>
       <button type="button" onClick={() => map?.zoomOut()} aria-label="Zoom out">−</button>
-      <button type="button" onClick={() => map?.easeTo({ center: [-96, 39], zoom: 2.55, pitch: 0, bearing: 0 })} aria-label="Reset view">⌂</button>
+      <button type="button" onClick={() => map?.easeTo({ center: WORLDCUP_ATLAS_CENTER, zoom: WORLDCUP_ATLAS_ZOOM, pitch: 0, bearing: 0 })} aria-label="Reset view">⌂</button>
     </div>
   );
 }
@@ -409,7 +455,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [mapSize, setMapSize] = useState<WorldCupMapSize>({ width: 1600, height: 640 });
-  const [atlasData, setAtlasData] = useState<HostAtlasData | null>(null);
+  const [regionHover, setRegionHover] = useState<MapRegionHover | null>(null);
   const [screenPoints, setScreenPoints] = useState<WorldCupMapPoint[]>([]);
   const [screenLabels, setScreenLabels] = useState<WorldCupScreenLabel[]>([]);
 
@@ -435,34 +481,15 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   }, [cities, matches, weatherByCity]);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      fetch(LOCAL_US_STATES_TOPOJSON_URL).then((response) => response.json()).then((topology) => feature(topology, topology.objects.states) as any),
-      fetch(LOCAL_CANADA_PROVINCES_GEOJSON_URL).then((response) => response.json()),
-      fetch(LOCAL_MEXICO_STATES_GEOJSON_URL).then((response) => response.json()),
-    ])
-      .then(([us, canada, mexico]) => {
-        if (!cancelled) setAtlasData({ us, canada, mexico });
-      })
-      .catch(() => {
-        if (!cancelled) setAtlasData(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     const host = mapHostRef.current;
     if (!host || mapRef.current) return undefined;
     const map = new maplibregl.Map({
       container: host,
       style: buildWorldMonitorRasterStyle(),
-      center: [-96, 39],
-      zoom: 2.72,
+      center: WORLDCUP_ATLAS_CENTER,
+      zoom: WORLDCUP_ATLAS_ZOOM,
       minZoom: 1.85,
       maxZoom: 7,
-      maxBounds: [[-172, 5], [-38, 84]],
       renderWorldCopies: false,
       attributionControl: false,
       interactive: true,
@@ -491,12 +518,12 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     map.on('load', () => {
       setMapReady(true);
-      loadUsStateBoundaries(map);
+      loadHostMapLayers(map, setRegionHover).catch(() => {});
       resizeAndSync();
     });
     map.on('idle', () => {
       setMapReady(true);
-      loadUsStateBoundaries(map);
+      loadHostMapLayers(map, setRegionHover).catch(() => {});
       resizeAndSync();
     });
     map.on('move', syncPoints);
@@ -512,7 +539,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         setMapDegraded(true);
         map.setStyle(buildWorldCupMapStyle(), { diff: false });
         window.requestAnimationFrame(() => {
-          loadUsStateBoundaries(map);
+          loadHostMapLayers(map, setRegionHover).catch(() => {});
           resizeAndSync();
         });
       }
@@ -522,7 +549,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
     const settleTimer = window.setTimeout(() => {
       setMapReady(true);
-      loadUsStateBoundaries(map);
+      loadHostMapLayers(map, setRegionHover).catch(() => {});
       resizeAndSync();
     }, 500);
     const resizeObserver = new ResizeObserver(() => window.requestAnimationFrame(resizeAndSync));
@@ -532,6 +559,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       window.cancelAnimationFrame(initialFrame);
       window.clearTimeout(settleTimer);
       resizeObserver.disconnect();
+      setRegionHover(null);
       map.off('error', onError);
       map.off('move', syncPoints);
       map.off('zoom', syncPoints);
@@ -550,8 +578,18 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   return (
     <div ref={rootRef} className={`wm-worldcup-map wm-worldcup-maplibre ${mapReady ? 'ready' : ''} ${mapDegraded ? 'degraded' : ''}`}>
       <div ref={mapHostRef} className="wm-worldcup-maplibre-host" />
-      <HostAtlasSvg data={atlasData} size={mapSize} />
       <LayerPanel />
+      {regionHover ? (
+        <div
+          className="wm-worldcup-map-region-tooltip"
+          style={{
+            transform: `translate(${Math.round(regionHover.screenX - (rootRef.current?.getBoundingClientRect().left || 0) + 14)}px, ${Math.round(regionHover.screenY - (rootRef.current?.getBoundingClientRect().top || 0) + 14)}px)`,
+          }}
+        >
+          <strong>{regionHover.region}</strong>
+          <span>{regionHover.country} HOST COUNTRY</span>
+        </div>
+      ) : null}
       <div className="wm-worldcup-map-country-label-layer">
         {screenLabels.filter((label) => label.visible).map((label) => (
           <span
