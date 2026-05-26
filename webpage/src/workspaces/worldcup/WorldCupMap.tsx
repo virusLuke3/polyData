@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { MapboxOverlay } from '@deck.gl/mapbox';
-import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
@@ -117,61 +115,6 @@ function pointFeatures(points: readonly (readonly [number, number, string, numbe
       geometry: { type: 'Point', coordinates: [lon, lat] },
     })),
   } as any;
-}
-
-function deckColor(tone: string, alpha = 190): [number, number, number, number] {
-  if (tone === 'blue') return [8, 189, 247, alpha];
-  if (tone === 'gold' || tone === 'orange') return [255, 157, 0, alpha];
-  if (tone === 'yellow') return [244, 231, 0, alpha];
-  if (tone === 'red') return [255, 76, 76, alpha];
-  return [255, 157, 0, alpha];
-}
-
-function buildWorldCupDeckLayers() {
-  const radarData = RADAR_CELLS.map(([longitude, latitude, tone, weight], id) => ({ id, longitude, latitude, tone, weight }));
-  const intelData = INTEL_POINTS.map(([longitude, latitude, tone], id) => ({ id, longitude, latitude, tone }));
-  return [
-    new ScatterplotLayer({
-      id: 'worldcup-radar-deck',
-      data: radarData,
-      getPosition: (d: any) => [d.longitude, d.latitude],
-      getRadius: (d: any) => Math.max(42000, d.weight * 11500),
-      getFillColor: (d: any) => deckColor(d.tone, d.tone === 'blue' ? 82 : 96),
-      getLineColor: (d: any) => deckColor(d.tone, 110),
-      lineWidthMinPixels: 0,
-      radiusMinPixels: 10,
-      radiusMaxPixels: 42,
-      stroked: false,
-      filled: true,
-      opacity: 0.82,
-      pickable: false,
-    }),
-    new GeoJsonLayer({
-      id: 'worldcup-alert-zones-deck',
-      data: ALERT_ZONES,
-      filled: true,
-      stroked: true,
-      getFillColor: [200, 14, 22, 92],
-      getLineColor: [255, 34, 43, 210],
-      getLineWidth: 2,
-      lineWidthMinPixels: 1,
-      pickable: false,
-    }),
-    new ScatterplotLayer({
-      id: 'worldcup-intel-points-deck',
-      data: intelData,
-      getPosition: (d: any) => [d.longitude, d.latitude],
-      getRadius: 26000,
-      getFillColor: (d: any) => deckColor(d.tone, 210),
-      getLineColor: [0, 0, 0, 150],
-      lineWidthMinPixels: 1,
-      radiusMinPixels: 5,
-      radiusMaxPixels: 13,
-      stroked: true,
-      filled: true,
-      pickable: false,
-    }),
-  ];
 }
 
 function firstSymbolLayerId(map: MapLibreMap) {
@@ -514,7 +457,6 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const citiesRef = useRef(cities);
   const matchesRef = useRef(matches);
   const weatherByCityRef = useRef(new Map<string, WorldCupCityWeather>());
@@ -568,24 +510,6 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     });
     mapRef.current = map;
 
-    const initDeckOverlay = () => {
-      if (deckOverlayRef.current) {
-        deckOverlayRef.current.setProps({ layers: buildWorldCupDeckLayers() });
-        return;
-      }
-      const overlay = new MapboxOverlay({
-        interleaved: false,
-        layers: buildWorldCupDeckLayers(),
-        pickingRadius: 10,
-        useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
-        onError: (error: Error) => {
-          console.warn('[WorldCupMap] deck.gl overlay render error:', error.message);
-        },
-      });
-      map.addControl(overlay as unknown as maplibregl.IControl);
-      deckOverlayRef.current = overlay;
-    };
-
     const syncPoints = () => {
       setScreenPoints(projectPoints(map, citiesRef.current, matchesRef.current, weatherByCityRef.current));
       setScreenLabels(projectLabels(map, COUNTRY_LABELS));
@@ -600,13 +524,11 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     map.on('load', () => {
       setMapReady(true);
-      initDeckOverlay();
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     });
     map.on('idle', () => {
       setMapReady(true);
-      initDeckOverlay();
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     });
@@ -623,7 +545,6 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         setMapDegraded(true);
         map.setStyle(buildWorldCupMapStyle(), { diff: false });
         window.requestAnimationFrame(() => {
-          initDeckOverlay();
           ensureWorldMonitorOverlayLayers(map);
           resizeAndSync();
         });
@@ -634,7 +555,6 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
     const settleTimer = window.setTimeout(() => {
       setMapReady(true);
-      initDeckOverlay();
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     }, 500);
@@ -645,14 +565,6 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       window.cancelAnimationFrame(initialFrame);
       window.clearTimeout(settleTimer);
       resizeObserver.disconnect();
-      if (deckOverlayRef.current) {
-        try {
-          map.removeControl(deckOverlayRef.current as unknown as maplibregl.IControl);
-        } catch {
-          deckOverlayRef.current.finalize();
-        }
-        deckOverlayRef.current = null;
-      }
       map.off('error', onError);
       map.off('move', syncPoints);
       map.off('zoom', syncPoints);
