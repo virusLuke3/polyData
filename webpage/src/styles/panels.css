@@ -3341,7 +3341,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-maplibre-host {
   opacity: 1;
   z-index: 0;
-  filter: grayscale(1) contrast(1.08) brightness(0.92) saturate(0);
+  filter: grayscale(1) contrast(1.02) brightness(0.82) saturate(0);
 }
 
 .wm-worldcup-maplibre-host .maplibregl-control-container {
@@ -3771,69 +3771,69 @@ body.panel-resize-active iframe {
 }
 
 .wm-worldcup-map-point .halo {
-  width: 26px;
-  height: 26px;
-  border: 2px solid rgba(210, 214, 214, 0.18);
-  background: rgba(255, 255, 255, 0.015);
-  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.012);
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(210, 214, 214, 0.16);
+  background: rgba(255, 255, 255, 0.012);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.01);
 }
 
 .wm-worldcup-map-point .dot {
-  width: 8px;
-  height: 8px;
-  border: 2px solid rgba(245, 245, 245, 0.82);
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid rgba(245, 245, 245, 0.8);
   background: #bcc2c3;
-  box-shadow: 0 0 7px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.07);
 }
 
 .wm-worldcup-map-point.important .halo {
-  width: 32px;
-  height: 32px;
-  border-color: rgba(220, 224, 224, 0.24);
+  width: 23px;
+  height: 23px;
+  border-color: rgba(220, 224, 224, 0.2);
 }
 
 .wm-worldcup-map-point.important .dot {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
 }
 
 .wm-worldcup-map-point.next .halo {
-  width: 40px;
-  height: 40px;
-  border-color: rgba(245, 188, 72, 0.48);
-  background: rgba(245, 188, 72, 0.055);
-  box-shadow: 0 0 0 9px rgba(245, 188, 72, 0.026);
+  width: 30px;
+  height: 30px;
+  border-color: rgba(245, 188, 72, 0.42);
+  background: rgba(245, 188, 72, 0.04);
+  box-shadow: 0 0 0 6px rgba(245, 188, 72, 0.018);
   animation: wc-maplibre-pulse 1.9s ease-out infinite;
 }
 
 .wm-worldcup-map-point.next .dot {
-  width: 11px;
-  height: 11px;
+  width: 8px;
+  height: 8px;
   background: #f2b94a;
 }
 
 .wm-worldcup-map-point.selected .halo {
-  width: 48px;
-  height: 48px;
-  border-color: rgba(255, 255, 255, 0.82);
-  background: rgba(255, 255, 255, 0.06);
+  width: 36px;
+  height: 36px;
+  border-color: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.04);
   box-shadow:
-    0 0 0 11px rgba(255, 255, 255, 0.028),
-    0 0 20px rgba(255, 255, 255, 0.15);
+    0 0 0 8px rgba(255, 255, 255, 0.02),
+    0 0 16px rgba(255, 255, 255, 0.12);
 }
 
 .wm-worldcup-map-point.selected .dot {
-  width: 12px;
-  height: 12px;
+  width: 9px;
+  height: 9px;
   border-color: #fff;
   background: #f4f4f4;
 }
 
 .wm-worldcup-map-point .label {
   position: absolute;
-  left: 22px;
-  top: -6px;
-  min-width: 160px;
+  left: 16px;
+  top: -5px;
+  min-width: 136px;
   display: grid;
   gap: 2px;
   text-align: left;
@@ -3848,7 +3848,7 @@ body.panel-resize-active iframe {
   overflow: hidden;
   color: #f1f3ef;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 950;
   line-height: 1;
   text-overflow: ellipsis;
@@ -3858,7 +3858,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-point .label em {
   color: #aeb4b4;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-style: normal;
   font-weight: 950;
   letter-spacing: 0.05em;
@@ -4320,14 +4320,14 @@ body.panel-resize-active iframe {
 @keyframes wc-maplibre-pulse {
   0% {
     transform: translate(-50%, -50%) scale(0.84);
-    opacity: 0.9;
+    opacity: 0.72;
   }
   76% {
-    transform: translate(-50%, -50%) scale(1.65);
-    opacity: 0.1;
+    transform: translate(-50%, -50%) scale(1.45);
+    opacity: 0.08;
   }
   100% {
-    transform: translate(-50%, -50%) scale(1.9);
+    transform: translate(-50%, -50%) scale(1.62);
     opacity: 0;
   }
 }

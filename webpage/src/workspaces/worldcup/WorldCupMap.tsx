@@ -69,6 +69,7 @@ const COUNTRIES_GEOJSON = feature(countriesAtlas as any, (countriesAtlas as any)
 const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
 const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
+const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
 const WORLDCUP_ATLAS_CENTER: [number, number] = [-99, 31.5];
 const WORLDCUP_ATLAS_ZOOM = 3.12;
 
@@ -77,6 +78,7 @@ const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; lab
   '124': { key: 'canada', iso2: 'CA', label: 'CANADA' },
   '484': { key: 'mexico', iso2: 'MX', label: 'MEXICO' },
 };
+const HOST_COUNTRY_ISO2 = new Set(Object.values(HOST_COUNTRY_META).map((item) => item.iso2));
 
 function firstSymbolLayerId(map: MapLibreMap) {
   const layers = map.getStyle().layers || [];
@@ -93,7 +95,7 @@ function buildWorldCupMapStyle(): StyleSpecification {
     sources: {
       countries: {
         type: 'geojson',
-        data: COUNTRIES_GEOJSON,
+        data: LOCAL_WORLD_COUNTRIES_GEOJSON_URL,
       },
     },
     layers: [
@@ -107,8 +109,8 @@ function buildWorldCupMapStyle(): StyleSpecification {
         type: 'fill',
         source: 'countries',
         paint: {
-          'fill-color': '#1b1d1e',
-          'fill-opacity': 0.92,
+          'fill-color': '#222323',
+          'fill-opacity': 0.96,
         },
       },
       {
@@ -116,18 +118,28 @@ function buildWorldCupMapStyle(): StyleSpecification {
         type: 'line',
         source: 'countries',
         paint: {
-          'line-color': '#36393a',
-          'line-opacity': 0.74,
+          'line-color': '#747a7b',
+          'line-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            2,
+            0.42,
+            4,
+            0.58,
+            6,
+            0.72,
+          ],
           'line-width': [
             'interpolate',
             ['linear'],
             ['zoom'],
-            1,
-            0.35,
+            2,
+            0.68,
             4,
-            0.85,
+            0.98,
             7,
-            1.45,
+            1.38,
           ],
         },
       },
@@ -242,13 +254,13 @@ function setupHostCountryHover(
 ) {
   if ((map as any).__worldCupHostHoverSetup) return;
   (map as any).__worldCupHostHoverSetup = true;
-  let hoveredIso2 = '';
+  let hoveredCountryId = '';
 
   const clearHover = () => {
-    hoveredIso2 = '';
+    hoveredCountryId = '';
     map.getCanvas().style.cursor = '';
     setRegionHover(null);
-    const noMatch: any = ['==', ['get', 'iso2'], ''];
+    const noMatch: any = ['==', ['get', 'ISO3166-1-Alpha-2'], ''];
     if (map.getLayer('wc-country-hover-fill')) map.setFilter('wc-country-hover-fill', noMatch);
     if (map.getLayer('wc-country-hover-border')) map.setFilter('wc-country-hover-border', noMatch);
   };
@@ -257,22 +269,22 @@ function setupHostCountryHover(
     if (!map.getLayer('wc-country-interactive')) return;
     const features = map.queryRenderedFeatures(event.point, { layers: ['wc-country-interactive'] });
     const props = features[0]?.properties as Record<string, string> | undefined;
-    const iso2 = props?.iso2 || '';
-    if (!iso2) {
-      if (hoveredIso2) clearHover();
+    const countryId = props?.['ISO3166-1-Alpha-2'] || '';
+    if (!countryId) {
+      if (hoveredCountryId) clearHover();
       return;
     }
-    if (iso2 !== hoveredIso2) {
-      hoveredIso2 = iso2;
-      const filter: any = ['==', ['get', 'iso2'], iso2];
+    if (countryId !== hoveredCountryId) {
+      hoveredCountryId = countryId;
+      const filter: any = ['==', ['get', 'ISO3166-1-Alpha-2'], countryId];
       map.setFilter('wc-country-hover-fill', filter);
       map.setFilter('wc-country-hover-border', filter);
       map.getCanvas().style.cursor = 'pointer';
     }
     const canvasRect = map.getCanvas().getBoundingClientRect();
     setRegionHover({
-      region: props?.name || iso2,
-      country: iso2,
+      region: props?.name || countryId,
+      country: HOST_COUNTRY_ISO2.has(countryId) ? `${countryId} HOST COUNTRY` : countryId,
       screenX: event.point.x + canvasRect.left,
       screenY: event.point.y + canvasRect.top,
     });
@@ -290,24 +302,24 @@ async function loadHostMapLayers(
   (map as any).__worldCupHostLayersLoading = true;
   const beforeId = firstSymbolLayerId(map);
   try {
-    addSourceSafe(map, 'wc-world-countries', COUNTRIES_GEOJSON);
+    addSourceSafe(map, 'wc-world-countries', LOCAL_WORLD_COUNTRIES_GEOJSON_URL);
     addLayerSafe(map, {
-      id: 'wc-world-country-fill',
+      id: 'wc-world-local-fill',
       type: 'fill',
       source: 'wc-world-countries',
       paint: {
-        'fill-color': '#2a2b2b',
-        'fill-opacity': 0.88,
+        'fill-color': '#232323',
+        'fill-opacity': 0.78,
       },
     }, beforeId);
     addLayerSafe(map, {
-      id: 'wc-world-country-border',
+      id: 'wc-world-local-border',
       type: 'line',
       source: 'wc-world-countries',
       paint: {
-        'line-color': '#a7abab',
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.38, 3.5, 0.52, 6, 0.72],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.46, 4, 0.82, 6, 1.18],
+        'line-color': '#7f8586',
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.36, 3.5, 0.48, 6, 0.66],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.62, 4, 0.9, 6, 1.2],
       },
     }, beforeId);
     addSourceSafe(map, 'wc-host-countries', hostCountriesGeoJson());
@@ -316,14 +328,14 @@ async function loadHostMapLayers(
       type: 'fill',
       source: 'wc-host-countries',
       paint: {
-        'fill-color': '#303232',
-        'fill-opacity': 0.38,
+        'fill-color': '#ffffff',
+        'fill-opacity': 0.018,
       },
     }, beforeId);
     addLayerSafe(map, {
       id: 'wc-country-interactive',
       type: 'fill',
-      source: 'wc-host-countries',
+      source: 'wc-world-countries',
       paint: {
         'fill-color': '#ffffff',
         'fill-opacity': 0,
@@ -332,33 +344,33 @@ async function loadHostMapLayers(
     addLayerSafe(map, {
       id: 'wc-country-hover-fill',
       type: 'fill',
-      source: 'wc-host-countries',
+      source: 'wc-world-countries',
       paint: {
         'fill-color': '#ffffff',
-        'fill-opacity': 0.085,
+        'fill-opacity': 0.05,
       },
-      filter: ['==', ['get', 'iso2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
     }, beforeId);
     addLayerSafe(map, {
       id: 'wc-country-border',
       type: 'line',
       source: 'wc-host-countries',
       paint: {
-        'line-color': '#d7dddd',
-        'line-opacity': 0.2,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 4, 1.1, 6, 1.55],
+        'line-color': '#ffffff',
+        'line-opacity': 0.12,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.7, 4, 1.1, 6, 1.45],
       },
     }, beforeId);
     addLayerSafe(map, {
       id: 'wc-country-hover-border',
       type: 'line',
-      source: 'wc-host-countries',
+      source: 'wc-world-countries',
       paint: {
         'line-color': '#ffffff',
-        'line-opacity': 0.86,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.5, 4, 2.25, 6, 3],
+        'line-opacity': 0.22,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.15, 4, 1.5, 6, 1.9],
       },
-      filter: ['==', ['get', 'iso2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
     }, beforeId);
 
     const [usTopology, canada, mexico] = await Promise.all([
@@ -371,10 +383,10 @@ async function loadHostMapLayers(
     addSourceSafe(map, 'wc-canada-provinces', canada);
     addSourceSafe(map, 'wc-mexico-states', mexico);
     const adminPaint = {
-      'line-color': '#d5d9d9',
-      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.42, 3.5, 0.58, 6, 0.76],
-      'line-dasharray': [3, 3],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.54, 4, 0.88, 6, 1.24],
+      'line-color': '#b8bcbc',
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.16, 3.5, 0.28, 6, 0.46],
+      'line-dasharray': [2, 2],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.42, 4, 0.68, 6, 0.95],
     };
     addLayerSafe(map, {
       id: 'wc-us-state-lines',
@@ -587,7 +599,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
           }}
         >
           <strong>{regionHover.region}</strong>
-          <span>{regionHover.country} HOST COUNTRY</span>
+          <span>{regionHover.country}</span>
         </div>
       ) : null}
       <div className="wm-worldcup-map-country-label-layer">
