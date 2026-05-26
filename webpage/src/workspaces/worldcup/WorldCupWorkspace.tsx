@@ -16,8 +16,11 @@ import type {
   WorldCupPolymarketMarket,
   WorldCupWorkspaceProps,
 } from './types';
+import './worldcup-panel-skin.css';
 
 type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
+
+const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
 
 function formatCountdown(match: WorldCupMatch | null, now: Date) {
   if (!match) return '--';
@@ -110,6 +113,10 @@ function newsTags(item: WorldCupNewsItem) {
   if (/(squad|team|player|coach|roster)/.test(text)) tags.push({ label: 'TEAM', tone: 'gold' });
   if (!tags.length) tags.push({ label: 'WATCH', tone: 'gray' });
   return tags.slice(0, 2);
+}
+
+function InfoDot({ label }: { label: string }) {
+  return <span className="wm-worldcup-info-dot" aria-label={label} title={label}>?</span>;
 }
 
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
@@ -289,7 +296,13 @@ function WeatherPanel({
 
 function PolymarketPanel({ markets }: { markets: WorldCupPolymarketMarket[] }) {
   return (
-    <Panel title="POLYMARKET MATCH MARKETS" badge="LOCAL DB" count={markets.length} className="wm-worldcup-panel wm-worldcup-polymarket-panel">
+    <Panel
+      title="POLYMARKET MATCH MARKETS"
+      badge="LOCAL DB"
+      count={markets.length}
+      titleControls={<InfoDot label="Local Polymarket market matches are ranked by team, venue and kickoff context confidence." />}
+      className="wm-worldcup-panel wm-worldcup-polymarket-panel"
+    >
       {markets.length ? (
         <div className="wm-worldcup-market-list">
           {markets.map((market) => (
@@ -343,7 +356,13 @@ function RostersPanel({ payload, match }: { payload: WorldCupDashboardPayload; m
 
 function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymarket: WorldCupPolymarketMarket[] }) {
   return (
-    <Panel title="SPORTSBOOK ODDS" badge="WATCH" count={odds.length} className="wm-worldcup-panel wm-worldcup-odds-panel">
+    <Panel
+      title="SPORTSBOOK ODDS"
+      badge="WATCH"
+      count={odds.length}
+      titleControls={<InfoDot label="Bookmaker snapshots show decimal odds and implied probability for the selected match." />}
+      className="wm-worldcup-panel wm-worldcup-odds-panel"
+    >
       <div className="wm-worldcup-odds-list">
         {odds.slice(0, 8).map((snapshot) => (
           <article className="wm-worldcup-odds-row" key={`${snapshot.matchId}-${snapshot.provider}`}>
@@ -391,7 +410,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
 
   if (loading && !payload) {
     return (
-      <main className="wm-dashboard wm-worldcup-dashboard">
+      <main className={WORLD_CUP_DASHBOARD_CLASS}>
         <PanelLoading label="Loading World Cup workspace" detail="Syncing schedule, host cities and market links" />
       </main>
     );
@@ -399,7 +418,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
 
   if (!payload) {
     return (
-      <main className="wm-dashboard wm-worldcup-dashboard">
+      <main className={WORLD_CUP_DASHBOARD_CLASS}>
         <div className="wm-banner error">{error || 'World Cup workspace unavailable.'}</div>
       </main>
     );
@@ -416,7 +435,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   ];
 
   return (
-    <main className="wm-dashboard wm-worldcup-dashboard">
+    <main className={WORLD_CUP_DASHBOARD_CLASS}>
       <section className="wm-worldcup-hero">
         <div className="wm-worldcup-hero-copy">
           <div className="wm-worldcup-hero-topline">
