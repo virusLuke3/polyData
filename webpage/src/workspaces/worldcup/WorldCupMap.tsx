@@ -222,6 +222,9 @@ function ensureWorldMonitorOverlayLayers(map: MapLibreMap) {
     if (!map.getSource('worldcup-intel-points')) {
       map.addSource('worldcup-intel-points', { type: 'geojson', data: pointFeatures(INTEL_POINTS) });
     }
+    if (!map.getSource('worldcup-alert-points')) {
+      map.addSource('worldcup-alert-points', { type: 'geojson', data: pointFeatures(ALERT_EVENT_POINTS) });
+    }
     if (!map.getLayer('worldcup-radar-blue')) {
       map.addLayer({
         id: 'worldcup-radar-blue',
@@ -292,6 +295,21 @@ function ensureWorldMonitorOverlayLayers(map: MapLibreMap) {
           'circle-blur': 0.08,
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 3.2, 4, 9.5],
           'circle-stroke-color': 'rgba(0,0,0,0.58)',
+          'circle-stroke-width': 1,
+        },
+      }, beforeId);
+    }
+    if (!map.getLayer('worldcup-alert-points')) {
+      map.addLayer({
+        id: 'worldcup-alert-points',
+        type: 'circle',
+        source: 'worldcup-alert-points',
+        paint: {
+          'circle-color': '#ff5d62',
+          'circle-opacity': 0.9,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 3.2, 4, 6.8, 6, 9],
+          'circle-stroke-color': '#ffb5b5',
+          'circle-stroke-opacity': 0.72,
           'circle-stroke-width': 1,
         },
       }, beforeId);
