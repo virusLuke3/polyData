@@ -1,3 +1,4 @@
+import type { JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { geoMercator, geoPath } from 'd3-geo';
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
@@ -50,6 +51,22 @@ type HostAtlasData = {
   mexico: any;
 };
 
+type HostCountryKey = 'us' | 'canada' | 'mexico';
+
+type HostAtlasPath = {
+  id: string;
+  d: string;
+  name: string;
+  country: HostCountryKey;
+};
+
+type HostAtlasHover = {
+  country: HostCountryKey;
+  region: string;
+  x: number;
+  y: number;
+};
+
 const IMPORTANT_CITY_IDS = new Set(['mexico-city', 'new-york-new-jersey', 'dallas', 'los-angeles']);
 
 const COUNTRY_LABELS: WorldCupMapLabel[] = [
@@ -68,6 +85,12 @@ const US_STATES_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-1
 const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
 const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
+
+const HOST_COUNTRY_LABEL: Record<HostCountryKey, string> = {
+  us: 'UNITED STATES',
+  canada: 'CANADA',
+  mexico: 'MEXICO',
+};
 
 const HOST_ATLAS_BOUNDS = {
   type: 'Feature',
@@ -216,35 +239,83 @@ function buildHostAtlasPaths(data: HostAtlasData | null, size: WorldCupMapSize) 
   if (!data || size.width < 200 || size.height < 200) return null;
   const path = geoPath(createHostAtlasProjection(size));
   const toPath = (item: any) => path(item) || '';
+  const mapRegion = (country: HostCountryKey, prefix: string) => (item: any, index: number): HostAtlasPath => ({
+    id: `${prefix}-${item.id || item.properties?.name || index}`,
+    d: toPath(item),
+    name: item.properties?.name || HOST_COUNTRY_LABEL[country],
+    country,
+  });
   return {
-    us: data.us.features.map((item: any, index: number) => ({ id: `us-${item.id || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
-    canada: data.canada.features.map((item: any, index: number) => ({ id: `ca-${item.properties?.name || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
-    mexico: data.mexico.features.map((item: any, index: number) => ({ id: `mx-${item.properties?.name || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
+    us: data.us.features.map(mapRegion('us', 'us')).filter((item: HostAtlasPath) => item.d),
+    canada: data.canada.features.map(mapRegion('canada', 'ca')).filter((item: HostAtlasPath) => item.d),
+    mexico: data.mexico.features.map(mapRegion('mexico', 'mx')).filter((item: HostAtlasPath) => item.d),
   };
 }
 
 function HostAtlasSvg({ data, size }: { data: HostAtlasData | null; size: WorldCupMapSize }) {
   const paths = useMemo(() => buildHostAtlasPaths(data, size), [data, size]);
+  const [hover, setHover] = useState<HostAtlasHover | null>(null);
+  const hoveredPaths: HostAtlasPath[] = hover && paths ? paths[hover.country] : [];
+  const moveHover = (event: JSX.TargetedMouseEvent<SVGPathElement>, item: HostAtlasPath) => {
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+    setHover({
+      country: item.country,
+      region: item.name,
+      x: rect ? event.clientX - rect.left : event.clientX,
+      y: rect ? event.clientY - rect.top : event.clientY,
+    });
+  };
+  const renderCountry = (country: HostCountryKey, items: HostAtlasPath[]) => (
+    <g className={`wm-worldcup-host-atlas-country ${country} ${hover?.country === country ? 'hovered' : ''}`}>
+      {items.map((item) => (
+        <path
+          key={item.id}
+          d={item.d}
+          onMouseEnter={(event) => moveHover(event, item)}
+          onMouseMove={(event) => moveHover(event, item)}
+        />
+      ))}
+    </g>
+  );
   return (
-    <svg className="wm-worldcup-host-atlas-svg" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
-      <rect className="wm-worldcup-host-atlas-water" x="0" y="0" width={size.width} height={size.height} />
-      {paths ? (
-        <g>
-          <g className="wm-worldcup-host-atlas-country canada">
-            {paths.canada.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
+    <>
+      <svg
+        className={`wm-worldcup-host-atlas-svg ${hover ? 'has-hover' : ''}`}
+        viewBox={`0 0 ${size.width} ${size.height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="World Cup host country administrative atlas"
+        onMouseLeave={() => setHover(null)}
+      >
+        <rect className="wm-worldcup-host-atlas-water" x="0" y="0" width={size.width} height={size.height} />
+        {paths ? (
+          <g>
+            {renderCountry('canada', paths.canada)}
+            {renderCountry('us', paths.us)}
+            {renderCountry('mexico', paths.mexico)}
+            <g className="wm-worldcup-host-atlas-border">
+              {[...paths.canada, ...paths.us, ...paths.mexico].map((item) => <path key={`line-${item.id}`} d={item.d} />)}
+            </g>
+            {hover ? (
+              <g className="wm-worldcup-host-atlas-hover-border">
+                {hoveredPaths.map((item) => <path key={`hover-${item.id}`} d={item.d} />)}
+              </g>
+            ) : null}
           </g>
-          <g className="wm-worldcup-host-atlas-country us">
-            {paths.us.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
-          </g>
-          <g className="wm-worldcup-host-atlas-country mexico">
-            {paths.mexico.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
-          </g>
-          <g className="wm-worldcup-host-atlas-border">
-            {[...paths.canada, ...paths.us, ...paths.mexico].map((item: { id: string; d: string }) => <path key={`line-${item.id}`} d={item.d} />)}
-          </g>
-        </g>
+        ) : null}
+      </svg>
+      {hover ? (
+        <div
+          className="wm-worldcup-host-atlas-tooltip"
+          style={{
+            transform: `translate(${Math.round(hover.x + 14)}px, ${Math.round(hover.y + 14)}px)`,
+          }}
+        >
+          <strong>{hover.region}</strong>
+          <span>{HOST_COUNTRY_LABEL[hover.country]}</span>
+        </div>
       ) : null}
-    </svg>
+    </>
   );
 }
 
