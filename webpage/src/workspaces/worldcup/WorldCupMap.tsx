@@ -42,6 +42,7 @@ type WorldCupOverlayPoint = {
   id: string;
   tone: string;
   weight: number;
+  kind?: 'radar' | 'intel' | 'alert';
   x: number;
   y: number;
   visible: boolean;
@@ -61,6 +62,7 @@ const COUNTRY_LABELS: WorldCupMapLabel[] = [
 ];
 
 const COUNTRIES_GEOJSON = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
+const US_STATES_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
 
 const INTEL_POINTS = [
   [-123.1, 49.25, 'orange'], [-122.33, 47.61, 'blue'], [-122.42, 37.77, 'gold'], [-118.24, 34.05, 'orange'],
@@ -78,6 +80,30 @@ const RADAR_CELLS = [
   [-74, 41, 'gold', 24], [-70, 44, 'blue', 16], [-102, 23, 'blue', 20], [-98, 20, 'gold', 16],
   [-77, 18, 'blue', 14], [-64, 32, 'blue', 12], [-8, 53, 'blue', 22], [0, 50, 'gold', 18],
   [7, 49, 'blue', 18], [15, 52, 'blue', 15], [121, 31, 'blue', 22], [139, 35, 'gold', 18],
+] as const;
+
+const ALERT_EVENT_POINTS = [
+  [-124.2, 40.8, 'red', 9], [-123.7, 39.7, 'red', 9], [-123.0, 38.2, 'red', 10], [-122.5, 37.8, 'red', 11],
+  [-122.2, 37.4, 'red', 8], [-121.9, 36.8, 'red', 8], [-121.4, 36.0, 'red', 8], [-120.8, 35.4, 'red', 9],
+  [-120.1, 34.9, 'red', 9], [-119.5, 34.4, 'red', 9], [-118.7, 34.1, 'red', 12], [-118.2, 33.8, 'red', 12],
+  [-117.6, 33.2, 'red', 10], [-117.1, 32.7, 'red', 10], [-122.6, 45.5, 'red', 10], [-122.3, 47.6, 'red', 10],
+  [-112.1, 33.5, 'red', 12], [-111.9, 40.8, 'red', 8], [-104.9, 39.7, 'red', 8], [-97.7, 30.3, 'red', 9],
+  [-96.8, 32.8, 'red', 12], [-95.4, 29.8, 'red', 12], [-94.6, 29.4, 'red', 8], [-93.9, 29.8, 'red', 8],
+  [-91.1, 30.4, 'red', 8], [-90.1, 29.9, 'red', 12], [-88.0, 30.7, 'red', 9], [-86.8, 30.4, 'red', 8],
+  [-84.3, 30.4, 'red', 8], [-82.5, 27.9, 'red', 9], [-81.7, 30.3, 'red', 10], [-80.2, 25.8, 'red', 13],
+  [-80.0, 26.6, 'red', 8], [-81.0, 28.5, 'red', 8], [-82.0, 29.2, 'red', 8], [-83.0, 32.1, 'red', 8],
+  [-84.4, 33.8, 'red', 12], [-86.8, 33.5, 'red', 8], [-87.6, 41.9, 'red', 12], [-90.2, 38.6, 'red', 8],
+  [-93.3, 44.9, 'red', 8], [-95.9, 41.3, 'red', 7], [-97.5, 35.5, 'red', 7], [-97.3, 37.7, 'red', 7],
+  [-94.6, 39.1, 'red', 8], [-86.2, 39.8, 'red', 8], [-83.0, 42.3, 'red', 10], [-81.7, 41.5, 'red', 8],
+  [-79.9, 40.4, 'red', 8], [-77.6, 43.1, 'red', 7], [-78.9, 42.9, 'red', 8], [-76.6, 39.3, 'red', 10],
+  [-77.0, 38.9, 'red', 12], [-75.2, 39.9, 'red', 10], [-74.8, 40.2, 'red', 8], [-74.0, 40.7, 'red', 13],
+  [-73.8, 41.0, 'red', 9], [-72.7, 41.8, 'red', 8], [-71.4, 41.8, 'red', 7], [-71.1, 42.4, 'red', 11],
+  [-70.3, 43.7, 'red', 8], [-69.8, 44.6, 'red', 7], [-66.1, 18.4, 'red', 7], [-78.5, 35.8, 'red', 8],
+  [-80.8, 35.2, 'red', 9], [-79.9, 36.1, 'red', 7], [-77.4, 37.5, 'red', 8], [-76.3, 36.9, 'red', 8],
+  [-75.5, 35.8, 'red', 7], [-79.9, 32.8, 'red', 8], [-81.1, 32.1, 'red', 8], [-84.0, 35.9, 'red', 7],
+  [-86.8, 36.2, 'red', 8], [-89.9, 35.1, 'red', 8], [-92.3, 34.8, 'red', 7], [-89.4, 43.1, 'red', 7],
+  [-87.9, 43.0, 'red', 7], [-85.7, 42.9, 'red', 7], [-82.5, 27.3, 'red', 7], [-97.1, 49.9, 'red', 7],
+  [-79.4, 43.7, 'red', 9], [-75.7, 45.4, 'red', 8], [-73.6, 45.5, 'red', 8], [-71.2, 46.8, 'red', 7],
 ] as const;
 
 const ALERT_ZONES = {
@@ -392,6 +418,7 @@ function projectLabels(map: MapLibreMap | null, labels: WorldCupMapLabel[]): Wor
 function projectOverlayPoints(
   map: MapLibreMap | null,
   points: readonly (readonly [number, number, string, number?])[],
+  kind: WorldCupOverlayPoint['kind'],
 ): WorldCupOverlayPoint[] {
   if (!map) return [];
   const canvas = map.getCanvas();
@@ -403,11 +430,48 @@ function projectOverlayPoints(
       id: `${tone}-${index}`,
       tone,
       weight: weight || 10,
+      kind,
       x: projected.x,
       y: projected.y,
       visible: projected.x > -120 && projected.x < width + 120 && projected.y > -90 && projected.y < height + 90,
     };
   });
+}
+
+function loadUsStateBoundaries(map: MapLibreMap) {
+  if (map.getSource('us-state-boundaries')) return;
+  fetch(US_STATES_TOPOJSON_URL)
+    .then((response) => response.json())
+    .then((topology) => {
+      if (!map.getStyle() || map.getSource('us-state-boundaries')) return;
+      const states = feature(topology, topology.objects.states) as any;
+      map.addSource('us-state-boundaries', {
+        type: 'geojson',
+        data: states,
+      });
+      const beforeId = firstSymbolLayerId(map);
+      map.addLayer({
+        id: 'us-state-boundary-fill',
+        type: 'fill',
+        source: 'us-state-boundaries',
+        paint: {
+          'fill-color': '#252829',
+          'fill-opacity': 0.05,
+        },
+      }, beforeId);
+      map.addLayer({
+        id: 'us-state-boundary-line',
+        type: 'line',
+        source: 'us-state-boundaries',
+        paint: {
+          'line-color': '#4c5051',
+          'line-opacity': 0.66,
+          'line-dasharray': [3, 3],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.55, 4, 1.25, 6, 1.75],
+        },
+      }, beforeId);
+    })
+    .catch(() => {});
 }
 
 function LayerPanel() {
@@ -467,6 +531,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const [screenLabels, setScreenLabels] = useState<WorldCupScreenLabel[]>([]);
   const [radarScreenPoints, setRadarScreenPoints] = useState<WorldCupOverlayPoint[]>([]);
   const [intelScreenPoints, setIntelScreenPoints] = useState<WorldCupOverlayPoint[]>([]);
+  const [alertScreenPoints, setAlertScreenPoints] = useState<WorldCupOverlayPoint[]>([]);
 
   const weatherByCity = useMemo(() => {
     const index = new Map<string, WorldCupCityWeather>();
@@ -513,8 +578,9 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const syncPoints = () => {
       setScreenPoints(projectPoints(map, citiesRef.current, matchesRef.current, weatherByCityRef.current));
       setScreenLabels(projectLabels(map, COUNTRY_LABELS));
-      setRadarScreenPoints(projectOverlayPoints(map, RADAR_CELLS));
-      setIntelScreenPoints(projectOverlayPoints(map, INTEL_POINTS));
+      setRadarScreenPoints(projectOverlayPoints(map, RADAR_CELLS, 'radar'));
+      setIntelScreenPoints(projectOverlayPoints(map, INTEL_POINTS, 'intel'));
+      setAlertScreenPoints(projectOverlayPoints(map, ALERT_EVENT_POINTS, 'alert'));
     };
     const resizeAndSync = () => {
       map.resize();
@@ -524,11 +590,13 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     map.on('load', () => {
       setMapReady(true);
+      loadUsStateBoundaries(map);
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     });
     map.on('idle', () => {
       setMapReady(true);
+      loadUsStateBoundaries(map);
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     });
@@ -546,6 +614,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         map.setStyle(buildWorldCupMapStyle(), { diff: false });
         window.requestAnimationFrame(() => {
           ensureWorldMonitorOverlayLayers(map);
+          loadUsStateBoundaries(map);
           resizeAndSync();
         });
       }
@@ -555,6 +624,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const initialFrame = window.requestAnimationFrame(resizeAndSync);
     const settleTimer = window.setTimeout(() => {
       setMapReady(true);
+      loadUsStateBoundaries(map);
       ensureWorldMonitorOverlayLayers(map);
       resizeAndSync();
     }, 500);
@@ -578,8 +648,9 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   useEffect(() => {
     setScreenPoints(projectPoints(mapRef.current, cities, matches, weatherByCity));
     setScreenLabels(projectLabels(mapRef.current, COUNTRY_LABELS));
-    setRadarScreenPoints(projectOverlayPoints(mapRef.current, RADAR_CELLS));
-    setIntelScreenPoints(projectOverlayPoints(mapRef.current, INTEL_POINTS));
+    setRadarScreenPoints(projectOverlayPoints(mapRef.current, RADAR_CELLS, 'radar'));
+    setIntelScreenPoints(projectOverlayPoints(mapRef.current, INTEL_POINTS, 'intel'));
+    setAlertScreenPoints(projectOverlayPoints(mapRef.current, ALERT_EVENT_POINTS, 'alert'));
   }, [cities, matches, selectedCityId, weatherByCity]);
 
   return (
@@ -614,6 +685,17 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
             key={point.id}
             className={`wm-worldcup-map-intel-dot ${point.tone}`}
             style={{ transform: `translate(${Math.round(point.x)}px, ${Math.round(point.y)}px)` }}
+          />
+        ))}
+        {alertScreenPoints.filter((point) => point.visible).map((point) => (
+          <span
+            key={point.id}
+            className="wm-worldcup-map-alert-dot"
+            style={{
+              width: `${Math.max(7, point.weight)}px`,
+              height: `${Math.max(7, point.weight)}px`,
+              transform: `translate(${Math.round(point.x)}px, ${Math.round(point.y)}px)`,
+            }}
           />
         ))}
       </div>

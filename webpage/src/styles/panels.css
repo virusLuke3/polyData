@@ -3565,12 +3565,22 @@ body.panel-resize-active iframe {
     radial-gradient(circle at 50% 50%, rgba(255, 188, 43, 0.78), rgba(255, 132, 0, 0.42) 48%, rgba(114, 63, 0, 0.05) 76%, transparent 100%);
 }
 
-.wm-worldcup-map-intel-dot {
+.wm-worldcup-map-intel-dot,
+.wm-worldcup-map-alert-dot {
   width: 9px;
   height: 9px;
   border: 1px solid rgba(0, 0, 0, 0.58);
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
   translate: -50% -50%;
+}
+
+.wm-worldcup-map-alert-dot {
+  z-index: 2;
+  border-color: rgba(255, 182, 182, 0.68);
+  background: #ff5d62;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.72),
+    0 0 12px rgba(255, 76, 76, 0.42);
 }
 
 .wm-worldcup-map-intel-dot.red {
