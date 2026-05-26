@@ -1739,22 +1739,25 @@ export function App() {
         <div className="wm-toolbar-left">
           <div className="wm-nav-cluster">
             <button
-              className={`wm-nav-pill ${workspaceMode === 'world' ? 'active' : ''}`}
+              className={`wm-workspace-option ${workspaceMode === 'world' ? 'active' : ''}`}
               type="button"
               onClick={() => {
                 setWorkspaceMode('world');
                 resetWorkspace();
               }}
+              title="World workspace"
             >
-              World
+              <span className="wm-workspace-icon">◎</span>
+              <span className="wm-workspace-label">World</span>
             </button>
             <button
-              className={`wm-nav-icon wm-nav-icon-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
+              className={`wm-workspace-option wm-workspace-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
               type="button"
               onClick={() => setWorkspaceMode('worldcup')}
               title="World Cup"
             >
-              ⚽
+              <span className="wm-workspace-icon">⚽</span>
+              <span className="wm-workspace-label">World Cup</span>
             </button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowCommandPalette(true)} title="Command palette">⌨</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowPanelLibrary((current) => !current)} title="Toggle panel library">◫</button>
