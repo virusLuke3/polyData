@@ -574,7 +574,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         return;
       }
       const overlay = new MapboxOverlay({
-        interleaved: true,
+        interleaved: false,
         layers: buildWorldCupDeckLayers(),
         pickingRadius: 10,
         useDevicePixels: window.devicePixelRatio > 2 ? 2 : true,
