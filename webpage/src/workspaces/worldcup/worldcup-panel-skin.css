@@ -2266,3 +2266,381 @@
     grid-template-columns: 1fr !important;
   }
 }
+
+/* v10: make the World Cup panels read like the WorldMonitor reference: smaller type, lighter weight, semantic color accents. */
+@media (min-width: 1180px) {
+  .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix > .wm-worldcup-matrix-cell,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix > .wm-worldcup-matrix-cell > .wm-worldcup-panel {
+  height: 274px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
+  grid-auto-rows: 274px !important;
+  gap: 4px !important;
+  padding: 4px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-header {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding: 0 9px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-title {
+  font-size: 10.8px !important;
+  font-weight: 680 !important;
+  letter-spacing: 0.12em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-badge {
+  height: 20px !important;
+  min-width: 40px !important;
+  padding: 0 8px !important;
+  font-size: 8.8px !important;
+  font-weight: 680 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-count {
+  width: 26px !important;
+  min-width: 26px !important;
+  height: 26px !important;
+  font-size: 10px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-body {
+  height: calc(100% - 36px) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-filter-tabs button {
+  height: 24px !important;
+  min-width: 34px !important;
+  padding: 0 7px !important;
+  font-size: 8px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-row {
+  grid-template-columns: 48px minmax(0, 1fr) 48px !important;
+  min-height: 43px !important;
+  padding: 5px 8px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-row:nth-child(4n + 1) {
+  border-left-color: rgba(34, 240, 126, 0.9) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-row:nth-child(4n + 2) {
+  border-left-color: rgba(255, 179, 43, 0.85) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-row:nth-child(4n + 3) {
+  border-left-color: rgba(55, 199, 244, 0.78) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-row:nth-child(4n) {
+  border-left-color: rgba(155, 108, 255, 0.78) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-time strong {
+  font-size: 11.2px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-time em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-player-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-note {
+  font-size: 8.4px !important;
+  font-weight: 450 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main strong {
+  font-size: 10.6px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main i {
+  font-size: 8px !important;
+  font-weight: 650 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-status {
+  width: 46px !important;
+  height: 18px !important;
+  font-size: 7.8px !important;
+  font-weight: 650 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard {
+  min-height: 52px !important;
+  margin: 7px 8px 5px !important;
+  padding: 8px 10px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-meta span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row span em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row > div:first-child span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-roster-head span {
+  font-size: 8.2px !important;
+  font-weight: 560 !important;
+  letter-spacing: 0.055em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard strong {
+  font-size: 14.4px !important;
+  font-weight: 650 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard b {
+  font-size: 16px !important;
+  font-weight: 720 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts {
+  gap: 3px !important;
+  margin: 0 8px 8px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts div {
+  min-height: 38px !important;
+  padding: 6px 8px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts div:nth-child(1) {
+  border-left-color: var(--wc-cyan) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts div:nth-child(2) {
+  border-left-color: var(--wc-amber) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts div:nth-child(3) {
+  border-left-color: var(--wc-purple) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts div:nth-child(4) {
+  border-left-color: var(--wc-green) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts strong {
+  font-size: 9.8px !important;
+  font-weight: 580 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row {
+  min-height: 70px !important;
+  padding: 8px 10px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > strong {
+  font-size: 10.8px !important;
+  font-weight: 560 !important;
+  line-height: 1.28 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-tag {
+  height: 16px !important;
+  padding: 0 5px !important;
+  font-size: 7.8px !important;
+  font-weight: 650 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row {
+  min-height: 39px !important;
+  padding: 6px 10px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row:nth-child(3n + 1) {
+  border-left-color: rgba(55, 199, 244, 0.8) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row:nth-child(3n + 2) {
+  border-left-color: rgba(255, 179, 43, 0.85) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row:nth-child(3n) {
+  border-left-color: rgba(34, 240, 126, 0.76) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-roster-head strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-player-row span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row strong {
+  font-size: 10.4px !important;
+  font-weight: 560 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row b {
+  color: var(--wc-amber) !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-roster-block {
+  min-height: 76px !important;
+  padding: 8px 10px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row:nth-child(odd) {
+  border-left-color: var(--wc-purple) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row:nth-child(even) {
+  border-left-color: var(--wc-cyan) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row {
+  border-left-color: var(--wc-purple) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-roster-block {
+  border-left-color: var(--wc-cyan) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-outcomes,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-cells {
+  gap: 4px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-outcomes span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-cells span {
+  min-height: 32px !important;
+  padding: 5px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-outcomes b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-cells b {
+  font-size: 7.6px !important;
+  font-weight: 560 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-outcomes strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-cells strong {
+  font-size: 10.8px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-player-row {
+  min-height: 24px !important;
+  padding: 4px 0 !important;
+}
+
+/* v11: lighter typography pass after screenshot review. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix b {
+  font-weight: 560 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-title {
+  font-size: 10.4px !important;
+  font-weight: 620 !important;
+  letter-spacing: 0.14em !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-panel-badge {
+  font-weight: 600 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-time strong {
+  font-size: 10.2px !important;
+  font-weight: 520 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main strong {
+  font-size: 9.8px !important;
+  font-weight: 520 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-main em {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard strong {
+  font-size: 12.6px !important;
+  font-weight: 560 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-scoreboard b {
+  font-size: 14px !important;
+  font-weight: 620 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-match-facts strong {
+  font-size: 9.2px !important;
+  font-weight: 500 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-row > strong {
+  font-size: 9.9px !important;
+  font-weight: 500 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-roster-head strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-player-row span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-market-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-row strong {
+  font-size: 9.6px !important;
+  font-weight: 500 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row b {
+  font-size: 11px !important;
+  font-weight: 560 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-outcomes strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-odds-cells strong {
+  font-size: 9.8px !important;
+  font-weight: 520 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-empty {
+  border-left-color: var(--wc-amber) !important;
+  color: #989ea7 !important;
+  font-size: 9px !important;
+  font-weight: 450 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-schedule-panel {
+  border-top-color: rgba(34, 240, 126, 0.55) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-match-panel {
+  border-top-color: rgba(55, 199, 244, 0.55) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-news-panel {
+  border-top-color: rgba(255, 66, 74, 0.66) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-weather-panel {
+  border-top-color: rgba(255, 179, 43, 0.6) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-polymarket-panel,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-odds-panel {
+  border-top-color: rgba(155, 108, 255, 0.66) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-rosters-panel {
+  border-top-color: rgba(55, 199, 244, 0.6) !important;
+}

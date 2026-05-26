@@ -171,7 +171,7 @@ function SchedulePanel({
   });
   return (
     <Panel
-      title="WORLD CUP CALENDAR"
+      title="CALENDAR"
       badge="SEED"
       status="live"
       count={filtered.length}
@@ -179,7 +179,7 @@ function SchedulePanel({
       controls={(
         <div className="wm-worldcup-filter-tabs">
           {(['all', 'today', 'future', 'market'] as MatchFilter[]).map((item) => (
-            <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item}</button>
+            <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item === 'market' ? 'mkt' : item}</button>
           ))}
         </div>
       )}
@@ -217,7 +217,7 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
     );
   }
   return (
-    <Panel title="MATCH CONTROL" badge={match.status === 'live' ? 'LIVE' : 'SCHEDULED'} count={markets.length} className="wm-worldcup-panel wm-worldcup-match-panel">
+    <Panel title="MATCH" badge={match.status === 'live' ? 'LIVE' : 'SCHEDULED'} count={markets.length} className="wm-worldcup-panel wm-worldcup-match-panel">
       <div className="wm-worldcup-scoreboard">
         <div>
           <span>HOME</span>
@@ -242,7 +242,7 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
 
 function NewsPanel({ items }: { items: ReturnType<typeof filterWorldCupNews> }) {
   return (
-    <Panel title="WORLD CUP NEWS" badge="INTEL" count={items.length} className="wm-worldcup-panel wm-worldcup-news-panel">
+    <Panel title="NEWS" badge="INTEL" count={items.length} className="wm-worldcup-panel wm-worldcup-news-panel">
       <div className="wm-worldcup-feed">
         {items.map((item) => (
           <a className="wm-worldcup-feed-row" href={item.url || '#'} key={item.id} target={item.url === '#' ? undefined : '_blank'} rel="noreferrer">
@@ -276,7 +276,7 @@ function WeatherPanel({
     matchCount: payload.matches.filter((match) => match.cityId === weather.cityId).length,
   }));
   return (
-    <Panel title="HOST CITY WEATHER" badge={payload.cacheMode.toUpperCase()} count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
+    <Panel title="WEATHER" badge={payload.cacheMode.toUpperCase()} count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
       <div className="wm-worldcup-weather-list">
         {cityWeather.map(({ city, weather, matchCount }) => (
           <button className={`wm-worldcup-weather-row ${city.id === selectedCityId ? 'active' : ''}`} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
@@ -296,7 +296,7 @@ function WeatherPanel({
 function PolymarketPanel({ markets }: { markets: WorldCupPolymarketMarket[] }) {
   return (
     <Panel
-      title="POLYMARKET MATCH MARKETS"
+      title="MARKETS"
       badge="LOCAL DB"
       count={markets.length}
       titleControls={<InfoDot label="Local Polymarket market matches are ranked by team, venue and kickoff context confidence." />}
@@ -334,7 +334,7 @@ function RostersPanel({ payload, match }: { payload: WorldCupDashboardPayload; m
   const teams = match ? [match.homeTeam, match.awayTeam] : [];
   const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
   return (
-    <Panel title="SQUAD LISTS" badge="PENDING" count={rosters.length || teams.length} className="wm-worldcup-panel wm-worldcup-rosters-panel">
+    <Panel title="SQUADS" badge="PENDING" count={rosters.length || teams.length} className="wm-worldcup-panel wm-worldcup-rosters-panel">
       {(rosters.length ? rosters : teams.map((team) => ({ team, updatedAt: payload.generatedAt, players: [] }))).map((roster) => (
         <section className="wm-worldcup-roster-block" key={roster.team}>
           <div className="wm-worldcup-roster-head">
@@ -356,7 +356,7 @@ function RostersPanel({ payload, match }: { payload: WorldCupDashboardPayload; m
 function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymarket: WorldCupPolymarketMarket[] }) {
   return (
     <Panel
-      title="SPORTSBOOK ODDS"
+      title="ODDS"
       badge="WATCH"
       count={odds.length}
       titleControls={<InfoDot label="Bookmaker snapshots show decimal odds and implied probability for the selected match." />}
