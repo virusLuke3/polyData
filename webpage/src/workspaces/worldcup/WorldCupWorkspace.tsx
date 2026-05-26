@@ -407,7 +407,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
             <span>UPDATED {formatUpdatedAgo(payload.generatedAt, now)}</span>
             <span>{formatBjtClock(now)} BJT</span>
           </div>
-          <h1>美加墨世界杯交易工作台</h1>
+          <h1>World Cup Trading Desk</h1>
           <p>Schedule, host-city weather, match status, Polymarket markets, squads and odds in one football workspace.</p>
           <div className="wm-worldcup-next-context">
             <span>NEXT MATCH CONTEXT</span>
