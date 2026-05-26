@@ -24,8 +24,10 @@ function formatCountdown(match: WorldCupMatch | null, now: Date) {
   const days = Math.floor(diffSeconds / 86400);
   const hours = Math.floor((diffSeconds % 86400) / 3600);
   const minutes = Math.floor((diffSeconds % 3600) / 60);
-  if (days > 0) return `${days}D ${hours}H ${minutes}M`;
-  return `${hours}H ${minutes}M`;
+  const seconds = diffSeconds % 60;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  if (days > 0) return `${days}D ${pad(hours)}H ${pad(minutes)}M ${pad(seconds)}S`;
+  return `${pad(hours)}H ${pad(minutes)}M ${pad(seconds)}S`;
 }
 
 function formatNumber(value?: number | null, digits = 1) {
@@ -39,6 +41,26 @@ function formatCompact(value?: number | null) {
   if (number >= 1_000_000) return `$${(number / 1_000_000).toFixed(1)}M`;
   if (number >= 1_000) return `$${(number / 1_000).toFixed(1)}K`;
   return `$${number.toFixed(0)}`;
+}
+
+function formatUpdatedAgo(iso: string, now: Date) {
+  const diffSeconds = Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / 1000));
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+function formatBjtClock(now: Date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(now);
 }
 
 function sameBeijingDate(match: WorldCupMatch, now: Date) {
@@ -63,6 +85,19 @@ function stageLabel(stage: string) {
 function scoreText(match: WorldCupMatch) {
   if (match.homeScore === undefined || match.awayScore === undefined) return 'VS';
   return `${match.homeScore}-${match.awayScore}`;
+}
+
+function kickoffDay(match: WorldCupMatch) {
+  return match.kickoffBeijing.replace(`, ${match.kickoffBeijing.split(',').pop()?.trim()}`, '');
+}
+
+function kickoffTime(match: WorldCupMatch) {
+  return match.kickoffBeijing.split(',').pop()?.trim() || match.kickoffBeijing;
+}
+
+function probabilityWidth(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
+  return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
 }
 
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
@@ -140,11 +175,11 @@ function SchedulePanel({
             onClick={() => onSelectMatch(match)}
           >
             <span className="wm-worldcup-match-time">
-              <strong>{match.kickoffBeijing.split(',').pop()?.trim() || match.kickoffBeijing}</strong>
-              <em>{match.kickoffBeijing.replace(`, ${match.kickoffBeijing.split(',').pop()?.trim()}`, '')}</em>
+              <strong>{kickoffTime(match)}</strong>
+              <em>{kickoffDay(match)}</em>
             </span>
             <span className="wm-worldcup-match-main">
-              <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
+              <strong><i>#{match.fifaMatchNumber || '--'}</i> {match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
               <em>{stageLabel(match.stage)} · {match.city} · {match.venue}</em>
             </span>
             <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'PM' : match.status.toUpperCase()}</span>
@@ -177,6 +212,7 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
         </div>
       </div>
       <div className="wm-worldcup-match-facts">
+        <div><span>MATCH</span><strong>#{match.fifaMatchNumber || '--'} · {stageLabel(match.stage)} · {match.round}</strong></div>
         <div><span>BEIJING</span><strong>{match.kickoffBeijing}</strong></div>
         <div><span>LOCAL</span><strong>{match.kickoffLocal}</strong></div>
         <div><span>VENUE</span><strong>{match.city} · {match.venue}</strong></div>
@@ -251,6 +287,7 @@ function PolymarketPanel({ markets }: { markets: WorldCupPolymarketMarket[] }) {
                   <span key={outcome.name}>
                     <b>{outcome.name}</b>
                     <strong>{outcome.yesPrice == null ? '--' : `${(outcome.yesPrice * 100).toFixed(1)}%`}</strong>
+                    <i style={{ width: probabilityWidth(outcome.yesPrice) }} />
                   </span>
                 ))}
               </div>
@@ -303,6 +340,7 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
                   <b>{outcome.name}</b>
                   <strong>{formatNumber(outcome.decimalOdds, 2)}</strong>
                   <em>{formatNumber(outcome.impliedProbability, 1)}%</em>
+                  <i style={{ width: outcome.impliedProbability == null ? '2%' : `${Math.max(2, Math.min(100, outcome.impliedProbability))}%` }} />
                 </span>
               ))}
             </div>
@@ -350,19 +388,41 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     );
   }
 
+  const selectedCity = matchCity(payload.cities, selectedCityId || selectedMatch?.cityId || nextMatch?.cityId || payload.cities[0]?.id || '');
+  const nextCity = nextMatch ? matchCity(payload.cities, nextMatch.cityId) : null;
+  const linkedMarketCount = payload.matches.filter((match) => match.marketLinked).length + selectedMarkets.length;
+  const terminalMetrics = [
+    { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
+    { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${payload.matches.filter((match) => match.cityId === selectedCity.id).length} matches` },
+    { label: 'match_count', value: String(payload.matches.length), meta: `${payload.cities.length} host cities` },
+    { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · seed-first` },
+  ];
+
   return (
     <main className="wm-dashboard wm-worldcup-dashboard">
       <section className="wm-worldcup-hero">
         <div className="wm-worldcup-hero-copy">
-          <span>FIFA WORLD CUP 2026</span>
+          <div className="wm-worldcup-hero-topline">
+            <span>FIFA WORLD CUP 2026</span>
+            <span>UPDATED {formatUpdatedAgo(payload.generatedAt, now)}</span>
+            <span>{formatBjtClock(now)} BJT</span>
+          </div>
           <h1>美加墨世界杯交易工作台</h1>
           <p>Schedule, host-city weather, match status, Polymarket markets, squads and odds in one football workspace.</p>
+          <div className="wm-worldcup-next-context">
+            <span>NEXT MATCH CONTEXT</span>
+            <strong>{nextMatch ? `${nextMatch.homeTeam} / ${nextMatch.awayTeam}` : 'Tournament window complete'}</strong>
+            <em>{nextMatch ? `${kickoffDay(nextMatch)} · ${kickoffTime(nextMatch)} BJT · ${nextCity?.city || nextMatch.city}` : 'No upcoming kickoff in seed schedule'}</em>
+          </div>
         </div>
         <div className="wm-worldcup-hero-metrics">
-          <div><span>NEXT KICKOFF</span><strong>{formatCountdown(nextMatch, now)}</strong></div>
-          <div><span>MATCHES</span><strong>{payload.matches.length}</strong></div>
-          <div><span>CITIES</span><strong>{payload.cities.length}</strong></div>
-          <div><span>CACHE</span><strong>{payload.cacheMode.toUpperCase()}</strong></div>
+          {terminalMetrics.map((metric) => (
+            <div className="wm-worldcup-terminal-card" key={metric.label}>
+              <span><b>$</b> {metric.label}</span>
+              <strong>{metric.value}</strong>
+              <em>{metric.meta}</em>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -374,12 +434,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
           </div>
           <div className="wm-map-status-strip">
             <span className="wm-status-chip">WORLD CUP</span>
-            <div className="wm-map-clock">{new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now)} BJT</div>
+            <div className="wm-map-clock">{formatBjtClock(now)} BJT</div>
+            <span className="wm-map-next-chip">{nextCity ? `NEXT · ${nextCity.city}` : 'NEXT · --'}</span>
           </div>
         </div>
         <WorldCupMap
           cities={payload.cities}
           matches={payload.matches}
+          nextMatch={nextMatch}
           selectedCityId={selectedCityId}
           selectedMatchId={selectedMatch?.id || null}
           onSelectCity={setSelectedCityId}
