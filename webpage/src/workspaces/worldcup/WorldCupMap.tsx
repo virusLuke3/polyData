@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { geoMercator, geoPath } from 'd3-geo';
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
@@ -38,6 +39,17 @@ type WorldCupScreenLabel = WorldCupMapLabel & {
   visible: boolean;
 };
 
+type WorldCupMapSize = {
+  width: number;
+  height: number;
+};
+
+type HostAtlasData = {
+  us: any;
+  canada: any;
+  mexico: any;
+};
+
 const IMPORTANT_CITY_IDS = new Set(['mexico-city', 'new-york-new-jersey', 'dallas', 'los-angeles']);
 
 const COUNTRY_LABELS: WorldCupMapLabel[] = [
@@ -53,6 +65,18 @@ const COUNTRY_LABELS: WorldCupMapLabel[] = [
 
 const COUNTRIES_GEOJSON = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
 const US_STATES_TOPOJSON_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
+const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
+const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
+const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
+
+const HOST_ATLAS_BOUNDS = {
+  type: 'Feature',
+  geometry: {
+    type: 'Polygon',
+    coordinates: [[[-141, 12], [-52, 12], [-52, 73], [-141, 73], [-141, 12]]],
+  },
+  properties: {},
+} as any;
 
 function firstSymbolLayerId(map: MapLibreMap) {
   const layers = map.getStyle().layers || [];
@@ -136,45 +160,92 @@ function shortKickoff(match: WorldCupMatch) {
   return match.kickoffLocal.replace(',', ' ·');
 }
 
+function createHostAtlasProjection(size: WorldCupMapSize) {
+  const leftInset = Math.min(310, size.width * 0.16);
+  const rightInset = Math.min(420, size.width * 0.21);
+  return geoMercator().fitExtent(
+    [[leftInset, 18], [Math.max(leftInset + 1, size.width - rightInset), Math.max(140, size.height - 8)]],
+    HOST_ATLAS_BOUNDS,
+  );
+}
+
+function projectHostCoordinate(size: WorldCupMapSize, lon: number, lat: number) {
+  const projected = createHostAtlasProjection(size)([lon, lat]);
+  return projected || [Number.NaN, Number.NaN];
+}
+
 function projectPoints(
   map: MapLibreMap | null,
+  size: WorldCupMapSize,
   cities: WorldCupVenueCity[],
   matches: WorldCupMatch[],
   weatherByCity: Map<string, WorldCupCityWeather>,
 ): WorldCupMapPoint[] {
   if (!map) return [];
-  const canvas = map.getCanvas();
-  const width = canvas.clientWidth || canvas.width;
-  const height = canvas.clientHeight || canvas.height;
+  const { width, height } = size;
   return cities.map((city) => {
-    const projected = map.project([city.longitude, city.latitude]);
+    const [x, y] = projectHostCoordinate(size, city.longitude, city.latitude);
     const count = matches.filter((match) => match.cityId === city.id).length;
     return {
       city,
       weather: weatherByCity.get(city.id) || null,
       count,
       status: cityStatus(city.id, matches),
-      x: projected.x,
-      y: projected.y,
-      visible: projected.x > -120 && projected.x < width + 120 && projected.y > -90 && projected.y < height + 90,
+      x,
+      y,
+      visible: Number.isFinite(x) && Number.isFinite(y) && x > -120 && x < width + 120 && y > -90 && y < height + 90,
     };
   });
 }
 
-function projectLabels(map: MapLibreMap | null, labels: WorldCupMapLabel[]): WorldCupScreenLabel[] {
+function projectLabels(map: MapLibreMap | null, size: WorldCupMapSize, labels: WorldCupMapLabel[]): WorldCupScreenLabel[] {
   if (!map) return [];
-  const canvas = map.getCanvas();
-  const width = canvas.clientWidth || canvas.width;
-  const height = canvas.clientHeight || canvas.height;
+  const { width, height } = size;
   return labels.map((label) => {
-    const projected = map.project([label.lon, label.lat]);
+    const [x, y] = projectHostCoordinate(size, label.lon, label.lat);
     return {
       ...label,
-      x: projected.x,
-      y: projected.y,
-      visible: projected.x > -100 && projected.x < width + 100 && projected.y > -60 && projected.y < height + 60,
+      x,
+      y,
+      visible: Number.isFinite(x) && Number.isFinite(y) && x > -100 && x < width + 100 && y > -60 && y < height + 60,
     };
   });
+}
+
+function buildHostAtlasPaths(data: HostAtlasData | null, size: WorldCupMapSize) {
+  if (!data || size.width < 200 || size.height < 200) return null;
+  const path = geoPath(createHostAtlasProjection(size));
+  const toPath = (item: any) => path(item) || '';
+  return {
+    us: data.us.features.map((item: any, index: number) => ({ id: `us-${item.id || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
+    canada: data.canada.features.map((item: any, index: number) => ({ id: `ca-${item.properties?.name || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
+    mexico: data.mexico.features.map((item: any, index: number) => ({ id: `mx-${item.properties?.name || index}`, d: toPath(item) })).filter((item: { d: string }) => item.d),
+  };
+}
+
+function HostAtlasSvg({ data, size }: { data: HostAtlasData | null; size: WorldCupMapSize }) {
+  const paths = useMemo(() => buildHostAtlasPaths(data, size), [data, size]);
+  return (
+    <svg className="wm-worldcup-host-atlas-svg" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true">
+      <rect className="wm-worldcup-host-atlas-water" x="0" y="0" width={size.width} height={size.height} />
+      {paths ? (
+        <g>
+          <g className="wm-worldcup-host-atlas-country canada">
+            {paths.canada.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
+          </g>
+          <g className="wm-worldcup-host-atlas-country us">
+            {paths.us.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
+          </g>
+          <g className="wm-worldcup-host-atlas-country mexico">
+            {paths.mexico.map((item: { id: string; d: string }) => <path key={item.id} d={item.d} />)}
+          </g>
+          <g className="wm-worldcup-host-atlas-border">
+            {[...paths.canada, ...paths.us, ...paths.mexico].map((item: { id: string; d: string }) => <path key={`line-${item.id}`} d={item.d} />)}
+          </g>
+        </g>
+      ) : null}
+    </svg>
+  );
 }
 
 function loadUsStateBoundaries(map: MapLibreMap) {
@@ -266,6 +337,8 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const fallbackAppliedRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
+  const [mapSize, setMapSize] = useState<WorldCupMapSize>({ width: 1600, height: 640 });
+  const [atlasData, setAtlasData] = useState<HostAtlasData | null>(null);
   const [screenPoints, setScreenPoints] = useState<WorldCupMapPoint[]>([]);
   const [screenLabels, setScreenLabels] = useState<WorldCupScreenLabel[]>([]);
 
@@ -291,6 +364,24 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   }, [cities, matches, weatherByCity]);
 
   useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch(LOCAL_US_STATES_TOPOJSON_URL).then((response) => response.json()).then((topology) => feature(topology, topology.objects.states) as any),
+      fetch(LOCAL_CANADA_PROVINCES_GEOJSON_URL).then((response) => response.json()),
+      fetch(LOCAL_MEXICO_STATES_GEOJSON_URL).then((response) => response.json()),
+    ])
+      .then(([us, canada, mexico]) => {
+        if (!cancelled) setAtlasData({ us, canada, mexico });
+      })
+      .catch(() => {
+        if (!cancelled) setAtlasData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const host = mapHostRef.current;
     if (!host || mapRef.current) return undefined;
     const map = new maplibregl.Map({
@@ -312,8 +403,14 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     mapRef.current = map;
 
     const syncPoints = () => {
-      setScreenPoints(projectPoints(map, citiesRef.current, matchesRef.current, weatherByCityRef.current));
-      setScreenLabels(projectLabels(map, COUNTRY_LABELS));
+      const canvas = map.getCanvas();
+      const size = {
+        width: canvas.clientWidth || canvas.width || 1600,
+        height: canvas.clientHeight || canvas.height || 640,
+      };
+      setMapSize(size);
+      setScreenPoints(projectPoints(map, size, citiesRef.current, matchesRef.current, weatherByCityRef.current));
+      setScreenLabels(projectLabels(map, size, COUNTRY_LABELS));
     };
     const resizeAndSync = () => {
       map.resize();
@@ -375,13 +472,14 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   }, []);
 
   useEffect(() => {
-    setScreenPoints(projectPoints(mapRef.current, cities, matches, weatherByCity));
-    setScreenLabels(projectLabels(mapRef.current, COUNTRY_LABELS));
-  }, [cities, matches, selectedCityId, weatherByCity]);
+    setScreenPoints(projectPoints(mapRef.current, mapSize, cities, matches, weatherByCity));
+    setScreenLabels(projectLabels(mapRef.current, mapSize, COUNTRY_LABELS));
+  }, [cities, matches, mapSize, selectedCityId, weatherByCity]);
 
   return (
     <div ref={rootRef} className={`wm-worldcup-map wm-worldcup-maplibre ${mapReady ? 'ready' : ''} ${mapDegraded ? 'degraded' : ''}`}>
       <div ref={mapHostRef} className="wm-worldcup-maplibre-host" />
+      <HostAtlasSvg data={atlasData} size={mapSize} />
       <LayerPanel />
       <div className="wm-worldcup-map-country-label-layer">
         {screenLabels.filter((label) => label.visible).map((label) => (

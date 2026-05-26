@@ -3347,6 +3347,53 @@ body.panel-resize-active iframe {
   display: none;
 }
 
+.wm-worldcup-host-atlas-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  background: #050606;
+}
+
+.wm-worldcup-host-atlas-water {
+  fill: #050606;
+}
+
+.wm-worldcup-host-atlas-country path {
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+
+.wm-worldcup-host-atlas-country.us path {
+  fill: rgba(20, 25, 25, 0.96);
+  stroke: rgba(92, 104, 104, 0.42);
+  stroke-width: 0.82;
+  stroke-dasharray: 3 3;
+}
+
+.wm-worldcup-host-atlas-country.canada path {
+  fill: rgba(18, 38, 31, 0.84);
+  stroke: rgba(112, 142, 132, 0.34);
+  stroke-width: 0.74;
+}
+
+.wm-worldcup-host-atlas-country.mexico path {
+  fill: rgba(20, 47, 37, 0.88);
+  stroke: rgba(121, 168, 148, 0.38);
+  stroke-width: 0.78;
+}
+
+.wm-worldcup-host-atlas-border path {
+  fill: none;
+  stroke: rgba(171, 186, 184, 0.2);
+  stroke-width: 0.42;
+  vector-effect: non-scaling-stroke;
+}
+
 .wm-worldcup-map-layer-panel {
   position: absolute;
   z-index: 8;
