@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'preact/hooks';
-import { geoNaturalEarth1, geoPath } from 'd3-geo';
+import { geoMercator, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-110m.json';
-import type { WorldCupMatch, WorldCupVenueCity } from './types';
+import type { WorldCupCityWeather, WorldCupMatch, WorldCupVenueCity } from './types';
 
 type WorldCupMapProps = {
   cities: WorldCupVenueCity[];
   matches: WorldCupMatch[];
+  weather: WorldCupCityWeather[];
   nextMatch: WorldCupMatch | null;
   selectedCityId: string | null;
   selectedMatchId: string | null;
@@ -17,15 +18,26 @@ const VIEWBOX_WIDTH = 1280;
 const VIEWBOX_HEIGHT = 620;
 
 function buildProjection() {
-  const projection = geoNaturalEarth1();
+  const projection = geoMercator();
   const world = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
-  projection.fitExtent([[18, 18], [VIEWBOX_WIDTH - 18, VIEWBOX_HEIGHT - 18]], world);
-  const focus = projection([-97, 39]) || [VIEWBOX_WIDTH / 2, VIEWBOX_HEIGHT / 2];
-  const zoom = 2.38;
+  const americasViewport = {
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [-171, 74],
+        [-22, 74],
+        [-22, -12],
+        [-171, -12],
+        [-171, 74],
+      ]],
+    },
+    properties: {},
+  } as any;
+  projection.fitExtent([[0, 0], [VIEWBOX_WIDTH, VIEWBOX_HEIGHT]], americasViewport);
   return {
     projection,
     world,
-    transform: `translate(${(VIEWBOX_WIDTH / 2 - focus[0] * zoom).toFixed(2)} ${(VIEWBOX_HEIGHT / 2 - focus[1] * zoom).toFixed(2)}) scale(${zoom})`,
   };
 }
 
@@ -46,9 +58,17 @@ function compactCityName(city: string) {
   return city.replace(' / ', '/').replace(' Bay Area', '').replace(' Gardens', '');
 }
 
-export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, selectedMatchId, onSelectCity }: WorldCupMapProps) {
+function matchTitle(match: WorldCupMatch) {
+  return `${match.homeTeam} vs ${match.awayTeam}`;
+}
+
+function shortKickoff(match: WorldCupMatch) {
+  return match.kickoffLocal.replace(',', ' ·');
+}
+
+export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityId, selectedMatchId, onSelectCity }: WorldCupMapProps) {
   const [hoverCityId, setHoverCityId] = useState<string | null>(null);
-  const { projection, transform, world } = useMemo(() => buildProjection(), []);
+  const { projection, world } = useMemo(() => buildProjection(), []);
   const path = useMemo(() => geoPath(projection), [projection]);
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) || null;
   const nextCityId = nextMatch?.cityId || null;
@@ -58,6 +78,12 @@ export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, select
     matches.forEach((match) => counts.set(match.cityId, (counts.get(match.cityId) || 0) + 1));
     return counts;
   }, [matches]);
+
+  const weatherByCity = useMemo(() => {
+    const cityWeather = new Map<string, WorldCupCityWeather>();
+    weather.forEach((item) => cityWeather.set(item.cityId, item));
+    return cityWeather;
+  }, [weather]);
 
   const importantCityIds = useMemo(() => {
     const ids = new Set<string>(['mexico-city', 'new-york-new-jersey', 'dallas', 'los-angeles']);
@@ -84,6 +110,7 @@ export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, select
     || null;
   const activeMatches = activePoint ? matches.filter((match) => match.cityId === activePoint.city.id) : [];
   const nextCityMatch = activePoint ? activeMatches.find((match) => match.id === nextMatch?.id) || activeMatches.find((match) => match.status === 'scheduled') : null;
+  const activeWeather = activePoint ? weatherByCity.get(activePoint.city.id) || null : null;
 
   return (
     <div className="wm-worldcup-map">
@@ -99,7 +126,7 @@ export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, select
           </radialGradient>
         </defs>
         <rect width={VIEWBOX_WIDTH} height={VIEWBOX_HEIGHT} fill="url(#wmWcSea)" />
-        <g transform={transform}>
+        <g>
           <path className="wm-worldcup-land" d={path(world) || ''} />
           <path className="wm-worldcup-graticule" d="M0 0" />
           {cityPoints.map((point) => {
@@ -127,12 +154,12 @@ export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, select
                   }
                 }}
               >
-                <circle className="halo" r={selected ? 20 : 13} />
-                <circle className="dot" r={selected ? 6 : 4.4} />
+                <circle className="halo" r={selected ? 54 : next ? 42 : 28} />
+                <circle className="dot" r={selected ? 10 : 7.5} />
                 {showLabel ? (
                   <>
-                    <text x="9" y="-8">{compactCityName(point.city.city)}</text>
-                    <text className="meta" x="9" y="6">{statusLabel(point.status)} · {point.count}</text>
+                    <text x="17" y="-9">{compactCityName(point.city.city)}</text>
+                    <text className="meta" x="17" y="10">{statusLabel(point.status)} · {point.count}</text>
                   </>
                 ) : null}
               </g>
@@ -153,13 +180,38 @@ export function WorldCupMap({ cities, matches, nextMatch, selectedCityId, select
           <span>SELECTED HOST CITY</span>
           <strong>{activePoint.city.city}</strong>
           <em>{activePoint.city.venue} · {activePoint.city.countryName}</em>
-          <div>
-            <b>{activePoint.count}</b>
-            <small>matches</small>
-            <b>{activePoint.city.capacity ? `${Math.round(activePoint.city.capacity / 1000)}k` : '--'}</b>
-            <small>capacity</small>
+          <div className="wm-worldcup-city-card-stats">
+            <span><b>{activePoint.count}</b><small>matches</small></span>
+            <span><b>{activePoint.city.capacity ? `${Math.round(activePoint.city.capacity / 1000)}k` : '--'}</b><small>capacity</small></span>
+            <span><b>{activeWeather ? `${activeWeather.current.tempC}°` : '--'}</b><small>{activeWeather?.current.condition || 'weather'}</small></span>
+            <span><b>{activeWeather?.current.windKph ? `${activeWeather.current.windKph}` : '--'}</b><small>wind kph</small></span>
           </div>
-          {nextCityMatch ? <p>{nextCityMatch.homeTeam} vs {nextCityMatch.awayTeam} · {nextCityMatch.kickoffLocal}</p> : null}
+          {nextCityMatch ? (
+            <section className="wm-worldcup-city-card-next">
+              <span>NEXT MATCH</span>
+              <strong>{matchTitle(nextCityMatch)}</strong>
+              <em>#{nextCityMatch.fifaMatchNumber || '--'} · {shortKickoff(nextCityMatch)} · {nextCityMatch.status.toUpperCase()}</em>
+            </section>
+          ) : null}
+          {activeWeather ? (
+            <section className="wm-worldcup-city-card-forecast">
+              {activeWeather.forecast.slice(0, 3).map((item) => (
+                <span key={item.date}>
+                  <b>{item.date.slice(5)}</b>
+                  <small>{item.lowC}°/{item.highC}° · {item.condition}</small>
+                </span>
+              ))}
+            </section>
+          ) : null}
+          <section className="wm-worldcup-city-card-matches">
+            {activeMatches.slice(0, 4).map((match) => (
+              <p key={match.id}>
+                <b>#{match.fifaMatchNumber || '--'}</b>
+                <span>{matchTitle(match)}</span>
+                <em>{shortKickoff(match)}</em>
+              </p>
+            ))}
+          </section>
         </aside>
       ) : null}
       <div className="wm-worldcup-map-legend">
