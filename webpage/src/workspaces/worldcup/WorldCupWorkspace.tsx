@@ -16,7 +16,6 @@ import type {
   WorldCupPolymarketMarket,
   WorldCupWorkspaceProps,
 } from './types';
-import './worldcup-panel-skin.css';
 
 type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
 
@@ -485,24 +484,38 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
         />
       </section>
 
-      <section className="wm-worldcup-grid">
-        <SchedulePanel
-          matches={payload.matches}
-          selectedMatchId={selectedMatch?.id || null}
-          filter={filter}
-          now={now}
-          onFilter={setFilter}
-          onSelectMatch={(match) => {
-            setSelectedMatchId(match.id);
-            setSelectedCityId(match.cityId);
-          }}
-        />
-        <MatchPanel match={selectedMatch} markets={selectedMarkets} />
-        <NewsPanel items={news} />
-        <WeatherPanel payload={payload} selectedCityId={selectedCityId} onSelectCity={setSelectedCityId} />
-        <PolymarketPanel markets={selectedMarkets} />
-        <RostersPanel payload={payload} match={selectedMatch} />
-        <OddsPanel odds={selectedOdds.length ? selectedOdds : payload.odds} polymarket={selectedMarkets} />
+      <section className="wm-worldcup-panel-matrix">
+        <div className="wm-worldcup-matrix-cell">
+          <SchedulePanel
+            matches={payload.matches}
+            selectedMatchId={selectedMatch?.id || null}
+            filter={filter}
+            now={now}
+            onFilter={setFilter}
+            onSelectMatch={(match) => {
+              setSelectedMatchId(match.id);
+              setSelectedCityId(match.cityId);
+            }}
+          />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <MatchPanel match={selectedMatch} markets={selectedMarkets} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <NewsPanel items={news} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <WeatherPanel payload={payload} selectedCityId={selectedCityId} onSelectCity={setSelectedCityId} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <PolymarketPanel markets={selectedMarkets} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <RostersPanel payload={payload} match={selectedMatch} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <OddsPanel odds={selectedOdds.length ? selectedOdds : payload.odds} polymarket={selectedMarkets} />
+        </div>
       </section>
     </main>
   );
