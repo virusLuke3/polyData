@@ -11,6 +11,7 @@ import { WorldCupMap } from './WorldCupMap';
 import type {
   WorldCupDashboardPayload,
   WorldCupMatch,
+  WorldCupNewsItem,
   WorldCupOddsSnapshot,
   WorldCupPolymarketMarket,
   WorldCupWorkspaceProps,
@@ -98,6 +99,17 @@ function kickoffTime(match: WorldCupMatch) {
 function probabilityWidth(value?: number | null) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
   return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
+}
+
+function newsTags(item: WorldCupNewsItem) {
+  const text = `${item.title} ${item.summary || ''}`.toLowerCase();
+  const tags: Array<{ label: string; tone: string }> = [];
+  if (/(alert|risk|delay|storm|injur|security|crisis)/.test(text)) tags.push({ label: 'ALERT', tone: 'red' });
+  if (/(market|odds|price|trading|polymarket)/.test(text)) tags.push({ label: 'MARKET', tone: 'purple' });
+  if (/(weather|storm|heat|rain|travel)/.test(text)) tags.push({ label: 'WEATHER', tone: 'blue' });
+  if (/(squad|team|player|coach|roster)/.test(text)) tags.push({ label: 'TEAM', tone: 'gold' });
+  if (!tags.length) tags.push({ label: 'WATCH', tone: 'gray' });
+  return tags.slice(0, 2);
 }
 
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
@@ -228,7 +240,12 @@ function NewsPanel({ items }: { items: ReturnType<typeof filterWorldCupNews> }) 
       <div className="wm-worldcup-feed">
         {items.map((item) => (
           <a className="wm-worldcup-feed-row" href={item.url || '#'} key={item.id} target={item.url === '#' ? undefined : '_blank'} rel="noreferrer">
-            <span>{item.source}</span>
+            <div className="wm-worldcup-feed-meta">
+              <span>{item.source}</span>
+              {newsTags(item).map((tag) => (
+                <b className={`wm-worldcup-feed-tag ${tag.tone}`} key={`${item.id}-${tag.label}`}>{tag.label}</b>
+              ))}
+            </div>
             <strong>{item.title}</strong>
             <em>{item.summary || 'Monitoring World Cup-linked market context.'}</em>
           </a>
