@@ -1,0 +1,143 @@
+import type { ContentItem, MarketGroupItem, RuntimeGlobalWeatherMapPayload } from '@/types';
+
+export type WorldCupStage =
+  | 'group'
+  | 'round32'
+  | 'round16'
+  | 'quarterfinal'
+  | 'semifinal'
+  | 'third_place'
+  | 'final';
+
+export type WorldCupMatchStatus = 'scheduled' | 'live' | 'finished' | 'postponed' | 'cancelled';
+
+export type WorldCupVenueCity = {
+  id: string;
+  city: string;
+  country: 'US' | 'CA' | 'MX';
+  countryName: string;
+  venue: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+  capacity?: number;
+};
+
+export type WorldCupMatch = {
+  id: string;
+  fifaMatchNumber?: number;
+  stage: WorldCupStage;
+  group?: string;
+  round: string;
+  kickoffUtc: string;
+  kickoffBeijing: string;
+  kickoffLocal: string;
+  cityId: string;
+  city: string;
+  venue: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore?: number;
+  awayScore?: number;
+  status: WorldCupMatchStatus;
+  minute?: string;
+  marketLinked?: boolean;
+  oddsLinked?: boolean;
+};
+
+export type WorldCupNewsItem = {
+  id: string;
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+  summary?: string;
+  teams?: string[];
+  cityId?: string;
+  matchId?: string;
+};
+
+export type WorldCupCityWeather = {
+  cityId: string;
+  current: {
+    tempC: number;
+    condition: string;
+    windKph?: number;
+    precipitationProbability?: number;
+  };
+  forecast: Array<{
+    date: string;
+    highC: number;
+    lowC: number;
+    condition: string;
+    precipitationProbability?: number;
+  }>;
+  generatedAt: string;
+};
+
+export type WorldCupPolymarketMarket = {
+  matchId?: string;
+  eventId?: string | number | null;
+  marketId?: number | null;
+  slug?: string | null;
+  title: string;
+  confidence: number;
+  source: 'local-db' | 'gamma' | 'manual' | 'inferred';
+  outcomes: Array<{
+    name: string;
+    yesPrice?: number | null;
+    volume24h?: number | null;
+  }>;
+  volume24h?: number | null;
+  liquidity?: number | null;
+};
+
+export type WorldCupTeamRoster = {
+  team: string;
+  updatedAt: string;
+  players: Array<{
+    name: string;
+    position?: string;
+    club?: string;
+    number?: number;
+    status?: 'confirmed' | 'probable' | 'injured' | 'reserve';
+  }>;
+};
+
+export type WorldCupOddsSnapshot = {
+  matchId: string;
+  provider: string;
+  providerType: 'traditional_sportsbook' | 'online_bookmaker' | 'exchange' | 'prediction_market';
+  marketType: 'moneyline' | 'total_goals' | 'advance' | 'outright';
+  outcomes: Array<{
+    name: string;
+    decimalOdds?: number;
+    impliedProbability?: number;
+  }>;
+  generatedAt: string;
+};
+
+export type WorldCupDashboardPayload = {
+  generatedAt: string;
+  cacheMode: 'seed' | 'remote' | 'fallback';
+  tournament: {
+    id: 'fifa-world-cup-2026';
+    name: string;
+    startsAt: string;
+    endsAt: string;
+    timezone: 'Asia/Shanghai';
+  };
+  cities: WorldCupVenueCity[];
+  matches: WorldCupMatch[];
+  news: WorldCupNewsItem[];
+  weather: WorldCupCityWeather[];
+  rosters: WorldCupTeamRoster[];
+  odds: WorldCupOddsSnapshot[];
+};
+
+export type WorldCupWorkspaceProps = {
+  now: Date;
+  marketGroups: MarketGroupItem[];
+  latestContent: ContentItem[];
+  weatherPayload?: RuntimeGlobalWeatherMapPayload | null;
+};

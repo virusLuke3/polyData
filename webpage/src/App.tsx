@@ -7,6 +7,7 @@ import { WeatherMapCityInspector } from '@/components/WeatherMapCityInspector';
 import { WorldGlobe } from '@/components/WorldGlobe';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { fetchPanelRuntimeData, getRefreshablePanels, mergeRuntimeData } from '@/panels/runtime-store';
+import { WorldCupWorkspace } from '@/workspaces/worldcup/WorldCupWorkspace';
 import {
   fetchAllActiveMarkets,
   fetchBootstrap,
@@ -66,6 +67,7 @@ const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v1';
 const MARKET_GROUP_SORT_STORAGE_KEY = 'wm:marketGroupSort:v1';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v2';
+const WORKSPACE_MODE_STORAGE_KEY = 'polydata:workspace-mode:v1';
 const REGION_STORAGE_KEY = 'polydata:region:v1';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const ZOOM_STORAGE_KEY = 'polydata:map-zoom:v2';
@@ -119,6 +121,7 @@ const PANEL_MAX_COL_SPAN = 3;
 
 type PanelLayoutPrefs = Record<string, { rowSpan?: number; colSpan?: number }>;
 type PanelSizeHint = 'default' | 'wide' | 'tall' | undefined;
+type WorkspaceMode = 'world' | 'worldcup';
 
 function clampSpan(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -315,6 +318,13 @@ function readSearchParam(key: string): string | null {
 function readMarketGroupSortStorage(): MarketGroupSort {
   const saved = readStringStorage<string>(MARKET_GROUP_SORT_STORAGE_KEY, 'active');
   return saved === 'new' || saved === 'volume' || saved === 'active' ? saved : 'active';
+}
+
+function readWorkspaceMode(): WorkspaceMode {
+  const override = readSearchParam('workspace');
+  if (override === 'worldcup') return 'worldcup';
+  const saved = readStringStorage<string>(WORKSPACE_MODE_STORAGE_KEY, 'world');
+  return saved === 'worldcup' ? 'worldcup' : 'world';
 }
 
 function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {
@@ -851,6 +861,7 @@ export function App() {
   const [layerQuery, setLayerQuery] = useState('');
   const [commandQuery, setCommandQuery] = useState('');
   const [layers, setLayers] = useState<LayerToggle[]>(INITIAL_LAYERS);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() => readWorkspaceMode());
   const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
   const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {}));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
@@ -1053,6 +1064,18 @@ export function App() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(MARKET_GROUP_SORT_STORAGE_KEY, marketGroupSort);
   }, [marketGroupSort]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(WORKSPACE_MODE_STORAGE_KEY, workspaceMode);
+    const url = new URL(window.location.href);
+    if (workspaceMode === 'worldcup') {
+      url.searchParams.set('workspace', 'worldcup');
+    } else {
+      url.searchParams.delete('workspace');
+    }
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [workspaceMode]);
 
   useEffect(() => {
     bootstrapRef.current = bootstrap;
@@ -1715,7 +1738,24 @@ export function App() {
       <header className="wm-toolbar">
         <div className="wm-toolbar-left">
           <div className="wm-nav-cluster">
-            <button className="wm-nav-pill active" type="button" onClick={resetWorkspace}>World</button>
+            <button
+              className={`wm-nav-pill ${workspaceMode === 'world' ? 'active' : ''}`}
+              type="button"
+              onClick={() => {
+                setWorkspaceMode('world');
+                resetWorkspace();
+              }}
+            >
+              World
+            </button>
+            <button
+              className={`wm-nav-icon wm-nav-icon-worldcup ${workspaceMode === 'worldcup' ? 'active' : ''}`}
+              type="button"
+              onClick={() => setWorkspaceMode('worldcup')}
+              title="World Cup"
+            >
+              ⚽
+            </button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowCommandPalette(true)} title="Command palette">⌨</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowPanelLibrary((current) => !current)} title="Toggle panel library">◫</button>
             <button className="wm-nav-icon" type="button" onClick={() => setShowSettings(true)} title="Open settings">⚒</button>
@@ -1737,6 +1777,14 @@ export function App() {
         </div>
       </header>
 
+      {workspaceMode === 'worldcup' ? (
+        <WorldCupWorkspace
+          now={now}
+          marketGroups={marketGroups}
+          latestContent={currentLatestContent}
+          weatherPayload={(runtimeData['global-temperature-monitor'] as RuntimeGlobalWeatherMapPayload | undefined) || null}
+        />
+      ) : (
       <main className="wm-dashboard">
         <div className="wm-main-content">
         <section className="wm-map-section">
@@ -1936,6 +1984,7 @@ export function App() {
         </section>
         </div>
       </main>
+      )}
 
       {showCommandPalette ? (
         <div className="wm-modal-backdrop" onClick={() => setShowCommandPalette(false)}>
