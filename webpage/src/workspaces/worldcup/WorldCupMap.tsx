@@ -72,8 +72,8 @@ const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
 const HOST_ATLAS_BOUNDS = {
   type: 'Feature',
   geometry: {
-    type: 'Polygon',
-    coordinates: [[[-141, 12], [-52, 12], [-52, 73], [-141, 73], [-141, 12]]],
+    type: 'MultiPoint',
+    coordinates: [[-132, 12], [-55, 50]],
   },
   properties: {},
 } as any;
