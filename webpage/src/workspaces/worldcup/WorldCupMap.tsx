@@ -60,7 +60,7 @@ function firstSymbolLayerId(map: MapLibreMap) {
 }
 
 function buildWorldMonitorRasterStyle(): StyleSpecification | string {
-  return 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+  return '/map-styles/worldcup-happy-dark.json';
 }
 
 function buildWorldCupMapStyle(): StyleSpecification {
