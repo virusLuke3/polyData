@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
-import { getWeatherMapFallbackStyle, getWeatherMapStyle } from '@/config/weatherBasemap';
+import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
+import { feature } from 'topojson-client';
+import countriesAtlas from 'world-atlas/countries-50m.json';
 import type { WorldCupCityWeather, WorldCupMatch, WorldCupVenueCity } from './types';
 
 type WorldCupMapProps = {
@@ -23,7 +24,87 @@ type WorldCupMapPoint = {
   visible: boolean;
 };
 
+type WorldCupMapLabel = {
+  id: string;
+  text: string;
+  lon: number;
+  lat: number;
+  size?: 'small' | 'normal' | 'large';
+};
+
+type WorldCupScreenLabel = WorldCupMapLabel & {
+  x: number;
+  y: number;
+  visible: boolean;
+};
+
 const IMPORTANT_CITY_IDS = new Set(['mexico-city', 'new-york-new-jersey', 'dallas', 'los-angeles']);
+
+const COUNTRY_LABELS: WorldCupMapLabel[] = [
+  { id: 'us', text: 'UNITED STATES', lon: -101, lat: 38, size: 'large' },
+  { id: 'ca', text: 'CANADA', lon: -104, lat: 57, size: 'large' },
+  { id: 'mx', text: 'MEXICO', lon: -102, lat: 23, size: 'normal' },
+  { id: 'greenland', text: 'GREENLAND', lon: -42, lat: 72, size: 'normal' },
+  { id: 'cuba', text: 'CUBA', lon: -78, lat: 21.5, size: 'small' },
+  { id: 'guatemala', text: 'GUATEMALA', lon: -90, lat: 15.6, size: 'small' },
+  { id: 'colombia', text: 'COLOMBIA', lon: -73, lat: 4, size: 'small' },
+  { id: 'brazil', text: 'BRAZIL', lon: -53, lat: -9, size: 'normal' },
+  { id: 'uk', text: 'UNITED KINGDOM', lon: -3, lat: 55, size: 'small' },
+  { id: 'fr', text: 'FRANCE', lon: 2, lat: 46, size: 'small' },
+  { id: 'es', text: 'SPAIN', lon: -4, lat: 40, size: 'small' },
+  { id: 'ma', text: 'MOROCCO', lon: -6, lat: 31, size: 'small' },
+  { id: 'ng', text: 'NIGERIA', lon: 8, lat: 9, size: 'small' },
+];
+
+const COUNTRIES_GEOJSON = feature(countriesAtlas as any, (countriesAtlas as any).objects.countries) as any;
+
+function buildWorldCupMapStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      countries: {
+        type: 'geojson',
+        data: COUNTRIES_GEOJSON,
+      },
+    },
+    layers: [
+      {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#050606' },
+      },
+      {
+        id: 'country-fill',
+        type: 'fill',
+        source: 'countries',
+        paint: {
+          'fill-color': '#143628',
+          'fill-opacity': 0.82,
+        },
+      },
+      {
+        id: 'country-border',
+        type: 'line',
+        source: 'countries',
+        paint: {
+          'line-color': '#315846',
+          'line-opacity': 0.72,
+          'line-width': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            1,
+            0.35,
+            4,
+            0.85,
+            7,
+            1.45,
+          ],
+        },
+      },
+    ],
+  };
+}
 
 function cityStatus(cityId: string, matches: WorldCupMatch[]) {
   const cityMatches = matches.filter((match) => match.cityId === cityId);
@@ -71,6 +152,22 @@ function projectPoints(
       x: projected.x,
       y: projected.y,
       visible: projected.x > -120 && projected.x < width + 120 && projected.y > -90 && projected.y < height + 90,
+    };
+  });
+}
+
+function projectLabels(map: MapLibreMap | null, labels: WorldCupMapLabel[]): WorldCupScreenLabel[] {
+  if (!map) return [];
+  const canvas = map.getCanvas();
+  const width = canvas.clientWidth || canvas.width;
+  const height = canvas.clientHeight || canvas.height;
+  return labels.map((label) => {
+    const projected = map.project([label.lon, label.lat]);
+    return {
+      ...label,
+      x: projected.x,
+      y: projected.y,
+      visible: projected.x > -100 && projected.x < width + 100 && projected.y > -60 && projected.y < height + 60,
     };
   });
 }
@@ -129,6 +226,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const [mapReady, setMapReady] = useState(false);
   const [mapDegraded, setMapDegraded] = useState(false);
   const [screenPoints, setScreenPoints] = useState<WorldCupMapPoint[]>([]);
+  const [screenLabels, setScreenLabels] = useState<WorldCupScreenLabel[]>([]);
 
   const weatherByCity = useMemo(() => {
     const index = new Map<string, WorldCupCityWeather>();
@@ -156,7 +254,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     if (!host || mapRef.current) return undefined;
     const map = new maplibregl.Map({
       container: host,
-      style: getWeatherMapStyle('dark-matter'),
+      style: buildWorldCupMapStyle(),
       center: [-96, 39],
       zoom: 2.65,
       minZoom: 1.85,
@@ -174,6 +272,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     const syncPoints = () => {
       setScreenPoints(projectPoints(map, citiesRef.current, matchesRef.current, weatherByCityRef.current));
+      setScreenLabels(projectLabels(map, COUNTRY_LABELS));
     };
     const resizeAndSync = () => {
       map.resize();
@@ -194,19 +293,13 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     map.on('resize', syncPoints);
     map.on('styledata', resizeAndSync);
 
-    let tileErrorCount = 0;
     const onError = (event: { error?: Error; message?: string }) => {
       const message = event.error?.message || event.message || '';
-      if (!message || fallbackAppliedRef.current) return;
-      if (/Failed to fetch|AJAXError|CORS|NetworkError|403|Forbidden/i.test(message)) {
-        tileErrorCount += 1;
-        if (tileErrorCount >= 2) {
-          fallbackAppliedRef.current = true;
-          setMapDegraded(true);
-          map.setStyle(getWeatherMapFallbackStyle('dark'), { diff: false });
-          window.requestAnimationFrame(resizeAndSync);
-        }
+      if (!message || fallbackAppliedRef.current) {
+        return;
       }
+      fallbackAppliedRef.current = true;
+      setMapDegraded(true);
     };
     map.on('error', onError);
 
@@ -231,12 +324,24 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
   useEffect(() => {
     setScreenPoints(projectPoints(mapRef.current, cities, matches, weatherByCity));
+    setScreenLabels(projectLabels(mapRef.current, COUNTRY_LABELS));
   }, [cities, matches, selectedCityId, weatherByCity]);
 
   return (
     <div ref={rootRef} className={`wm-worldcup-map wm-worldcup-maplibre ${mapReady ? 'ready' : ''} ${mapDegraded ? 'degraded' : ''}`}>
       <div ref={mapHostRef} className="wm-worldcup-maplibre-host" />
       <LayerPanel />
+      <div className="wm-worldcup-map-country-label-layer">
+        {screenLabels.filter((label) => label.visible).map((label) => (
+          <span
+            className={`wm-worldcup-map-country-label ${label.size || 'normal'}`}
+            key={label.id}
+            style={{ transform: `translate(${Math.round(label.x)}px, ${Math.round(label.y)}px)` }}
+          >
+            {label.text}
+          </span>
+        ))}
+      </div>
       <div className="wm-worldcup-map-point-layer">
         {screenPoints.filter((point) => point.visible).map((point) => {
           const selected = point.city.id === selectedCityId || point.city.id === selectedMatch?.cityId;
