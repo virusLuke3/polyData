@@ -59,65 +59,8 @@ function firstSymbolLayerId(map: MapLibreMap) {
   return layers.find((layer) => layer.type === 'symbol')?.id;
 }
 
-function buildWorldMonitorRasterStyle(): StyleSpecification {
-  return {
-    version: 8,
-    sources: {
-      countries: {
-        type: 'geojson',
-        data: COUNTRIES_GEOJSON,
-      },
-      cartoDark: {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-          'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-          'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-          'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-        ],
-        tileSize: 256,
-        attribution: '© CARTO © OpenStreetMap contributors',
-      },
-    },
-    layers: [
-      {
-        id: 'background',
-        type: 'background',
-        paint: { 'background-color': '#121415' },
-      },
-      {
-        id: 'country-fill-base',
-        type: 'fill',
-        source: 'countries',
-        paint: {
-          'fill-color': '#191b1c',
-          'fill-opacity': 0.9,
-        },
-      },
-      {
-        id: 'country-border-base',
-        type: 'line',
-        source: 'countries',
-        paint: {
-          'line-color': '#303435',
-          'line-opacity': 0.68,
-          'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.3, 4, 1.1],
-        },
-      },
-      {
-        id: 'carto-dark-raster',
-        type: 'raster',
-        source: 'cartoDark',
-        paint: {
-          'raster-opacity': 1,
-          'raster-saturation': -0.12,
-          'raster-contrast': 0.08,
-          'raster-brightness-min': 0,
-          'raster-brightness-max': 0.92,
-        },
-      },
-    ],
-  };
+function buildWorldMonitorRasterStyle(): StyleSpecification | string {
+  return 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 }
 
 function buildWorldCupMapStyle(): StyleSpecification {
@@ -354,7 +297,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       container: host,
       style: buildWorldMonitorRasterStyle(),
       center: [-96, 39],
-      zoom: 2.55,
+      zoom: 2.72,
       minZoom: 1.85,
       maxZoom: 7,
       maxBounds: [[-172, 5], [-38, 84]],
