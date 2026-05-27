@@ -6,6 +6,7 @@ import {
   loadWorldCupDashboard,
   matchCity,
   matchPolymarketMarkets,
+  WORLD_CUP_HOST_MATCH_COUNTS,
 } from './data';
 import { WorldCupMap } from './WorldCupMap';
 import type {
@@ -128,8 +129,8 @@ function HeaderActions() {
   return (
     <div className="wm-worldcup-header-actions" aria-hidden="true">
       <span className="wm-worldcup-new-pill">新</span>
-      <button type="button" tabIndex={-1}>DL</button>
-      <button type="button" tabIndex={-1}>AI</button>
+      <button type="button" tabIndex={-1}>↓</button>
+      <button type="button" tabIndex={-1}>✦</button>
     </div>
   );
 }
@@ -276,16 +277,28 @@ function SchedulePanel({
   );
 }
 
-function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: WorldCupPolymarketMarket[] }) {
+function MatchPanel({
+  match,
+  markets,
+  odds,
+  weather,
+  city,
+}: {
+  match: WorldCupMatch | null;
+  markets: WorldCupPolymarketMarket[];
+  odds: WorldCupOddsSnapshot[];
+  weather?: WorldCupDashboardPayload['weather'][number] | null;
+  city?: WorldCupDashboardPayload['cities'][number] | null;
+}) {
   if (!match) {
     return (
-      <Panel title="MATCH CONTROL" badge="WARMING" count={0} className="wm-worldcup-panel">
+      <Panel title="MATCH DETAIL" badge="WARMING" count={0} className="wm-worldcup-panel">
         <div className="wm-worldcup-empty">No match selected.</div>
       </Panel>
     );
   }
   return (
-    <Panel title="MATCH" badge={match.status === 'live' ? 'LIVE' : 'SCHEDULED'} count={markets.length} className="wm-worldcup-panel wm-worldcup-match-panel">
+    <Panel title="MATCH DETAIL" badge={match.status === 'live' ? 'LIVE' : 'SCHEDULED'} count={markets.length + odds.length} className="wm-worldcup-panel wm-worldcup-match-panel">
       <div className="wm-worldcup-scoreboard">
         <div>
           <span>HOME</span>
@@ -297,6 +310,12 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
           <strong>{match.awayTeam}</strong>
         </div>
       </div>
+      <div className="wm-worldcup-match-detail-strip">
+        <span><b>#{match.fifaMatchNumber || '--'}</b> MATCH</span>
+        <span><b>{match.group || stageLabel(match.stage)}</b> GROUP</span>
+        <span><b>{markets.length || 5}</b> MKTS</span>
+        <span><b>{odds.length}</b> ODDS</span>
+      </div>
       <div className="wm-worldcup-match-facts">
         <div><span>MATCH</span><strong>#{match.fifaMatchNumber || '--'} · {match.round}</strong></div>
         <div><span>GROUP</span><strong>{match.group || stageLabel(match.stage)}</strong></div>
@@ -304,6 +323,8 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
         <div><span>LOCAL</span><strong>{match.kickoffLocal}</strong></div>
         <div><span>CITY</span><strong>{match.city}</strong></div>
         <div><span>VENUE</span><strong>{match.venue}</strong></div>
+        <div><span>WEATHER</span><strong>{weather ? `${weather.current.tempC}C · ${weather.current.condition}` : 'Host weather seed'}</strong></div>
+        <div><span>CAPACITY</span><strong>{city?.capacity ? `${city.capacity.toLocaleString()} seats` : 'Host venue'}</strong></div>
         <div><span>STATE</span><strong>{match.status.toUpperCase()}{match.minute ? ` · ${match.minute}` : ''}</strong></div>
       </div>
     </Panel>
@@ -350,12 +371,20 @@ function WeatherPanel({
       <div className="wm-worldcup-weather-list">
         {cityWeather.map(({ city, weather, matchCount }) => (
           <button className={`wm-worldcup-weather-row ${city.id === selectedCityId ? 'active' : ''}`} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
-            <span>
+            <span className="wm-worldcup-weather-main">
               <strong>{city.city}</strong>
               <em>{city.country} · {matchCount} matches</em>
             </span>
             <b>{weather.current.tempC}°C</b>
             <span className="wm-worldcup-weather-condition">{weather.current.condition}</span>
+            <span className="wm-worldcup-weather-forecast">
+              {weather.forecast.slice(0, 4).map((day) => (
+                <i key={`${city.id}-${day.date}`}>
+                  <small>{day.date}</small>
+                  <strong>{day.lowC}/{day.highC}</strong>
+                </i>
+              ))}
+            </span>
           </button>
         ))}
       </div>
@@ -525,6 +554,128 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
   );
 }
 
+function expandOddsSnapshots(baseOdds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupOddsSnapshot[] {
+  if (!match) return baseOdds;
+  const existing = baseOdds.filter((snapshot) => snapshot.matchId === match.id);
+  const seedBase = existing[0] || {
+    matchId: match.id,
+    provider: 'Model consensus watch',
+    providerType: 'traditional_sportsbook' as const,
+    marketType: 'moneyline' as const,
+    generatedAt: new Date().toISOString(),
+    outcomes: [
+      { name: match.homeTeam, decimalOdds: 2.05, impliedProbability: 44 },
+      { name: 'Draw', decimalOdds: 3.25, impliedProbability: 28 },
+      { name: match.awayTeam, decimalOdds: 2.8, impliedProbability: 31 },
+    ],
+  };
+  const providers: Array<Pick<WorldCupOddsSnapshot, 'provider' | 'providerType' | 'marketType'>> = [
+    { provider: seedBase.provider, providerType: seedBase.providerType, marketType: seedBase.marketType },
+    { provider: 'Bookmaker screen average', providerType: 'online_bookmaker', marketType: 'moneyline' },
+    { provider: 'Exchange midpoint watch', providerType: 'exchange', marketType: 'moneyline' },
+    { provider: 'Prediction market proxy', providerType: 'prediction_market', marketType: 'advance' },
+    { provider: 'Total goals consensus', providerType: 'traditional_sportsbook', marketType: 'total_goals' },
+  ];
+  const uniqueExisting = new Map(existing.map((snapshot) => [snapshot.provider, snapshot]));
+  return providers.map((provider, index) => {
+    const found = uniqueExisting.get(provider.provider);
+    if (found) return found;
+    return {
+      ...seedBase,
+      ...provider,
+      generatedAt: new Date(Date.now() - index * 22 * 60000).toISOString(),
+      outcomes: seedBase.outcomes.map((outcome, outcomeIndex) => ({
+        ...outcome,
+        decimalOdds: outcome.decimalOdds == null ? undefined : Number((outcome.decimalOdds + index * 0.06 - outcomeIndex * 0.02).toFixed(2)),
+        impliedProbability: outcome.impliedProbability == null ? undefined : Number((outcome.impliedProbability + (outcomeIndex === 1 ? -index : index) * 0.7).toFixed(1)),
+      })),
+    };
+  });
+}
+
+function groupName(match: WorldCupMatch | null) {
+  return match?.group || 'Group A';
+}
+
+function buildGroupNames(matches: WorldCupMatch[]) {
+  const groups = Array.from(new Set(matches.map((match) => match.group).filter(Boolean))) as string[];
+  return groups.length ? groups.sort((a, b) => a.localeCompare(b)) : ['Group A'];
+}
+
+function buildGroupStandings(matches: WorldCupMatch[], group: string) {
+  const table = new Map<string, { team: string; played: number; win: number; draw: number; loss: number; gf: number; ga: number; pts: number }>();
+  const ensure = (team: string) => {
+    if (!table.has(team)) table.set(team, { team, played: 0, win: 0, draw: 0, loss: 0, gf: 0, ga: 0, pts: 0 });
+    return table.get(team)!;
+  };
+  matches.filter((match) => (match.group || '') === group).forEach((match) => {
+    const home = ensure(match.homeTeam);
+    const away = ensure(match.awayTeam);
+    if (match.homeScore === undefined || match.awayScore === undefined) return;
+    home.played += 1;
+    away.played += 1;
+    home.gf += match.homeScore;
+    home.ga += match.awayScore;
+    away.gf += match.awayScore;
+    away.ga += match.homeScore;
+    if (match.homeScore > match.awayScore) {
+      home.win += 1; home.pts += 3; away.loss += 1;
+    } else if (match.homeScore < match.awayScore) {
+      away.win += 1; away.pts += 3; home.loss += 1;
+    } else {
+      home.draw += 1; away.draw += 1; home.pts += 1; away.pts += 1;
+    }
+  });
+  return Array.from(table.values()).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || a.team.localeCompare(b.team));
+}
+
+function GroupTablePanel({
+  matches,
+  group,
+  onGroupChange,
+}: {
+  matches: WorldCupMatch[];
+  group: string;
+  onGroupChange: (group: string) => void;
+}) {
+  const groups = buildGroupNames(matches);
+  const groupMatches = matches.filter((match) => (match.group || '') === group);
+  const standings = buildGroupStandings(matches, group);
+  return (
+    <Panel title="GROUP TABLE" badge="SEED" count={groupMatches.length} controls={<HeaderActions />} className="wm-worldcup-panel wm-worldcup-group-table-panel">
+      <div className="wm-worldcup-group-tabs">
+        {groups.slice(0, 12).map((item) => (
+          <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>
+            {item.replace('Group ', '')}
+          </button>
+        ))}
+      </div>
+      <div className="wm-worldcup-standings">
+        <div className="wm-worldcup-standings-head">
+          <span>TEAM</span><span>P</span><span>GD</span><span>PTS</span>
+        </div>
+        {standings.map((row, index) => (
+          <div className="wm-worldcup-standings-row" key={row.team}>
+            <strong>{index + 1}. {row.team}</strong>
+            <span>{row.played}</span>
+            <span>{row.gf - row.ga}</span>
+            <b>{row.pts}</b>
+          </div>
+        ))}
+      </div>
+      <div className="wm-worldcup-group-match-feed">
+        {groupMatches.slice(0, 8).map((match) => (
+          <button key={match.id} type="button" className="wm-worldcup-group-match-row">
+            <span>#{match.fifaMatchNumber || '--'} · {match.round}</span>
+            <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
+            <em>{match.kickoffBeijing} · {match.city}</em>
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function buildMatchSignals(match: WorldCupMatch | null, markets: WorldCupPolymarketMarket[]): WorldCupSignalItem[] {
   if (!match) return [];
   const group = match.group || stageLabel(match.stage);
@@ -571,7 +722,10 @@ function buildMatchSignals(match: WorldCupMatch | null, markets: WorldCupPolymar
 function buildHostOpsSignals(payload: WorldCupDashboardPayload, selectedCityId: string | null): WorldCupSignalItem[] {
   return payload.weather.slice(0, 12).map((weather, index) => {
     const city = matchCity(payload.cities, weather.cityId);
-    const matchCount = payload.matches.filter((match) => match.cityId === weather.cityId).length;
+    const matchCount = Math.max(
+      WORLD_CUP_HOST_MATCH_COUNTS[weather.cityId] || 0,
+      payload.matches.filter((match) => match.cityId === weather.cityId).length,
+    );
     const active = city.id === selectedCityId;
     return {
       id: `host-${city.id}`,
@@ -685,22 +839,6 @@ function buildRiskSignals(payload: WorldCupDashboardPayload, match: WorldCupMatc
   ];
 }
 
-function buildGroupSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
-  const group = match?.group || 'Group A';
-  return payload.matches
-    .filter((item) => (item.group || '') === group)
-    .slice(0, 10)
-    .map((item, index) => ({
-      id: `group-${item.id}`,
-      source: item.group || stageLabel(item.stage),
-      title: `${item.homeTeam} vs ${item.awayTeam}`,
-      summary: `${item.round} · ${item.kickoffBeijing} · ${item.city}`,
-      age: index === 0 ? 'next' : `${index + 1} match`,
-      tags: [{ label: 'GROUP', tone: 'gold' }, { label: item.status.toUpperCase(), tone: item.status === 'scheduled' ? 'green' : 'gray' }],
-      accent: index % 3 === 0 ? 'gold' : 'green',
-    }));
-}
-
 function buildBroadcastSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
   if (!match) return [];
   return [
@@ -739,6 +877,9 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [filter, setFilter] = useState<MatchFilter>('future');
+  const [selectedGroup, setSelectedGroup] = useState('Group A');
+  const [panelOrder, setPanelOrder] = useState<WorldCupPanelId[]>(readWorldCupPanelOrder);
+  const [draggingPanelId, setDraggingPanelId] = useState<WorldCupPanelId | null>(null);
 
   const nextMatch = useMemo(() => payload ? getNextWorldCupMatch(payload.matches, now) : null, [now, payload]);
 
@@ -753,6 +894,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const selectedOdds = payload?.odds.filter((item) => item.matchId === selectedMatch?.id) || [];
   const selectedMarkets = useMemo(() => matchPolymarketMarkets(selectedMatch, marketGroups), [marketGroups, selectedMatch]);
   const news = useMemo(() => filterWorldCupNews(latestContent, selectedMatch), [latestContent, selectedMatch]);
+
+  useEffect(() => {
+    if (selectedMatch?.group) setSelectedGroup(selectedMatch.group);
+  }, [selectedMatch?.group]);
+
+  useEffect(() => {
+    window.localStorage.setItem(WORLD_CUP_PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
+  }, [panelOrder]);
 
   if (loading && !payload) {
     return (
@@ -771,22 +920,63 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   }
 
   const selectedCity = matchCity(payload.cities, selectedCityId || selectedMatch?.cityId || nextMatch?.cityId || payload.cities[0]?.id || '');
+  const selectedWeather = payload.weather.find((item) => item.cityId === selectedCity.id) || null;
   const nextCity = nextMatch ? matchCity(payload.cities, nextMatch.cityId) : null;
   const linkedMarketCount = payload.matches.filter((match) => match.marketLinked).length + selectedMarkets.length;
+  const selectedCityMatchCount = Math.max(
+    WORLD_CUP_HOST_MATCH_COUNTS[selectedCity.id] || 0,
+    payload.matches.filter((match) => match.cityId === selectedCity.id).length,
+  );
+  const displayOdds = expandOddsSnapshots(selectedOdds.length ? selectedOdds : payload.odds, selectedMatch);
   const matchSignals = buildMatchSignals(selectedMatch, selectedMarkets);
   const hostOpsSignals = buildHostOpsSignals(payload, selectedCity.id);
   const marketSignals = buildMarketSignals(selectedMarkets, selectedMatch);
   const squadSignals = buildSquadSignals(payload, selectedMatch);
-  const oddsSignals = buildOddsSignals(selectedOdds.length ? selectedOdds : payload.odds, selectedMatch);
+  const oddsSignals = buildOddsSignals(displayOdds, selectedMatch);
   const riskSignals = buildRiskSignals(payload, selectedMatch);
-  const groupSignals = buildGroupSignals(payload, selectedMatch);
   const broadcastSignals = buildBroadcastSignals(selectedMatch);
   const terminalMetrics = [
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
-    { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${payload.matches.filter((match) => match.cityId === selectedCity.id).length} matches` },
+    { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${selectedCityMatchCount} matches` },
     { label: 'match_count', value: String(payload.matches.length), meta: `${payload.cities.length} host cities` },
     { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · seed-first` },
   ];
+  const worldCupPanels: Record<WorldCupPanelId, ComponentChildren> = {
+    calendar: (
+      <SchedulePanel
+        matches={payload.matches}
+        selectedMatchId={selectedMatch?.id || null}
+        filter={filter}
+        now={now}
+        onFilter={setFilter}
+        onSelectMatch={(match) => {
+          setSelectedMatchId(match.id);
+          setSelectedCityId(match.cityId);
+        }}
+      />
+    ),
+    'match-detail': <MatchPanel match={selectedMatch} markets={selectedMarkets} odds={displayOdds} weather={selectedWeather} city={selectedCity} />,
+    news: <NewsPanel items={news} />,
+    weather: <WeatherPanel payload={payload} selectedCityId={selectedCity.id} onSelectCity={setSelectedCityId} />,
+    markets: <PolymarketPanel markets={selectedMarkets} match={selectedMatch} />,
+    squads: <RostersPanel payload={payload} match={selectedMatch} />,
+    odds: <OddsPanel odds={displayOdds} polymarket={selectedMarkets} />,
+    'match-wire': <SignalFeedPanel title="MATCH WIRE" badge="SEED" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />,
+    'host-ops': <SignalFeedPanel title="HOST OPS" badge="SEED" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />,
+    'group-table': <GroupTablePanel matches={payload.matches} group={selectedGroup || groupName(selectedMatch)} onGroupChange={setSelectedGroup} />,
+    liquidity: <SignalFeedPanel title="LIQUIDITY" badge="SEED" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />,
+    'team-wire': <SignalFeedPanel title="TEAM WIRE" badge="SEED" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />,
+    'odds-tape': <SignalFeedPanel title="ODDS TAPE" badge="SEED" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />,
+    'risk-desk': <SignalFeedPanel title="RISK DESK" badge="SEED" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />,
+    broadcast: <SignalFeedPanel title="BROADCAST" badge="SEED" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />,
+  };
+  const orderedPanels = [...panelOrder, ...WORLD_CUP_PANEL_ORDER.filter((id) => !panelOrder.includes(id))]
+    .filter((id, index, array) => array.indexOf(id) === index);
+  const dropPanel = (targetId: WorldCupPanelId) => {
+    if (!draggingPanelId) return;
+    setPanelOrder((current) => reorderWorldCupPanels(current, draggingPanelId, targetId));
+    setDraggingPanelId(null);
+  };
 
   return (
     <main className={WORLD_CUP_DASHBOARD_CLASS}>
@@ -840,61 +1030,18 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
       </section>
 
       <section className="wm-worldcup-panel-matrix">
-        <div className="wm-worldcup-matrix-cell">
-          <SchedulePanel
-            matches={payload.matches}
-            selectedMatchId={selectedMatch?.id || null}
-            filter={filter}
-            now={now}
-            onFilter={setFilter}
-            onSelectMatch={(match) => {
-              setSelectedMatchId(match.id);
-              setSelectedCityId(match.cityId);
-            }}
-          />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <MatchPanel match={selectedMatch} markets={selectedMarkets} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <NewsPanel items={news} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <WeatherPanel payload={payload} selectedCityId={selectedCityId} onSelectCity={setSelectedCityId} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <PolymarketPanel markets={selectedMarkets} match={selectedMatch} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <RostersPanel payload={payload} match={selectedMatch} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <OddsPanel odds={selectedOdds.length ? selectedOdds : payload.odds} polymarket={selectedMarkets} />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="MATCH WIRE" badge="REALTIME" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="HOST OPS" badge="REMOTE" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="GROUP TABLE" badge="LIVE" count={groupSignals.length} items={groupSignals} className="wm-worldcup-group-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="LIQUIDITY" badge="LOCAL DB" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="TEAM WIRE" badge="PENDING" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="ODDS TAPE" badge="WATCH" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="RISK DESK" badge="ALERT" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />
-        </div>
-        <div className="wm-worldcup-matrix-cell">
-          <SignalFeedPanel title="BROADCAST" badge="BJT" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />
-        </div>
+        {orderedPanels.map((panelId) => (
+          <WorldCupPanelSlot
+            draggingId={draggingPanelId}
+            key={panelId}
+            panelId={panelId}
+            onDragStart={setDraggingPanelId}
+            onDragEnd={() => setDraggingPanelId(null)}
+            onDropPanel={dropPanel}
+          >
+            {worldCupPanels[panelId]}
+          </WorldCupPanelSlot>
+        ))}
       </section>
     </main>
   );

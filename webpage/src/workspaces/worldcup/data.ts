@@ -33,6 +33,25 @@ export const WORLD_CUP_CITIES: WorldCupVenueCity[] = [
   { id: 'vancouver', city: 'Vancouver', country: 'CA', countryName: 'Canada', venue: 'BC Place', latitude: 49.2767, longitude: -123.1119, timezone: 'America/Vancouver', capacity: 54500 },
 ];
 
+export const WORLD_CUP_HOST_MATCH_COUNTS: Record<string, number> = {
+  atlanta: 8,
+  boston: 7,
+  dallas: 9,
+  houston: 7,
+  'kansas-city': 6,
+  'los-angeles': 8,
+  miami: 7,
+  'new-york-new-jersey': 8,
+  philadelphia: 6,
+  'san-francisco': 6,
+  seattle: 6,
+  guadalajara: 4,
+  'mexico-city': 5,
+  monterrey: 4,
+  toronto: 6,
+  vancouver: 7,
+};
+
 const GROUND_TO_CITY_ID: Record<string, string> = {
   Atlanta: 'atlanta',
   'Boston (Foxborough)': 'boston',
@@ -209,7 +228,7 @@ export function filterWorldCupNews(content: ContentItem[], selected?: WorldCupMa
       const text = `${item.title || ''} ${item.summary || ''} ${item.source || ''}`.toLowerCase();
       return terms.some((term) => text.includes(term)) || selectedTerms.some((term) => text.includes(term));
     })
-    .slice(0, 12)
+    .slice(0, 18)
     .map((item, index) => ({
       id: String(item.id || item.url || `content-${index}`),
       title: item.title || 'World Cup intelligence item',
@@ -220,7 +239,7 @@ export function filterWorldCupNews(content: ContentItem[], selected?: WorldCupMa
       matchId: selected?.id,
     }));
   const seedItems = fallbackNews(selected);
-  if (items.length >= 8) return items;
+  if (items.length >= 12) return items.slice(0, 18);
   const seen = new Set(items.map((item) => `${item.source}:${item.title}`.toLowerCase()));
   return [
     ...items,
@@ -230,7 +249,7 @@ export function filterWorldCupNews(content: ContentItem[], selected?: WorldCupMa
       seen.add(key);
       return true;
     }),
-  ].slice(0, 10);
+  ].slice(0, 18);
 }
 
 export function matchPolymarketMarkets(match: WorldCupMatch | null, marketGroups: MarketGroupItem[]): WorldCupPolymarketMarket[] {
@@ -369,6 +388,62 @@ function fallbackNews(selected?: WorldCupMatch | null): WorldCupNewsItem[] {
       url: '#',
       publishedAt: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
       summary: 'Moneyline, draw pricing and liquidity gaps are compared against market watchlists.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-11',
+      title: `${group}: fixture congestion, rotation and suspension monitor`,
+      source: 'GROUP WIRE',
+      url: '#',
+      publishedAt: new Date(Date.now() - 20 * 3600 * 1000).toISOString(),
+      summary: 'The panel tracks rest days, group-table pressure and likely rotation windows.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-12',
+      title: `${city}: airport, hotel load and supporter movement watch`,
+      source: 'TRAVEL OPS',
+      url: '#',
+      publishedAt: new Date(Date.now() - 22 * 3600 * 1000).toISOString(),
+      summary: 'Host-city travel load is paired with weather and stadium ingress risk.',
+      cityId: selected?.cityId,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-13',
+      title: `${prefix}: referee assignment and disciplinary context pending`,
+      source: 'MATCH OPS',
+      url: '#',
+      publishedAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+      summary: 'Disciplinary history, referee style and game tempo are reserved for source enrichment.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-14',
+      title: `${venue}: pitch condition, roof status and local operations check`,
+      source: 'STADIUM OPS',
+      url: '#',
+      publishedAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+      summary: 'Venue state is surfaced next to market liquidity and squad availability.',
+      cityId: selected?.cityId,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-15',
+      title: `${prefix}: opening line, implied probability and spread drift`,
+      source: 'RATE DESK',
+      url: '#',
+      publishedAt: new Date(Date.now() - 28 * 3600 * 1000).toISOString(),
+      summary: 'Bookmaker sources, exchange midpoint and prediction-market proxy are compared.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-16',
+      title: `${prefix}: broadcast, time-zone and regional desk handoff`,
+      source: 'BJT DESK',
+      url: '#',
+      publishedAt: new Date(Date.now() - 30 * 3600 * 1000).toISOString(),
+      summary: 'Beijing desk, local desk and venue desk keep the same match card in sync.',
       matchId: selected?.id,
     },
   ];
