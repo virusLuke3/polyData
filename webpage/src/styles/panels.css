@@ -4112,7 +4112,7 @@ body.panel-resize-active iframe {
   top: 18px;
   width: min(390px, calc(100% - 318px));
   max-height: calc(100% - 88px);
-  overflow: hidden;
+  overflow: hidden auto;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(4, 5, 5, 0.82);
@@ -4157,7 +4157,7 @@ body.panel-resize-active iframe {
 
 .wm-worldcup-map-inspector-body {
   min-height: 0;
-  overflow: hidden auto;
+  overflow: visible;
 }
 
 .wm-worldcup-map-inspector.collapsed .wm-worldcup-map-inspector-body {
@@ -4386,6 +4386,12 @@ body.panel-resize-active iframe {
   display: grid;
   gap: 3px;
   transform: translateY(-50%);
+  transition: right 180ms ease, opacity 180ms ease;
+}
+
+.wm-worldcup-maplibre.inspector-open .wm-worldcup-map-controls {
+  right: 424px;
+  opacity: 0.82;
 }
 
 .wm-worldcup-map-controls button {

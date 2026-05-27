@@ -2,10 +2,11 @@ import type { PickingInfo } from '@deck.gl/core';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from 'maplibre-gl';
+import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
 import { OPENFREEMAP_DARK_STYLE } from '@/config/weatherBasemap';
+import { WORLD_CUP_HOST_MATCH_COUNTS } from './data';
 import type { WorldCupCityWeather, WorldCupMatch, WorldCupVenueCity } from './types';
 
 type WorldCupMapProps = {
@@ -37,6 +38,7 @@ type CitySignal = {
   selected: boolean;
   next: boolean;
   important: boolean;
+  plannedMatchCount: number;
   marketCount: number;
   oddsCount: number;
   weatherRisk: number;
@@ -73,8 +75,9 @@ const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
 const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
-const WORLDCUP_ATLAS_CENTER: [number, number] = [-95, 38];
-const WORLDCUP_ATLAS_ZOOM = 3.08;
+const WORLDCUP_REMOTE_FALLBACK_STYLE_URL = '/map-styles/worldcup-happy-dark.json';
+const WORLDCUP_ATLAS_CENTER: [number, number] = [-96, 34.8];
+const WORLDCUP_ATLAS_ZOOM = 3;
 const PMTILES_STYLE_URL = import.meta.env.VITE_WORLDCUP_PMTILES_STYLE_URL || import.meta.env.VITE_PMTILES_STYLE_URL || '';
 const NO_COUNTRY_MATCH = '__worldcup_no_country__';
 
@@ -96,12 +99,13 @@ const DEFAULT_ENABLED_LAYERS: EnabledLayers = {
 };
 
 const COLORS = {
-  city: [203, 210, 213, 222] as [number, number, number, number],
-  cityLine: [255, 255, 255, 208] as [number, number, number, number],
-  selected: [78, 214, 242, 232] as [number, number, number, number],
-  selectedDim: [78, 214, 242, 34] as [number, number, number, number],
-  next: [242, 184, 75, 230] as [number, number, number, number],
-  nextDim: [242, 184, 75, 34] as [number, number, number, number],
+  city: [218, 224, 226, 228] as [number, number, number, number],
+  cityLine: [255, 255, 255, 226] as [number, number, number, number],
+  selected: [62, 211, 244, 242] as [number, number, number, number],
+  selectedDim: [62, 211, 244, 38] as [number, number, number, number],
+  next: [255, 176, 45, 244] as [number, number, number, number],
+  nextDim: [255, 130, 20, 48] as [number, number, number, number],
+  nextOuter: [255, 88, 69, 36] as [number, number, number, number],
   weather: [55, 175, 220, 54] as [number, number, number, number],
   market: [98, 190, 255, 130] as [number, number, number, number],
   odds: [244, 183, 70, 148] as [number, number, number, number],
@@ -120,11 +124,41 @@ function applyWorldMonitorMapPaint(map: MapLibreMap) {
   layers.forEach((layer) => {
     if (layer.id.startsWith('country-') || layer.id.startsWith('wc-')) return;
     try {
-      if (layer.type === 'symbol') {
-        map.setPaintProperty(layer.id, 'text-color', '#949697');
+      if (layer.type === 'background') {
+        map.setPaintProperty(layer.id, 'background-color', '#151515');
+        map.setPaintProperty(layer.id, 'background-opacity', 1);
+      } else if (layer.type === 'fill') {
+        const id = layer.id.toLowerCase();
+        if (id.includes('water') || id.includes('ocean')) {
+          map.setPaintProperty(layer.id, 'fill-color', '#202020');
+          map.setPaintProperty(layer.id, 'fill-opacity', 1);
+        } else if (id.includes('park') || id.includes('landcover') || id.includes('landuse')) {
+          map.setPaintProperty(layer.id, 'fill-color', '#1d1f1f');
+          map.setPaintProperty(layer.id, 'fill-opacity', 0.92);
+        } else {
+          map.setPaintProperty(layer.id, 'fill-color', '#252626');
+          map.setPaintProperty(layer.id, 'fill-opacity', 0.88);
+        }
+      } else if (layer.type === 'line') {
+        const id = layer.id.toLowerCase();
+        const isBoundary = id.includes('boundary') || id.includes('admin') || id.includes('country') || id.includes('state');
+        map.setPaintProperty(layer.id, 'line-color', isBoundary ? '#8a8f91' : '#4a4d4e');
+        map.setPaintProperty(layer.id, 'line-opacity', isBoundary
+          ? ['interpolate', ['linear'], ['zoom'], 2, 0.34, 3, 0.5, 5, 0.68]
+          : ['interpolate', ['linear'], ['zoom'], 2, 0.08, 4, 0.18, 7, 0.34]);
+        map.setPaintProperty(layer.id, 'line-width', isBoundary
+          ? ['interpolate', ['linear'], ['zoom'], 2, 0.78, 3, 1.05, 5, 1.4]
+          : ['interpolate', ['linear'], ['zoom'], 2, 0.28, 5, 0.68, 8, 1.05]);
+      } else if (layer.type === 'raster') {
+        map.setPaintProperty(layer.id, 'raster-opacity', 0.62);
+        map.setPaintProperty(layer.id, 'raster-saturation', -1);
+        map.setPaintProperty(layer.id, 'raster-brightness-min', 0.04);
+        map.setPaintProperty(layer.id, 'raster-brightness-max', 0.42);
+      } else if (layer.type === 'symbol') {
+        map.setPaintProperty(layer.id, 'text-color', '#818486');
         map.setPaintProperty(layer.id, 'text-halo-color', '#050505');
-        map.setPaintProperty(layer.id, 'text-halo-width', 1.8);
-        map.setPaintProperty(layer.id, 'text-opacity', ['interpolate', ['linear'], ['zoom'], 2, 0.55, 3, 0.72, 5, 0.86]);
+        map.setPaintProperty(layer.id, 'text-halo-width', 1.9);
+        map.setPaintProperty(layer.id, 'text-opacity', ['interpolate', ['linear'], ['zoom'], 2, 0.52, 3, 0.7, 5, 0.84]);
       }
     } catch {
       // Some third-party style layers do not expose every paint property.
@@ -157,45 +191,6 @@ function localizeBasemapLabels(map: MapLibreMap, language = 'en') {
       // Third-party styles can contain non-localizable symbol layers.
     }
   });
-}
-
-function buildLocalFallbackStyle(): StyleSpecification {
-  return {
-    version: 8,
-    glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-    sources: {
-      countries: {
-        type: 'geojson',
-        data: LOCAL_WORLD_COUNTRIES_GEOJSON_URL,
-      },
-    },
-    layers: [
-      {
-        id: 'background',
-        type: 'background',
-        paint: { 'background-color': '#090909' },
-      },
-      {
-        id: 'country-fill',
-        type: 'fill',
-        source: 'countries',
-        paint: {
-          'fill-color': '#2b2b2b',
-          'fill-opacity': 0.94,
-        },
-      },
-      {
-        id: 'country-border',
-        type: 'line',
-        source: 'countries',
-        paint: {
-          'line-color': '#a3a7a8',
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.5, 4, 0.68, 6, 0.82],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.9, 4, 1.28, 7, 1.62],
-        },
-      },
-    ],
-  };
 }
 
 function primaryBasemapStyle(): string {
@@ -394,12 +389,20 @@ function cityStatus(cityId: string, matches: WorldCupMatch[]) {
   return 'FINISHED';
 }
 
+function plannedMatchCount(cityId: string, matches: WorldCupMatch[]) {
+  return Math.max(WORLD_CUP_HOST_MATCH_COUNTS[cityId] || 0, matches.filter((match) => match.cityId === cityId).length);
+}
+
 function matchTitle(match: WorldCupMatch) {
   return `${match.homeTeam} vs ${match.awayTeam}`;
 }
 
 function shortKickoff(match: WorldCupMatch) {
   return match.kickoffLocal.replace(',', ' ·');
+}
+
+function shortBeijingKickoff(match: WorldCupMatch) {
+  return match.kickoffBeijing.replace(',', ' ·');
 }
 
 function escapeHtml(value: unknown) {
@@ -418,6 +421,13 @@ function weatherRiskScore(weather: WorldCupCityWeather | null) {
   const wind = weather.current.windKph || 0;
   const storm = /storm|rain|watch|humid/i.test(weather.current.condition) ? 18 : 0;
   return Math.min(100, precip + storm + Math.max(0, wind - 14));
+}
+
+function nextMatchRank(cityId: string, matches: WorldCupMatch[], nextMatch: WorldCupMatch | null) {
+  if (cityId === nextMatch?.cityId) return 0;
+  const upcoming = matches.filter((match) => match.status !== 'finished');
+  const index = upcoming.findIndex((match) => match.cityId === cityId);
+  return index >= 0 ? index + 1 : 999;
 }
 
 function offsetPoint(city: WorldCupVenueCity, index: number, radius = 0.33): [number, number] {
@@ -450,7 +460,8 @@ function buildCitySignals(
       nextMatch: cityNextMatch,
       selected: city.id === explicitSelectedCityId || (explicitMatchSelected && city.id === selectedFromMatch),
       next: city.id === nextMatch?.cityId,
-      important: IMPORTANT_CITY_IDS.has(city.id),
+      important: IMPORTANT_CITY_IDS.has(city.id) || nextMatchRank(city.id, matches, nextMatch) <= 4,
+      plannedMatchCount: plannedMatchCount(city.id, matches),
       marketCount: cityMatches.filter((match) => match.marketLinked).length,
       oddsCount: cityMatches.filter((match) => match.oddsLinked).length,
       weatherRisk: weatherRiskScore(weather),
@@ -593,7 +604,7 @@ function buildDeckLayers(
   zoom: number,
 ) {
   const layers = [];
-  const showDenseLabels = zoom >= 3.35;
+  const showDenseLabels = zoom >= 2.85;
 
   if (enabledLayers.schedule) {
     layers.push(new PathLayer<SchedulePath>({
@@ -678,14 +689,27 @@ function buildDeckLayers(
 
   if (enabledLayers.cities) {
     layers.push(new ScatterplotLayer<CitySignal>({
+      id: 'wc-next-host-city-pulse-layer',
+      data: citySignals.filter((signal) => signal.next),
+      getPosition: (d) => [d.city.longitude, d.city.latitude],
+      getRadius: 62000,
+      getFillColor: COLORS.nextOuter,
+      getLineColor: [255, 96, 54, 96],
+      radiusMinPixels: 18,
+      radiusMaxPixels: 38,
+      lineWidthMinPixels: 1.5,
+      stroked: true,
+      pickable: false,
+    }));
+    layers.push(new ScatterplotLayer<CitySignal>({
       id: 'wc-host-city-halo-layer',
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getRadius: (d) => d.selected ? 39000 : d.next ? 31000 : 19000,
+      getRadius: (d) => d.selected ? 42000 : d.next ? 50000 : 22000,
       getFillColor: (d) => d.selected ? COLORS.selectedDim : d.next ? COLORS.nextDim : [255, 255, 255, 18],
-      getLineColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : [255, 255, 255, 42],
-      radiusMinPixels: 7,
-      radiusMaxPixels: 22,
+      getLineColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : [255, 255, 255, 46],
+      radiusMinPixels: 8,
+      radiusMaxPixels: 28,
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: false,
@@ -694,12 +718,16 @@ function buildDeckLayers(
       id: 'wc-host-city-layer',
       data: citySignals,
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getRadius: (d) => 6400 + Math.min(17000, (d.city.capacity || 50000) / 5),
+      getRadius: (d) => {
+        if (d.next) return 30000;
+        if (d.selected) return 26000;
+        return 8500 + d.plannedMatchCount * 1550;
+      },
       getFillColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : COLORS.city,
-      getLineColor: COLORS.cityLine,
-      radiusMinPixels: 3,
-      radiusMaxPixels: 9,
-      lineWidthMinPixels: 1.25,
+      getLineColor: (d) => d.next ? [255, 244, 210, 245] : COLORS.cityLine,
+      radiusMinPixels: 5,
+      radiusMaxPixels: 15,
+      lineWidthMinPixels: 1.35,
       stroked: true,
       pickable: true,
     }));
@@ -707,12 +735,12 @@ function buildDeckLayers(
       id: 'wc-host-city-label-layer',
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important || showDenseLabels),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getText: (d) => `${compactCityName(d.city.city)}\n${cityStatus(d.city.id, d.matches)} - ${d.matches.length}`,
-      getSize: (d) => d.selected || d.next ? 13 : 10,
-      getColor: (d) => d.selected ? [255, 255, 255, 242] : [238, 241, 241, 216],
+      getText: (d) => `${compactCityName(d.city.city)}\n${d.next ? 'NEXT MATCH' : cityStatus(d.city.id, d.matches)} - ${d.plannedMatchCount}`,
+      getSize: (d) => d.selected || d.next ? 14 : d.important ? 11.5 : 10,
+      getColor: (d) => d.next ? [255, 235, 188, 246] : d.selected ? [225, 250, 255, 244] : [230, 234, 234, 205],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
-      getPixelOffset: [13, 5],
+      getPixelOffset: [14, 4],
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
       fontWeight: 900,
       lineHeight: 0.92,
@@ -729,7 +757,7 @@ function getDeckTooltip(info: PickingInfo<DeckObject>) {
   const obj = info.object;
   if (obj.type === 'host-city') {
     return {
-      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.city.city)}</strong><br/>${escapeHtml(obj.city.venue)}<br/>${obj.matches.length} matches · ${escapeHtml(obj.weather?.current.condition || 'weather seed')}</div>`,
+      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.city.city)}</strong><br/>${escapeHtml(obj.city.venue)}<br/>${obj.plannedMatchCount} matches · ${escapeHtml(obj.weather?.current.condition || 'weather seed')}</div>`,
     };
   }
   if (obj.type === 'schedule') {
@@ -825,6 +853,19 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   );
   const activeSignal = getActiveSignal(citySignals, selectedCityId, selectedMatchId, matches, nextMatch);
   const activeMatches = activeSignal?.matches || [];
+  const activeMatchSlots = useMemo(() => {
+    if (!activeSignal) return [];
+    const seeded = activeMatches.map((match) => ({ type: 'match' as const, match, key: match.id }));
+    const missingCount = Math.max(0, activeSignal.plannedMatchCount - seeded.length);
+    return [
+      ...seeded,
+      ...Array.from({ length: missingCount }, (_, index) => ({
+        type: 'slot' as const,
+        key: `${activeSignal.city.id}-slot-${index + 1}`,
+        slotNumber: seeded.length + index + 1,
+      })),
+    ];
+  }, [activeMatches, activeSignal]);
   const nextCityMatch = activeSignal?.nextMatch || null;
 
   const updateDeckLayers = () => {
@@ -937,6 +978,17 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     });
     mapRef.current = map;
 
+    let tileLoadOk = false;
+    let tileErrorCount = 0;
+
+    const markTileLoadOk = () => {
+      tileLoadOk = true;
+      if (styleTimeoutRef.current) {
+        window.clearTimeout(styleTimeoutRef.current);
+        styleTimeoutRef.current = null;
+      }
+    };
+
     const addDeck = () => {
       if (deckOverlayRef.current) return;
       const overlay = new MapboxOverlay({
@@ -963,6 +1015,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     };
 
     const loadSupport = () => {
+      markTileLoadOk();
       setMapReady(true);
       localizeBasemapLabels(map);
       applyWorldMonitorMapPaint(map);
@@ -990,12 +1043,10 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         cancelAnimationFrame(pulseRafRef.current);
         pulseRafRef.current = null;
       }
-      map.setStyle(buildLocalFallbackStyle(), { diff: false });
+      map.setStyle(WORLDCUP_REMOTE_FALLBACK_STYLE_URL, { diff: false });
       map.once('style.load', loadSupport);
     };
 
-    let tileLoadOk = false;
-    let tileErrorCount = 0;
     const onError = (event: { error?: Error; message?: string }) => {
       const message = event.error?.message || event.message || '';
       if (/Failed to fetch|AJAXError|CORS|NetworkError|403|Forbidden|ERR_EMPTY_RESPONSE|Could not load style/i.test(message)) {
@@ -1005,20 +1056,18 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     };
     const onData = (event: { dataType?: string }) => {
       if (event.dataType === 'source') {
-        tileLoadOk = true;
-        if (styleTimeoutRef.current) {
-          window.clearTimeout(styleTimeoutRef.current);
-          styleTimeoutRef.current = null;
-        }
+        markTileLoadOk();
       }
+    };
+    const onIdle = () => {
+      markTileLoadOk();
+      setMapReady(true);
+      updateDeckLayers();
     };
 
     map.on('load', loadSupport);
     map.on('style.load', loadSupport);
-    map.on('idle', () => {
-      setMapReady(true);
-      updateDeckLayers();
-    });
+    map.on('idle', onIdle);
     map.on('move', updateDeckLayers);
     map.on('zoom', updateDeckLayers);
     map.on('resize', updateDeckLayers);
@@ -1046,13 +1095,14 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       deckOverlayRef.current = null;
       map.off('error', onError);
       map.off('data', onData);
+      map.off('idle', onIdle);
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
   return (
-    <div ref={rootRef} className={`wm-worldcup-map wm-worldcup-maplibre ${mapReady ? 'ready' : ''} ${mapDegraded ? 'degraded' : ''}`}>
+    <div ref={rootRef} className={`wm-worldcup-map wm-worldcup-maplibre ${mapReady ? 'ready' : ''} ${mapDegraded ? 'degraded' : ''} ${inspectorOpen ? 'inspector-open' : ''}`}>
       <div ref={mapHostRef} className="wm-worldcup-maplibre-host" />
       <LayerPanel enabledLayers={enabledLayers} onToggle={toggleLayer} />
       {regionHover ? (
@@ -1069,7 +1119,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       {activeSignal ? (
         <aside className={`wm-worldcup-map-inspector ${inspectorOpen ? 'open' : 'collapsed'}`}>
           <div className="wm-worldcup-map-inspector-head">
-            <span>SELECTED HOST CITY</span>
+            <span>{activeSignal.next ? 'NEXT MATCH CITY' : 'SELECTED HOST CITY'}</span>
             <button type="button" onClick={() => setInspectorOpen((value) => !value)} aria-label="Toggle city inspector">
               {inspectorOpen ? '−' : '+'}
             </button>
@@ -1078,31 +1128,61 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
           <em>{activeSignal.city.venue} · {activeSignal.city.countryName}</em>
           <div className="wm-worldcup-map-inspector-body">
             <div className="wm-worldcup-map-inspector-stats">
-              <span><b>{activeSignal.matches.length}</b><small>MATCHES</small></span>
+              <span><b>{activeSignal.plannedMatchCount}</b><small>MATCHES</small></span>
               <span><b>{activeSignal.city.capacity ? `${Math.round(activeSignal.city.capacity / 1000)}k` : '--'}</b><small>CAPACITY</small></span>
               <span><b>{activeSignal.weather ? `${activeSignal.weather.current.tempC}°` : '--'}</b><small>{activeSignal.weather?.current.condition || 'WEATHER'}</small></span>
               <span><b>{activeSignal.weather?.current.windKph || '--'}</b><small>WIND KPH</small></span>
             </div>
             {nextCityMatch ? (
               <section className="wm-worldcup-map-inspector-next">
-                <span>NEXT MATCH</span>
+                <span>{nextCityMatch.id === nextMatch?.id ? 'NEXT TO KICK OFF' : 'NEXT CITY MATCH'}</span>
                 <strong>{matchTitle(nextCityMatch)}</strong>
-                <em>#{nextCityMatch.fifaMatchNumber || '--'} · {shortKickoff(nextCityMatch)} · {nextCityMatch.status.toUpperCase()}</em>
+                <em>#{nextCityMatch.fifaMatchNumber || '--'} · {shortKickoff(nextCityMatch)} local · {shortBeijingKickoff(nextCityMatch)} BJT · {nextCityMatch.status.toUpperCase()}</em>
               </section>
             ) : null}
             {activeSignal.weather ? (
-              <section className="wm-worldcup-map-inspector-forecast">
-                {activeSignal.weather.forecast.slice(0, 3).map((item) => (
-                  <span key={item.date}><b>{item.lowC}°/{item.highC}°</b><small>{item.condition}</small></span>
-                ))}
+              <section className="wm-worldcup-map-weather-card">
+                <div className="wm-worldcup-map-weather-now">
+                  <span>WEATHER WATCH</span>
+                  <strong>{activeSignal.weather.current.condition}</strong>
+                  <em>
+                    {activeSignal.weather.current.tempC}°C · wind {activeSignal.weather.current.windKph || '--'} kph
+                    · precip {activeSignal.weather.current.precipitationProbability ?? 0}%
+                  </em>
+                </div>
+                <div className="wm-worldcup-map-inspector-forecast">
+                  {activeSignal.weather.forecast.slice(0, 5).map((item) => (
+                    <span key={item.date}>
+                      <b>{item.lowC}°/{item.highC}°</b>
+                      <small>{item.date.replace(/^2026-/, '')} · {item.condition} · {item.precipitationProbability ?? 0}%</small>
+                    </span>
+                  ))}
+                </div>
+                <small className="wm-worldcup-map-weather-generated">updated {activeSignal.weather.generatedAt.replace('T', ' ').replace('Z', ' UTC')}</small>
               </section>
             ) : null}
             <section className="wm-worldcup-map-inspector-matches">
-              {activeMatches.slice(0, 5).map((match) => (
-                <p key={match.id}>
-                  <b>#{match.fifaMatchNumber || '--'}</b>
-                  <span>{matchTitle(match)}</span>
-                  <em>{shortKickoff(match)}</em>
+              <div className="wm-worldcup-map-inspector-section-title">
+                <span>FULL CITY MATCH CARD</span>
+                <b>{activeSignal.plannedMatchCount}</b>
+              </div>
+              {activeMatchSlots.map((slot) => slot.type === 'match' ? (
+                <p key={slot.key}>
+                  <b>#{slot.match.fifaMatchNumber || '--'}</b>
+                  <span>
+                    {matchTitle(slot.match)}
+                    <small>{slot.match.round} · {slot.match.venue}</small>
+                  </span>
+                  <em>{shortKickoff(slot.match)} local · {slot.match.status.toUpperCase()}</em>
+                </p>
+              ) : (
+                <p key={slot.key} className="pending">
+                  <b>#{slot.slotNumber}</b>
+                  <span>
+                    Host-city match slot
+                    <small>{activeSignal.city.venue} · runtime schedule pending</small>
+                  </span>
+                  <em>FIFA slot · SEED</em>
                 </p>
               ))}
             </section>
@@ -1118,7 +1198,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         <b className="weather" /> <em>Weather</em>
         <b className="market" /> <em>Markets</em>
       </div>
-      <div className="wm-worldcup-maplibre-status">{mapDegraded ? 'LOCAL FALLBACK' : 'WEBGL'}</div>
+      <div className="wm-worldcup-maplibre-status">{mapDegraded ? 'WEBGL FALLBACK' : 'WEBGL'}</div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { type ComponentChildren } from 'preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel, PanelLoading } from '@/components/Panel';
 import {
@@ -20,6 +21,22 @@ import type {
 
 type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
 type WorldCupSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
+type WorldCupPanelId =
+  | 'calendar'
+  | 'match-detail'
+  | 'news'
+  | 'weather'
+  | 'markets'
+  | 'squads'
+  | 'odds'
+  | 'match-wire'
+  | 'host-ops'
+  | 'group-table'
+  | 'liquidity'
+  | 'team-wire'
+  | 'odds-tape'
+  | 'risk-desk'
+  | 'broadcast';
 type WorldCupSignalItem = {
   id: string;
   source: string;
@@ -31,6 +48,46 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
+const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v2';
+const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
+  'calendar',
+  'match-detail',
+  'news',
+  'weather',
+  'markets',
+  'squads',
+  'odds',
+  'match-wire',
+  'host-ops',
+  'group-table',
+  'liquidity',
+  'team-wire',
+  'odds-tape',
+  'risk-desk',
+  'broadcast',
+];
+
+function readWorldCupPanelOrder(): WorldCupPanelId[] {
+  if (typeof window === 'undefined') return WORLD_CUP_PANEL_ORDER;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(WORLD_CUP_PANEL_ORDER_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed)) return WORLD_CUP_PANEL_ORDER;
+    const known = new Set(WORLD_CUP_PANEL_ORDER);
+    const ordered = parsed.filter((id): id is WorldCupPanelId => known.has(id));
+    return [...ordered, ...WORLD_CUP_PANEL_ORDER.filter((id) => !ordered.includes(id))];
+  } catch {
+    return WORLD_CUP_PANEL_ORDER;
+  }
+}
+
+function reorderWorldCupPanels(panelIds: WorldCupPanelId[], draggedId: WorldCupPanelId, targetId: WorldCupPanelId) {
+  if (draggedId === targetId) return panelIds;
+  const next = panelIds.filter((id) => id !== draggedId);
+  const targetIndex = next.indexOf(targetId);
+  if (targetIndex < 0) return panelIds;
+  next.splice(targetIndex, 0, draggedId);
+  return next;
+}
 
 function formatCountdown(match: WorldCupMatch | null, now: Date) {
   if (!match) return '--';
@@ -131,6 +188,49 @@ function HeaderActions() {
       <span className="wm-worldcup-new-pill">新</span>
       <button type="button" tabIndex={-1}>↓</button>
       <button type="button" tabIndex={-1}>✦</button>
+    </div>
+  );
+}
+
+function WorldCupPanelSlot({
+  panelId,
+  draggingId,
+  children,
+  onDragStart,
+  onDragEnd,
+  onDropPanel,
+}: {
+  panelId: WorldCupPanelId;
+  draggingId: WorldCupPanelId | null;
+  children: ComponentChildren;
+  onDragStart: (panelId: WorldCupPanelId) => void;
+  onDragEnd: () => void;
+  onDropPanel: (targetId: WorldCupPanelId) => void;
+}) {
+  return (
+    <div
+      className={`wm-worldcup-matrix-cell wm-worldcup-draggable-cell ${draggingId === panelId ? 'dragging-source' : ''}`}
+      data-worldcup-panel-id={panelId}
+      draggable
+      onDragStart={(event) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.wm-panel-header') || target.closest('button, a, input, select, textarea, [role="button"]')) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer?.setData('text/plain', panelId);
+        event.dataTransfer?.setDragImage(target.closest('.wm-worldcup-matrix-cell') || target, 18, 18);
+        onDragStart(panelId);
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        const dragged = event.dataTransfer?.getData('text/plain');
+        if (dragged) onDropPanel(panelId);
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -603,9 +703,9 @@ function buildGroupNames(matches: WorldCupMatch[]) {
 }
 
 function buildGroupStandings(matches: WorldCupMatch[], group: string) {
-  const table = new Map<string, { team: string; played: number; win: number; draw: number; loss: number; gf: number; ga: number; pts: number }>();
+  const table = new Map<string, { team: string; played: number; gf: number; ga: number; pts: number }>();
   const ensure = (team: string) => {
-    if (!table.has(team)) table.set(team, { team, played: 0, win: 0, draw: 0, loss: 0, gf: 0, ga: 0, pts: 0 });
+    if (!table.has(team)) table.set(team, { team, played: 0, gf: 0, ga: 0, pts: 0 });
     return table.get(team)!;
   };
   matches.filter((match) => (match.group || '') === group).forEach((match) => {
@@ -618,12 +718,11 @@ function buildGroupStandings(matches: WorldCupMatch[], group: string) {
     home.ga += match.awayScore;
     away.gf += match.awayScore;
     away.ga += match.homeScore;
-    if (match.homeScore > match.awayScore) {
-      home.win += 1; home.pts += 3; away.loss += 1;
-    } else if (match.homeScore < match.awayScore) {
-      away.win += 1; away.pts += 3; home.loss += 1;
-    } else {
-      home.draw += 1; away.draw += 1; home.pts += 1; away.pts += 1;
+    if (match.homeScore > match.awayScore) home.pts += 3;
+    else if (match.homeScore < match.awayScore) away.pts += 3;
+    else {
+      home.pts += 1;
+      away.pts += 1;
     }
   });
   return Array.from(table.values()).sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || a.team.localeCompare(b.team));
