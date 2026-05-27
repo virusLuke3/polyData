@@ -88,9 +88,9 @@ const HOST_COUNTRY_ISO2 = new Set(Object.values(HOST_COUNTRY_META).map((item) =>
 const DEFAULT_ENABLED_LAYERS: EnabledLayers = {
   cities: true,
   schedule: false,
-  weather: true,
-  markets: true,
-  odds: true,
+  weather: false,
+  markets: false,
+  odds: false,
   transit: false,
   teams: false,
 };
@@ -99,14 +99,14 @@ const COLORS = {
   city: [203, 210, 213, 222] as [number, number, number, number],
   cityLine: [255, 255, 255, 208] as [number, number, number, number],
   selected: [78, 214, 242, 232] as [number, number, number, number],
-  selectedDim: [78, 214, 242, 52] as [number, number, number, number],
+  selectedDim: [78, 214, 242, 34] as [number, number, number, number],
   next: [242, 184, 75, 230] as [number, number, number, number],
-  nextDim: [242, 184, 75, 48] as [number, number, number, number],
-  weather: [55, 175, 220, 68] as [number, number, number, number],
-  market: [98, 190, 255, 155] as [number, number, number, number],
-  odds: [244, 183, 70, 172] as [number, number, number, number],
-  transit: [155, 164, 166, 132] as [number, number, number, number],
-  team: [48, 218, 186, 122] as [number, number, number, number],
+  nextDim: [242, 184, 75, 34] as [number, number, number, number],
+  weather: [55, 175, 220, 54] as [number, number, number, number],
+  market: [98, 190, 255, 130] as [number, number, number, number],
+  odds: [244, 183, 70, 148] as [number, number, number, number],
+  transit: [155, 164, 166, 112] as [number, number, number, number],
+  team: [48, 218, 186, 98] as [number, number, number, number],
   route: [242, 184, 75, 72] as [number, number, number, number],
 };
 
@@ -125,28 +125,54 @@ function applyWorldMonitorMapPaint(map: MapLibreMap) {
       } else if (layer.type === 'fill') {
         const id = layer.id.toLowerCase();
         if (/water|ocean|lake|river/.test(id)) {
-          map.setPaintProperty(layer.id, 'fill-color', '#090909');
+          map.setPaintProperty(layer.id, 'fill-color', '#101010');
           map.setPaintProperty(layer.id, 'fill-opacity', 1);
         } else {
-          map.setPaintProperty(layer.id, 'fill-color', '#242424');
-          map.setPaintProperty(layer.id, 'fill-opacity', 0.94);
+          map.setPaintProperty(layer.id, 'fill-color', '#2d2d2d');
+          map.setPaintProperty(layer.id, 'fill-opacity', 0.92);
         }
       } else if (layer.type === 'line') {
         const id = layer.id.toLowerCase();
         const boundary = /boundary|admin|border|state|province/.test(id);
-        map.setPaintProperty(layer.id, 'line-color', boundary ? '#8b8f90' : '#55595a');
-        map.setPaintProperty(layer.id, 'line-opacity', boundary ? 0.52 : 0.28);
+        map.setPaintProperty(layer.id, 'line-color', boundary ? '#a5a8a9' : '#626566');
+        map.setPaintProperty(layer.id, 'line-opacity', boundary ? 0.6 : 0.32);
         if (boundary) {
-          map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 2, 0.72, 4, 1.1, 6, 1.48]);
+          map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 2, 0.9, 4, 1.35, 6, 1.72]);
         }
       } else if (layer.type === 'symbol') {
-        map.setPaintProperty(layer.id, 'text-color', '#8d8f90');
+        map.setPaintProperty(layer.id, 'text-color', '#949697');
         map.setPaintProperty(layer.id, 'text-halo-color', '#050505');
-        map.setPaintProperty(layer.id, 'text-halo-width', 1.6);
-        map.setPaintProperty(layer.id, 'text-opacity', ['interpolate', ['linear'], ['zoom'], 2, 0.48, 3, 0.66, 5, 0.82]);
+        map.setPaintProperty(layer.id, 'text-halo-width', 1.8);
+        map.setPaintProperty(layer.id, 'text-opacity', ['interpolate', ['linear'], ['zoom'], 2, 0.55, 3, 0.72, 5, 0.86]);
       }
     } catch {
       // Some third-party style layers do not expose every paint property.
+    }
+  });
+}
+
+function localizeBasemapLabels(map: MapLibreMap, language = 'zh') {
+  const style = map.getStyle();
+  const layers = style.layers || [];
+  const expression: any = [
+    'coalesce',
+    ['get', `name:${language}`],
+    ['get', 'name_zh'],
+    ['get', 'name:en'],
+    ['get', 'name_en'],
+    ['get', 'name'],
+  ];
+
+  layers.forEach((layer) => {
+    if (layer.type !== 'symbol') return;
+    try {
+      const textField = map.getLayoutProperty(layer.id, 'text-field');
+      if (!textField) return;
+      const serialized = typeof textField === 'string' ? textField : JSON.stringify(textField);
+      if (!/name/.test(serialized)) return;
+      map.setLayoutProperty(layer.id, 'text-field', expression);
+    } catch {
+      // Third-party styles can contain non-localizable symbol layers.
     }
   });
 }
@@ -172,8 +198,8 @@ function buildLocalFallbackStyle(): StyleSpecification {
         type: 'fill',
         source: 'countries',
         paint: {
-          'fill-color': '#202020',
-          'fill-opacity': 0.96,
+          'fill-color': '#2b2b2b',
+          'fill-opacity': 0.94,
         },
       },
       {
@@ -181,9 +207,9 @@ function buildLocalFallbackStyle(): StyleSpecification {
         type: 'line',
         source: 'countries',
         paint: {
-          'line-color': '#8a8f90',
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.44, 4, 0.62, 6, 0.76],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.72, 4, 1.05, 7, 1.42],
+          'line-color': '#a3a7a8',
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.5, 4, 0.68, 6, 0.82],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.9, 4, 1.28, 7, 1.62],
         },
       },
     ],
@@ -294,7 +320,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'country-boundaries',
       paint: {
         'fill-color': '#ffffff',
-        'fill-opacity': 0.05,
+        'fill-opacity': 0.055,
       },
       filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
@@ -304,8 +330,8 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'country-boundaries',
       paint: {
         'line-color': '#ffffff',
-        'line-opacity': 0.22,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.15, 4, 1.55, 6, 2.05],
+        'line-opacity': 0.28,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.35, 4, 1.85, 6, 2.35],
       },
       filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
@@ -314,7 +340,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       type: 'fill',
       source: 'country-boundaries',
       paint: {
-        'fill-color': 'rgba(59, 130, 246, 0)',
+        'fill-color': '#3b82f6',
         'fill-opacity': 0,
       },
       filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
@@ -324,9 +350,9 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       type: 'line',
       source: 'country-boundaries',
       paint: {
-        'line-color': 'rgba(59, 130, 246, 0)',
+        'line-color': '#3b82f6',
         'line-opacity': 0,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.05, 4, 1.5, 6, 1.9],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.35, 4, 1.85, 6, 2.25],
       },
       filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
@@ -337,7 +363,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'wc-host-countries',
       paint: {
         'fill-color': '#ffffff',
-        'fill-opacity': 0.018,
+        'fill-opacity': 0.012,
       },
     }, beforeId);
     addLayerSafe(map, {
@@ -346,8 +372,8 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'wc-host-countries',
       paint: {
         'line-color': '#ffffff',
-        'line-opacity': 0.12,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.8, 4, 1.15, 6, 1.45],
+        'line-opacity': 0.1,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 4, 1.05, 6, 1.35],
       },
     }, beforeId);
 
@@ -361,10 +387,10 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
     addSourceSafe(map, 'wc-canada-provinces', canada);
     addSourceSafe(map, 'wc-mexico-states', mexico);
     const adminPaint = {
-      'line-color': '#c5c9c9',
-      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.22, 3.5, 0.38, 6, 0.56],
+      'line-color': '#cdd0d1',
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.3, 3.5, 0.48, 6, 0.66],
       'line-dasharray': [3, 2],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.64, 4, 0.9, 6, 1.18],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.86, 4, 1.15, 6, 1.46],
     };
     addLayerSafe(map, { id: 'wc-us-state-lines', type: 'line', source: 'wc-us-states', paint: adminPaint }, beforeId);
     addLayerSafe(map, { id: 'wc-canada-province-lines', type: 'line', source: 'wc-canada-provinces', paint: adminPaint }, beforeId);
@@ -422,11 +448,12 @@ function buildCitySignals(
   matches: WorldCupMatch[],
   weatherByCity: Map<string, WorldCupCityWeather>,
   nextMatch: WorldCupMatch | null,
-  selectedCityId: string | null,
   selectedMatchId: string | null,
+  explicitSelectedCityId: string | null = null,
 ) {
   const selectedMatch = matches.find((match) => match.id === selectedMatchId) || null;
   const selectedFromMatch = selectedMatch?.cityId || null;
+  const explicitMatchSelected = !!selectedMatch && selectedMatch.id !== nextMatch?.id;
   return cities.map((city) => {
     const cityMatches = matches.filter((match) => match.cityId === city.id);
     const cityNextMatch = cityMatches.find((match) => match.id === nextMatch?.id)
@@ -439,7 +466,7 @@ function buildCitySignals(
       weather,
       matches: cityMatches,
       nextMatch: cityNextMatch,
-      selected: city.id === selectedCityId || city.id === selectedFromMatch,
+      selected: city.id === explicitSelectedCityId || (explicitMatchSelected && city.id === selectedFromMatch),
       next: city.id === nextMatch?.cityId,
       important: IMPORTANT_CITY_IDS.has(city.id),
       marketCount: cityMatches.filter((match) => match.marketLinked).length,
@@ -480,7 +507,7 @@ function buildDeckSignals(citySignals: CitySignal[], matches: WorldCupMatch[]) {
         sublabel: `${signal.weatherRisk.toFixed(0)} risk`,
         lon,
         lat,
-        weight: signal.weatherRisk,
+        weight: Math.min(70, signal.weatherRisk),
       };
     });
 
@@ -608,8 +635,8 @@ function buildDeckLayers(
       getFillColor: COLORS.weather,
       getLineColor: [72, 210, 255, 92],
       lineWidthMinPixels: 0.5,
-      radiusMinPixels: 5,
-      radiusMaxPixels: 22,
+      radiusMinPixels: 3,
+      radiusMaxPixels: 12,
       stroked: true,
       pickable: true,
     }));
@@ -622,8 +649,8 @@ function buildDeckLayers(
       getPosition: (d) => [d.lon, d.lat],
       getRadius: (d) => 6500 + d.weight * 2400,
       getFillColor: COLORS.market,
-      radiusMinPixels: 3,
-      radiusMaxPixels: 8,
+      radiusMinPixels: 2,
+      radiusMaxPixels: 6,
       pickable: true,
     }));
   }
@@ -635,8 +662,8 @@ function buildDeckLayers(
       getPosition: (d) => [d.lon, d.lat],
       getRadius: (d) => 6500 + d.weight * 2100,
       getFillColor: COLORS.odds,
-      radiusMinPixels: 3,
-      radiusMaxPixels: 9,
+      radiusMinPixels: 2,
+      radiusMaxPixels: 7,
       pickable: true,
     }));
   }
@@ -672,11 +699,11 @@ function buildDeckLayers(
       id: 'wc-host-city-halo-layer',
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getRadius: (d) => d.selected ? 52000 : d.next ? 36000 : 26000,
+      getRadius: (d) => d.selected ? 39000 : d.next ? 31000 : 19000,
       getFillColor: (d) => d.selected ? COLORS.selectedDim : d.next ? COLORS.nextDim : [255, 255, 255, 18],
       getLineColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : [255, 255, 255, 42],
-      radiusMinPixels: 10,
-      radiusMaxPixels: 30,
+      radiusMinPixels: 7,
+      radiusMaxPixels: 22,
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: false,
@@ -685,12 +712,12 @@ function buildDeckLayers(
       id: 'wc-host-city-layer',
       data: citySignals,
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getRadius: (d) => 9000 + Math.min(22000, (d.city.capacity || 50000) / 4),
+      getRadius: (d) => 6400 + Math.min(17000, (d.city.capacity || 50000) / 5),
       getFillColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : COLORS.city,
       getLineColor: COLORS.cityLine,
-      radiusMinPixels: 4,
-      radiusMaxPixels: 12,
-      lineWidthMinPixels: 1.5,
+      radiusMinPixels: 3,
+      radiusMaxPixels: 9,
+      lineWidthMinPixels: 1.25,
       stroked: true,
       pickable: true,
     }));
@@ -699,7 +726,7 @@ function buildDeckLayers(
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important || showDenseLabels),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
       getText: (d) => `${compactCityName(d.city.city)}\n${cityStatus(d.city.id, d.matches)} - ${d.matches.length}`,
-      getSize: (d) => d.selected || d.next ? 14 : 11,
+      getSize: (d) => d.selected || d.next ? 13 : 10,
       getColor: (d) => d.selected ? [255, 255, 255, 242] : [238, 241, 241, 216],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
@@ -811,7 +838,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   }, [weather]);
 
   const citySignals = useMemo(
-    () => buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedCityId, selectedMatchId),
+    () => buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
     [cities, matches, nextMatch, selectedCityId, selectedMatchId, weatherByCity],
   );
   const activeSignal = getActiveSignal(citySignals, selectedCityId, selectedMatchId, matches, nextMatch);
@@ -830,8 +857,8 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       current.matches,
       weatherIndex,
       current.nextMatch,
-      current.selectedCityId,
       current.selectedMatchId,
+      explicitSelectedCityRef.current,
     );
     overlay.setProps({
       layers: buildDeckLayers(currentCitySignals, buildDeckSignals(currentCitySignals, current.matches), enabledLayersRef.current, map.getZoom()),
@@ -851,8 +878,8 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       if (map.getLayer('country-highlight-border')) map.setFilter('country-highlight-border', filter);
       if (!map.getLayer('country-highlight-fill')) return;
       if (!iso2) {
-        map.setPaintProperty('country-highlight-fill', 'fill-color', 'rgba(59, 130, 246, 0)');
-        map.setPaintProperty('country-highlight-border', 'line-color', 'rgba(59, 130, 246, 0)');
+        map.setPaintProperty('country-highlight-fill', 'fill-color', '#3b82f6');
+        map.setPaintProperty('country-highlight-border', 'line-color', '#3b82f6');
         map.setPaintProperty('country-highlight-fill', 'fill-opacity', 0);
         map.setPaintProperty('country-highlight-border', 'line-opacity', 0);
         return;
@@ -899,7 +926,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     dataRef.current = { cities, matches, weather, nextMatch, selectedCityId, selectedMatchId };
     updateDeckLayers();
     const signal = getActiveSignal(
-      buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedCityId, selectedMatchId),
+      buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
       selectedCityId,
       selectedMatchId,
       matches,
@@ -943,7 +970,8 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
           explicitSelectedCityRef.current = city.id;
           onSelectCity(city.id);
           setInspectorOpen(true);
-          map.easeTo({ center: [city.longitude, city.latitude], zoom: Math.max(map.getZoom(), 3.15), duration: 520 });
+          const targetZoom = Math.min(3.35, Math.max(map.getZoom(), 3.04));
+          map.easeTo({ center: [city.longitude, city.latitude], zoom: targetZoom, duration: 360 });
         },
         onError: (error: Error) => console.warn('[WorldCupMap] deck overlay render warning:', error.message),
       });
@@ -954,6 +982,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     const loadSupport = () => {
       setMapReady(true);
+      localizeBasemapLabels(map);
       applyWorldMonitorMapPaint(map);
       loadMapSupportLayers(map, setRegionHover)
         .then(() => {
@@ -989,7 +1018,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       const message = event.error?.message || event.message || '';
       if (/Failed to fetch|AJAXError|CORS|NetworkError|403|Forbidden|ERR_EMPTY_RESPONSE|Could not load style/i.test(message)) {
         tileErrorCount += 1;
-        if (!tileLoadOk && tileErrorCount >= 2) switchToLocalFallback();
+        if (!tileLoadOk && tileErrorCount >= 4) switchToLocalFallback();
       }
     };
     const onData = (event: { dataType?: string }) => {
@@ -1016,7 +1045,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     styleTimeoutRef.current = window.setTimeout(() => {
       if (!tileLoadOk) switchToLocalFallback();
-    }, 9000);
+    }, 14000);
 
     const resizeObserver = new ResizeObserver(() => {
       window.requestAnimationFrame(() => {
