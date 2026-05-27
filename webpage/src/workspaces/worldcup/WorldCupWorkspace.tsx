@@ -18,6 +18,16 @@ import type {
 } from './types';
 
 type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
+type WorldCupSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
+type WorldCupSignalItem = {
+  id: string;
+  source: string;
+  title: string;
+  summary: string;
+  age: string;
+  tags: Array<{ label: string; tone: WorldCupSignalTone }>;
+  accent?: WorldCupSignalTone;
+};
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
 
@@ -114,8 +124,67 @@ function newsTags(item: WorldCupNewsItem) {
   return tags.slice(0, 2);
 }
 
+function HeaderActions() {
+  return (
+    <div className="wm-worldcup-header-actions" aria-hidden="true">
+      <span className="wm-worldcup-new-pill">新</span>
+      <button type="button" tabIndex={-1}>DL</button>
+      <button type="button" tabIndex={-1}>AI</button>
+    </div>
+  );
+}
+
 function InfoDot({ label }: { label: string }) {
   return <span className="wm-worldcup-info-dot" aria-label={label} title={label}>?</span>;
+}
+
+function SignalTags({ tags }: { tags: WorldCupSignalItem['tags'] }) {
+  return (
+    <>
+      {tags.slice(0, 3).map((tag) => (
+        <b className={`wm-worldcup-feed-tag ${tag.tone}`} key={`${tag.label}-${tag.tone}`}>{tag.label}</b>
+      ))}
+    </>
+  );
+}
+
+function SignalRow({ item }: { item: WorldCupSignalItem }) {
+  return (
+    <article className={`wm-worldcup-signal-row ${item.accent || item.tags[0]?.tone || 'gray'}`}>
+      <div className="wm-worldcup-feed-meta">
+        <span>{item.source}</span>
+        <SignalTags tags={item.tags} />
+      </div>
+      <strong>{item.title}</strong>
+      <em>{item.summary}</em>
+      <div className="wm-worldcup-signal-foot">
+        <span>{item.age}</span>
+        <button type="button" tabIndex={-1}>文</button>
+      </div>
+    </article>
+  );
+}
+
+function SignalFeedPanel({
+  title,
+  badge,
+  count,
+  items,
+  className,
+}: {
+  title: string;
+  badge: string;
+  count?: number;
+  items: WorldCupSignalItem[];
+  className: string;
+}) {
+  return (
+    <Panel title={title} badge={badge} count={count ?? items.length} controls={<HeaderActions />} className={`wm-worldcup-panel ${className}`}>
+      <div className="wm-worldcup-signal-list">
+        {items.map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
 }
 
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
@@ -456,6 +525,215 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
   );
 }
 
+function buildMatchSignals(match: WorldCupMatch | null, markets: WorldCupPolymarketMarket[]): WorldCupSignalItem[] {
+  if (!match) return [];
+  const group = match.group || stageLabel(match.stage);
+  return [
+    {
+      id: 'match-clock',
+      source: 'MATCH DESK',
+      title: `${match.homeTeam} vs ${match.awayTeam}: kickoff control and match state`,
+      summary: `${match.kickoffBeijing} Beijing · ${match.kickoffLocal} local · ${match.status.toUpperCase()}`,
+      age: 'live seed',
+      tags: [{ label: 'SCHEDULE', tone: 'green' }, { label: group, tone: 'gold' }],
+      accent: 'green',
+    },
+    {
+      id: 'match-venue',
+      source: 'VENUE OPS',
+      title: `${match.venue}: host venue readiness and pitch watch`,
+      summary: `${match.city}. Capacity, access load and pitch state are pinned for match-day operations.`,
+      age: '2h ago',
+      tags: [{ label: 'VENUE', tone: 'blue' }, { label: 'WATCH', tone: 'gray' }],
+      accent: 'blue',
+    },
+    {
+      id: 'match-market',
+      source: 'POLYDATA',
+      title: `${markets.length || 5} linked market candidates for selected fixture`,
+      summary: 'Winner, group points, lineup volatility and venue-risk baskets are compared for liquidity.',
+      age: 'seed',
+      tags: [{ label: 'MARKET', tone: 'purple' }, { label: 'LIQUIDITY', tone: 'gold' }],
+      accent: 'purple',
+    },
+    {
+      id: 'match-risk',
+      source: 'RISK WIRE',
+      title: `${match.homeTeam} / ${match.awayTeam}: late lineup and travel variance`,
+      summary: 'Roster windows, travel cadence and weather exposure can move pre-match probabilities.',
+      age: '4h ago',
+      tags: [{ label: 'ALERT', tone: 'red' }, { label: 'TEAM', tone: 'gold' }],
+      accent: 'red',
+    },
+  ];
+}
+
+function buildHostOpsSignals(payload: WorldCupDashboardPayload, selectedCityId: string | null): WorldCupSignalItem[] {
+  return payload.weather.slice(0, 12).map((weather, index) => {
+    const city = matchCity(payload.cities, weather.cityId);
+    const matchCount = payload.matches.filter((match) => match.cityId === weather.cityId).length;
+    const active = city.id === selectedCityId;
+    return {
+      id: `host-${city.id}`,
+      source: active ? 'SELECTED HOST' : 'HOST OPS',
+      title: `${city.city}: ${matchCount} matches, ${city.venue}`,
+      summary: `${weather.current.tempC}C · ${weather.current.condition} · wind ${weather.current.windKph || '--'} kph · rain ${weather.current.precipitationProbability || 0}%`,
+      age: `${index + 1}h ago`,
+      tags: [
+        { label: active ? 'ACTIVE' : 'REMOTE', tone: active ? 'green' : 'blue' },
+        { label: weather.current.condition.toUpperCase(), tone: /storm|rain/i.test(weather.current.condition) ? 'red' : 'gold' },
+      ],
+      accent: active ? 'green' : index % 3 === 0 ? 'blue' : 'gold',
+    } satisfies WorldCupSignalItem;
+  });
+}
+
+function buildMarketSignals(markets: WorldCupPolymarketMarket[], match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const displayMarkets = markets.length ? markets : seedPolymarketMarkets(match);
+  return displayMarkets.flatMap<WorldCupSignalItem>((market, marketIndex) => [
+    {
+      id: `market-${marketIndex}-headline`,
+      source: market.source.toUpperCase(),
+      title: market.title,
+      summary: `${Math.round(market.confidence * 100)} confidence · 24h volume ${formatCompact(market.volume24h)} · ${market.outcomes.length} outcomes`,
+      age: `${marketIndex + 1}h ago`,
+      tags: [{ label: 'MARKET', tone: 'purple' }, { label: 'LOCAL DB', tone: 'green' }],
+      accent: marketIndex % 2 ? 'blue' : 'purple',
+    },
+    {
+      id: `market-${marketIndex}-price`,
+      source: 'PRICE WATCH',
+      title: market.outcomes.slice(0, 3).map((outcome) => `${outcome.name} ${outcome.yesPrice == null ? '--' : `${(outcome.yesPrice * 100).toFixed(1)}%`}`).join(' · '),
+      summary: 'Outcome spread is tracked against sportsbook consensus and news volatility.',
+      age: 'now',
+      tags: [{ label: 'ODDS', tone: 'gold' }, { label: 'SPREAD', tone: 'blue' }],
+      accent: 'gold',
+    },
+  ]).slice(0, 10);
+}
+
+function buildSquadSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const teams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 2).map((roster) => roster.team);
+  const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
+  return rosters.flatMap((roster) => roster.players.map((player, index) => ({
+    id: `squad-${roster.team}-${player.name}`,
+    source: roster.team,
+    title: player.name,
+    summary: `${player.position || 'ALL'} · ${player.club || player.status || 'pending official announcement'}`,
+    age: index ? 'reserve' : 'seed',
+    tags: [
+      { label: player.status?.toUpperCase() || 'PENDING', tone: player.status === 'injured' ? 'red' : 'gold' },
+      { label: 'TEAM', tone: 'green' },
+    ],
+    accent: player.status === 'injured' ? 'red' : 'blue',
+  } satisfies WorldCupSignalItem))).slice(0, 8);
+}
+
+function buildOddsSignals(odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const snapshots = odds.length ? odds : [];
+  return snapshots.slice(0, 8).map((snapshot, index) => ({
+    id: `odds-${snapshot.matchId}-${snapshot.provider}-${index}`,
+    source: snapshot.providerType.replace('_', ' ').toUpperCase(),
+    title: snapshot.provider,
+    summary: snapshot.outcomes.map((outcome) => `${outcome.name} ${formatNumber(outcome.decimalOdds, 2)} / ${formatNumber(outcome.impliedProbability, 1)}%`).join(' · '),
+    age: match ? match.kickoffBeijing : 'seed',
+    tags: [{ label: 'WATCH', tone: 'green' }, { label: snapshot.marketType.toUpperCase(), tone: 'purple' }],
+    accent: index % 2 ? 'purple' : 'blue',
+  }));
+}
+
+function buildRiskSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const selected = match || payload.matches[0] || null;
+  const weather = selected ? payload.weather.find((item) => item.cityId === selected.cityId) : null;
+  return [
+    {
+      id: 'risk-weather',
+      source: 'WEATHER RISK',
+      title: selected ? `${selected.city}: ${weather?.current.condition || 'host conditions'} before kickoff` : 'Host weather monitor',
+      summary: `Temperature ${weather?.current.tempC ?? '--'}C · precipitation ${weather?.current.precipitationProbability ?? 0}% · wind ${weather?.current.windKph ?? '--'} kph.`,
+      age: 'live',
+      tags: [{ label: 'ALERT', tone: /storm|rain/i.test(weather?.current.condition || '') ? 'red' : 'gold' }, { label: 'WEATHER', tone: 'blue' }],
+      accent: /storm|rain/i.test(weather?.current.condition || '') ? 'red' : 'gold',
+    },
+    {
+      id: 'risk-travel',
+      source: 'TRAVEL DESK',
+      title: selected ? `${selected.homeTeam} and ${selected.awayTeam}: rest-window and transit check` : 'Team travel watch',
+      summary: 'Travel distance, local timezone adjustment and recovery windows are monitored as pre-match signals.',
+      age: '3h ago',
+      tags: [{ label: 'TRAVEL', tone: 'blue' }, { label: 'TEAM', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'risk-security',
+      source: 'SECURITY',
+      title: 'Venue perimeter, crowd ingress and broadcast operations',
+      summary: 'Operational readiness and match-day crowd load are tracked alongside market and squad context.',
+      age: '6h ago',
+      tags: [{ label: 'WATCH', tone: 'gray' }, { label: 'OPS', tone: 'green' }],
+      accent: 'green',
+    },
+    {
+      id: 'risk-market',
+      source: 'VOL WATCH',
+      title: 'Liquidity shock monitor for team news and weather drift',
+      summary: 'Late roster updates and venue risk can widen spreads before the market settles.',
+      age: 'now',
+      tags: [{ label: 'ALERT', tone: 'red' }, { label: 'MARKET', tone: 'purple' }],
+      accent: 'red',
+    },
+  ];
+}
+
+function buildGroupSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const group = match?.group || 'Group A';
+  return payload.matches
+    .filter((item) => (item.group || '') === group)
+    .slice(0, 10)
+    .map((item, index) => ({
+      id: `group-${item.id}`,
+      source: item.group || stageLabel(item.stage),
+      title: `${item.homeTeam} vs ${item.awayTeam}`,
+      summary: `${item.round} · ${item.kickoffBeijing} · ${item.city}`,
+      age: index === 0 ? 'next' : `${index + 1} match`,
+      tags: [{ label: 'GROUP', tone: 'gold' }, { label: item.status.toUpperCase(), tone: item.status === 'scheduled' ? 'green' : 'gray' }],
+      accent: index % 3 === 0 ? 'gold' : 'green',
+    }));
+}
+
+function buildBroadcastSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  return [
+    {
+      id: 'broadcast-bjt',
+      source: 'BROADCAST',
+      title: `${match.homeTeam} vs ${match.awayTeam}: Beijing time window`,
+      summary: `${match.kickoffBeijing}. Desk view keeps BJT, local kickoff and venue status together.`,
+      age: 'scheduled',
+      tags: [{ label: 'BJT', tone: 'green' }, { label: 'LIVE OPS', tone: 'blue' }],
+      accent: 'green',
+    },
+    {
+      id: 'broadcast-local',
+      source: 'LOCAL FEED',
+      title: `${match.city}: local matchday handoff`,
+      summary: `${match.kickoffLocal}. Host city context is paired with weather and venue ops.`,
+      age: 'local',
+      tags: [{ label: 'LOCAL', tone: 'blue' }, { label: 'VENUE', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'broadcast-market',
+      source: 'MARKET FEED',
+      title: 'Market desk watches news latency and odds spread',
+      summary: 'News tags, source age and market confidence are normalized into the same row grammar.',
+      age: 'now',
+      tags: [{ label: 'MARKET', tone: 'purple' }, { label: 'WATCH', tone: 'gray' }],
+      accent: 'purple',
+    },
+  ];
+}
+
 export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCupWorkspaceProps) {
   const { payload, loading, error } = useWorldCupDashboard(marketGroups);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -495,6 +773,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const selectedCity = matchCity(payload.cities, selectedCityId || selectedMatch?.cityId || nextMatch?.cityId || payload.cities[0]?.id || '');
   const nextCity = nextMatch ? matchCity(payload.cities, nextMatch.cityId) : null;
   const linkedMarketCount = payload.matches.filter((match) => match.marketLinked).length + selectedMarkets.length;
+  const matchSignals = buildMatchSignals(selectedMatch, selectedMarkets);
+  const hostOpsSignals = buildHostOpsSignals(payload, selectedCity.id);
+  const marketSignals = buildMarketSignals(selectedMarkets, selectedMatch);
+  const squadSignals = buildSquadSignals(payload, selectedMatch);
+  const oddsSignals = buildOddsSignals(selectedOdds.length ? selectedOdds : payload.odds, selectedMatch);
+  const riskSignals = buildRiskSignals(payload, selectedMatch);
+  const groupSignals = buildGroupSignals(payload, selectedMatch);
+  const broadcastSignals = buildBroadcastSignals(selectedMatch);
   const terminalMetrics = [
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
     { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${payload.matches.filter((match) => match.cityId === selectedCity.id).length} matches` },
@@ -584,6 +870,30 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
         </div>
         <div className="wm-worldcup-matrix-cell">
           <OddsPanel odds={selectedOdds.length ? selectedOdds : payload.odds} polymarket={selectedMarkets} />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="MATCH WIRE" badge="REALTIME" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="HOST OPS" badge="REMOTE" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="GROUP TABLE" badge="LIVE" count={groupSignals.length} items={groupSignals} className="wm-worldcup-group-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="LIQUIDITY" badge="LOCAL DB" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="TEAM WIRE" badge="PENDING" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="ODDS TAPE" badge="WATCH" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="RISK DESK" badge="ALERT" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />
+        </div>
+        <div className="wm-worldcup-matrix-cell">
+          <SignalFeedPanel title="BROADCAST" badge="BJT" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />
         </div>
       </section>
     </main>

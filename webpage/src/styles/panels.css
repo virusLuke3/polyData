@@ -4110,12 +4110,12 @@ body.panel-resize-active iframe {
   z-index: 9;
   right: 16px;
   top: 18px;
-  width: min(330px, calc(100% - 318px));
+  width: min(390px, calc(100% - 318px));
   max-height: calc(100% - 88px);
   overflow: hidden;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(4, 5, 5, 0.76);
+  background: rgba(4, 5, 5, 0.82);
   backdrop-filter: blur(8px);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.52), inset 0 0 0 1px rgba(255, 255, 255, 0.025);
   font-family: var(--font-mono);
@@ -4169,7 +4169,10 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector > em,
 .wm-worldcup-map-inspector small,
 .wm-worldcup-map-inspector-next span,
-.wm-worldcup-map-inspector-next em {
+.wm-worldcup-map-inspector-next em,
+.wm-worldcup-map-weather-now span,
+.wm-worldcup-map-weather-generated,
+.wm-worldcup-map-inspector-section-title span {
   color: #8f9898;
   font-size: 9px;
   font-style: normal;
@@ -4231,8 +4234,8 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-next {
   margin-top: 12px;
   padding: 11px;
-  border-left: 4px solid var(--wc-cyan);
-  background: rgba(87, 214, 247, 0.055);
+  border-left: 4px solid var(--wc-gold);
+  background: linear-gradient(90deg, rgba(255, 176, 45, 0.11), rgba(87, 214, 247, 0.035));
 }
 
 .wm-worldcup-map-inspector-next strong {
@@ -4255,7 +4258,7 @@ body.panel-resize-active iframe {
 
 .wm-worldcup-map-inspector-forecast {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   margin-top: 10px;
 }
@@ -4263,6 +4266,55 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-forecast b {
   color: #f1f4f1;
   font-size: 12px;
+}
+
+.wm-worldcup-map-weather-card {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(87, 214, 247, 0.18);
+  background: rgba(4, 14, 16, 0.52);
+}
+
+.wm-worldcup-map-weather-now strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 6px;
+  color: #f2f4f2;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-weather-now em {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  color: #9ba5a8;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-weather-generated {
+  display: block;
+  margin-top: 8px;
+}
+
+.wm-worldcup-map-inspector-section-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  min-height: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-worldcup-map-inspector-section-title b {
+  color: var(--wc-gold);
+  font-size: 12px;
+  text-align: right;
 }
 
 .wm-worldcup-map-inspector-matches {
@@ -4274,10 +4326,10 @@ body.panel-resize-active iframe {
 
 .wm-worldcup-map-inspector-matches p {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 104px;
+  grid-template-columns: 42px minmax(0, 1fr) 124px;
   gap: 8px;
   align-items: center;
-  min-height: 34px;
+  min-height: 42px;
   margin: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   color: #c5cccc;
@@ -4293,6 +4345,19 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-matches p em {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-inspector-matches p span small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: #727c80;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -16065,4 +16130,53 @@ body.panel-resize-active iframe {
   .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
     grid-template-columns: 1fr !important;
   }
+}
+
+/* World Cup monitor-board typography lock. panels.css is later in the bundle,
+   so keep the final body-vs-label font split here. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-match-main strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-scoreboard strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-feed-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-signal-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-weather-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-market-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-roster-head strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-player-row span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-odds-row > div:first-child strong {
+  font-family: Inter, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+  letter-spacing: 0 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-feed-row > strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-signal-row > strong {
+  font-size: 12.5px !important;
+  font-weight: 560 !important;
+  line-height: 1.28 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-feed-row > em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-signal-row > em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-market-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-player-row em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-odds-note {
+  font-family: Inter, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif !important;
+  color: #8b929c !important;
+  font-size: 9px !important;
+  font-weight: 450 !important;
+  letter-spacing: 0 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-match-main strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-weather-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-market-row strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-roster-head strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-player-row span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-odds-row > div:first-child strong {
+  font-size: 12px !important;
+  font-weight: 540 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-scoreboard strong {
+  font-size: 14px !important;
+  font-weight: 560 !important;
 }
