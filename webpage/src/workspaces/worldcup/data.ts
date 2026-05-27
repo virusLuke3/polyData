@@ -343,6 +343,34 @@ function fallbackNews(selected?: WorldCupMatch | null): WorldCupNewsItem[] {
       summary: 'Beijing and local kickoff times are tracked alongside venue and weather signals.',
       matchId: selected?.id,
     },
+    {
+      id: 'seed-news-8',
+      title: `${prefix}: group-table scenarios and rest-window monitor`,
+      source: 'GROUP DESK',
+      url: '#',
+      publishedAt: new Date(Date.now() - 14 * 3600 * 1000).toISOString(),
+      summary: 'Group pressure, rotation risk and travel cadence are tracked before kickoff.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-9',
+      title: `${city}: crowd flow, transport and stadium perimeter watch`,
+      source: 'OPS WIRE',
+      url: '#',
+      publishedAt: new Date(Date.now() - 16 * 3600 * 1000).toISOString(),
+      summary: 'Host-city operations, entry windows and local transport load are pinned for match day.',
+      cityId: selected?.cityId,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-10',
+      title: `${prefix}: bookmaker consensus and prediction-market spread`,
+      source: 'ODDS DESK',
+      url: '#',
+      publishedAt: new Date(Date.now() - 18 * 3600 * 1000).toISOString(),
+      summary: 'Moneyline, draw pricing and liquidity gaps are compared against market watchlists.',
+      matchId: selected?.id,
+    },
   ];
 }
 
