@@ -151,15 +151,16 @@ function applyWorldMonitorMapPaint(map: MapLibreMap) {
   });
 }
 
-function localizeBasemapLabels(map: MapLibreMap, language = 'zh') {
+function localizeBasemapLabels(map: MapLibreMap, language = 'en') {
   const style = map.getStyle();
   const layers = style.layers || [];
   const expression: any = [
     'coalesce',
     ['get', `name:${language}`],
-    ['get', 'name_zh'],
-    ['get', 'name:en'],
     ['get', 'name_en'],
+    ['get', 'name:en'],
+    ['get', 'name:latin'],
+    ['get', 'name_int'],
     ['get', 'name'],
   ];
 
@@ -1129,12 +1130,12 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       ) : null}
       <MapControls map={mapRef.current} />
       <div className="wm-worldcup-maplibre-legend">
-        <span>图例</span>
-        <b className="admin" /> <em>行政区划</em>
-        <b className="host" /> <em>主办城市</em>
-        <b className="next" /> <em>下一场</em>
-        <b className="weather" /> <em>天气</em>
-        <b className="market" /> <em>市场</em>
+        <span>LEGEND</span>
+        <b className="admin" /> <em>Admin lines</em>
+        <b className="host" /> <em>Host city</em>
+        <b className="next" /> <em>Next match</em>
+        <b className="weather" /> <em>Weather</em>
+        <b className="market" /> <em>Markets</em>
       </div>
       <div className="wm-worldcup-maplibre-status">{mapDegraded ? 'LOCAL FALLBACK' : 'WEBGL'}</div>
     </div>
