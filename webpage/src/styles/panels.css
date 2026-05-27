@@ -3325,7 +3325,7 @@ body.panel-resize-active iframe {
   position: relative;
   min-height: 640px;
   overflow: hidden;
-  background: #0b0b0b;
+  background: #060606;
 }
 
 .wm-worldcup-maplibre > .wm-worldcup-maplibre-host,
@@ -3341,7 +3341,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-maplibre-host {
   opacity: 1;
   z-index: 0;
-  filter: grayscale(1) contrast(1.02) brightness(0.82) saturate(0);
+  filter: grayscale(1) contrast(1.08) brightness(0.78) saturate(0);
 }
 
 .wm-worldcup-maplibre-host .maplibregl-control-container {
@@ -3499,13 +3499,14 @@ body.panel-resize-active iframe {
   z-index: 8;
   left: 12px;
   top: 14px;
-  width: 280px;
+  width: 270px;
   max-height: calc(100% - 34px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.11);
-  background: rgba(3, 4, 4, 0.9);
+  background: rgba(2, 3, 3, 0.82);
+  backdrop-filter: blur(8px);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.42);
   font-family: var(--font-mono);
 }
@@ -3574,12 +3575,20 @@ body.panel-resize-active iframe {
   border-radius: 3px;
   color: #d7dcda;
   font-size: 12px;
-  cursor: default;
+  cursor: pointer;
+  background: transparent;
+  font-family: var(--font-mono);
+  text-align: left;
 }
 
 .wm-worldcup-map-layer-row.active {
-  border-color: rgba(49, 244, 111, 0.15);
-  background: rgba(49, 244, 111, 0.025);
+  border-color: rgba(255, 255, 255, 0.105);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-worldcup-map-layer-row:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.045);
 }
 
 .wm-worldcup-map-layer-row i {
@@ -3596,8 +3605,8 @@ body.panel-resize-active iframe {
 }
 
 .wm-worldcup-map-layer-row.active i {
-  border-color: var(--wc-green);
-  background: var(--wc-green);
+  border-color: rgba(222, 228, 228, 0.72);
+  background: rgba(222, 228, 228, 0.92);
 }
 
 .wm-worldcup-map-layer-row b {
@@ -3630,10 +3639,30 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-layer-panel footer {
   padding: 9px 12px;
   border-top: 1px solid rgba(87, 214, 247, 0.15);
-  color: #00d9ff;
+  color: #42d7ef;
   font-size: 11px;
   font-weight: 950;
   letter-spacing: 0.12em;
+}
+
+.deckgl-tooltip {
+  min-width: 148px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  background: rgba(5, 5, 5, 0.94);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.48);
+  color: #d5dcda;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+.deckgl-tooltip strong {
+  color: #f4f5f1;
+  font-size: 12px;
+  font-weight: 950;
 }
 
 .wm-worldcup-map-point-layer {
@@ -4079,18 +4108,61 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector {
   position: absolute;
   z-index: 9;
-  right: 16px;
-  top: 18px;
-  width: min(390px, calc(100% - 330px));
-  max-height: calc(100% - 92px);
+  right: 14px;
+  top: 16px;
+  width: min(330px, calc(100% - 318px));
+  max-height: calc(100% - 88px);
   overflow: hidden;
-  padding: 14px;
-  border: 1px solid rgba(87, 214, 247, 0.26);
-  background: rgba(2, 5, 5, 0.9);
+  padding: 12px;
+  border: 1px solid rgba(87, 214, 247, 0.18);
+  background: rgba(2, 5, 5, 0.78);
+  backdrop-filter: blur(10px);
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.52), inset 0 0 0 1px rgba(255, 255, 255, 0.025);
   font-family: var(--font-mono);
+  transition: width 180ms ease, max-height 180ms ease, opacity 180ms ease, background 180ms ease;
 }
 
+.wm-worldcup-map-inspector.collapsed {
+  width: min(230px, calc(100% - 318px));
+  max-height: 112px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(5, 6, 6, 0.68);
+}
+
+.wm-worldcup-map-inspector-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px;
+  gap: 8px;
+  align-items: center;
+}
+
+.wm-worldcup-map-inspector-head button {
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #e8ece9;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.wm-worldcup-map-inspector-head button:hover {
+  border-color: rgba(87, 214, 247, 0.42);
+}
+
+.wm-worldcup-map-inspector-body {
+  min-height: 0;
+  overflow: hidden auto;
+}
+
+.wm-worldcup-map-inspector.collapsed .wm-worldcup-map-inspector-body {
+  display: none;
+}
+
+.wm-worldcup-map-inspector-head > span,
 .wm-worldcup-map-inspector > span,
 .wm-worldcup-map-inspector > em,
 .wm-worldcup-map-inspector small,
@@ -4107,9 +4179,9 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector > strong {
   display: block;
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: 7px;
   color: #f6f7f3;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.05;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4126,8 +4198,8 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 14px;
+  gap: 5px;
+  margin-top: 12px;
 }
 
 .wm-worldcup-map-inspector-stats span,
@@ -4141,7 +4213,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector b {
   display: block;
   color: var(--wc-gold);
-  font-size: 20px;
+  font-size: 17px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -4224,7 +4296,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-controls {
   position: absolute;
   z-index: 10;
-  right: 16px;
+  right: 14px;
   top: 50%;
   display: grid;
   gap: 3px;
@@ -4282,6 +4354,14 @@ body.panel-resize-active iframe {
   background: var(--wc-gold);
 }
 
+.wm-worldcup-maplibre-legend b.weather {
+  background: #38b7dc;
+}
+
+.wm-worldcup-maplibre-legend b.market {
+  background: #62beff;
+}
+
 .wm-worldcup-maplibre-legend b.admin {
   width: 18px;
   height: 0;
@@ -4309,9 +4389,9 @@ body.panel-resize-active iframe {
   right: 18px;
   bottom: 14px;
   padding: 5px 9px;
-  border: 1px solid rgba(49, 244, 111, 0.18);
-  background: rgba(49, 244, 111, 0.08);
-  color: var(--wc-green);
+  border: 1px solid rgba(87, 214, 247, 0.18);
+  background: rgba(5, 8, 8, 0.72);
+  color: #42d7ef;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 950;
