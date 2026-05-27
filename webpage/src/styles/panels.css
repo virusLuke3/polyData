@@ -3341,7 +3341,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-maplibre-host {
   opacity: 1;
   z-index: 0;
-  filter: grayscale(1) contrast(1.08) brightness(0.78) saturate(0);
+  filter: none;
 }
 
 .wm-worldcup-maplibre-host .maplibregl-control-container {

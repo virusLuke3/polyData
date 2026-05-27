@@ -73,8 +73,8 @@ const LOCAL_US_STATES_TOPOJSON_URL = '/map-data/us-states-10m.json';
 const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
-const WORLDCUP_ATLAS_CENTER: [number, number] = [-91.8, 34.2];
-const WORLDCUP_ATLAS_ZOOM = 2.72;
+const WORLDCUP_ATLAS_CENTER: [number, number] = [-95, 38];
+const WORLDCUP_ATLAS_ZOOM = 2.98;
 const PMTILES_STYLE_URL = import.meta.env.VITE_WORLDCUP_PMTILES_STYLE_URL || import.meta.env.VITE_PMTILES_STYLE_URL || '';
 
 const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; label: string }> = {
@@ -112,6 +112,42 @@ const COLORS = {
 function firstSymbolLayerId(map: MapLibreMap) {
   const layers = map.getStyle().layers || [];
   return layers.find((layer) => layer.type === 'symbol')?.id;
+}
+
+function applyWorldMonitorMapPaint(map: MapLibreMap) {
+  const layers = map.getStyle().layers || [];
+  layers.forEach((layer) => {
+    if (layer.id.startsWith('country-') || layer.id.startsWith('wc-')) return;
+    try {
+      if (layer.type === 'background') {
+        map.setPaintProperty(layer.id, 'background-color', '#111111');
+      } else if (layer.type === 'fill') {
+        const id = layer.id.toLowerCase();
+        if (/water|ocean|lake|river/.test(id)) {
+          map.setPaintProperty(layer.id, 'fill-color', '#090909');
+          map.setPaintProperty(layer.id, 'fill-opacity', 1);
+        } else {
+          map.setPaintProperty(layer.id, 'fill-color', '#242424');
+          map.setPaintProperty(layer.id, 'fill-opacity', 0.94);
+        }
+      } else if (layer.type === 'line') {
+        const id = layer.id.toLowerCase();
+        const boundary = /boundary|admin|border|state|province/.test(id);
+        map.setPaintProperty(layer.id, 'line-color', boundary ? '#8b8f90' : '#55595a');
+        map.setPaintProperty(layer.id, 'line-opacity', boundary ? 0.52 : 0.28);
+        if (boundary) {
+          map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 2, 0.72, 4, 1.1, 6, 1.48]);
+        }
+      } else if (layer.type === 'symbol') {
+        map.setPaintProperty(layer.id, 'text-color', '#8d8f90');
+        map.setPaintProperty(layer.id, 'text-halo-color', '#050505');
+        map.setPaintProperty(layer.id, 'text-halo-width', 1.6);
+        map.setPaintProperty(layer.id, 'text-opacity', ['interpolate', ['linear'], ['zoom'], 2, 0.48, 3, 0.66, 5, 0.82]);
+      }
+    } catch {
+      // Some third-party style layers do not expose every paint property.
+    }
+  });
 }
 
 function buildLocalFallbackStyle(): StyleSpecification {
@@ -614,8 +650,8 @@ function buildDeckLayers(
       getRadius: (d) => d.selected ? 52000 : d.next ? 36000 : 26000,
       getFillColor: (d) => d.selected ? COLORS.selectedDim : d.next ? COLORS.nextDim : [255, 255, 255, 18],
       getLineColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : [255, 255, 255, 42],
-      radiusMinPixels: 9,
-      radiusMaxPixels: 34,
+      radiusMinPixels: 10,
+      radiusMaxPixels: 30,
       lineWidthMinPixels: 1,
       stroked: true,
       pickable: false,
@@ -627,8 +663,8 @@ function buildDeckLayers(
       getRadius: (d) => 9000 + Math.min(22000, (d.city.capacity || 50000) / 4),
       getFillColor: (d) => d.selected ? COLORS.selected : d.next ? COLORS.next : COLORS.city,
       getLineColor: COLORS.cityLine,
-      radiusMinPixels: 3,
-      radiusMaxPixels: 13,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 12,
       lineWidthMinPixels: 1.5,
       stroked: true,
       pickable: true,
@@ -637,7 +673,7 @@ function buildDeckLayers(
       id: 'wc-host-city-label-layer',
       data: citySignals.filter((signal) => signal.selected || signal.next || signal.important || showDenseLabels),
       getPosition: (d) => [d.city.longitude, d.city.latitude],
-      getText: (d) => `${compactCityName(d.city.city)}\n${cityStatus(d.city.id, d.matches)} · ${d.matches.length}`,
+      getText: (d) => `${compactCityName(d.city.city)}\n${cityStatus(d.city.id, d.matches)} - ${d.matches.length}`,
       getSize: (d) => d.selected || d.next ? 14 : 11,
       getColor: (d) => d.selected ? [255, 255, 255, 242] : [238, 241, 241, 216],
       getTextAnchor: 'start',
@@ -880,6 +916,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
 
     const loadSupport = () => {
       setMapReady(true);
+      applyWorldMonitorMapPaint(map);
       loadMapSupportLayers(map, setRegionHover)
         .then(() => {
           highlightCountry(dataRef.current.selectedCityId
