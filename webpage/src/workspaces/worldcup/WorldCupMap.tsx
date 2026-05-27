@@ -120,26 +120,7 @@ function applyWorldMonitorMapPaint(map: MapLibreMap) {
   layers.forEach((layer) => {
     if (layer.id.startsWith('country-') || layer.id.startsWith('wc-')) return;
     try {
-      if (layer.type === 'background') {
-        map.setPaintProperty(layer.id, 'background-color', '#111111');
-      } else if (layer.type === 'fill') {
-        const id = layer.id.toLowerCase();
-        if (/water|ocean|lake|river/.test(id)) {
-          map.setPaintProperty(layer.id, 'fill-color', '#101010');
-          map.setPaintProperty(layer.id, 'fill-opacity', 1);
-        } else {
-          map.setPaintProperty(layer.id, 'fill-color', '#2d2d2d');
-          map.setPaintProperty(layer.id, 'fill-opacity', 0.92);
-        }
-      } else if (layer.type === 'line') {
-        const id = layer.id.toLowerCase();
-        const boundary = /boundary|admin|border|state|province/.test(id);
-        map.setPaintProperty(layer.id, 'line-color', boundary ? '#a5a8a9' : '#626566');
-        map.setPaintProperty(layer.id, 'line-opacity', boundary ? 0.6 : 0.32);
-        if (boundary) {
-          map.setPaintProperty(layer.id, 'line-width', ['interpolate', ['linear'], ['zoom'], 2, 0.9, 4, 1.35, 6, 1.72]);
-        }
-      } else if (layer.type === 'symbol') {
+      if (layer.type === 'symbol') {
         map.setPaintProperty(layer.id, 'text-color', '#949697');
         map.setPaintProperty(layer.id, 'text-halo-color', '#050505');
         map.setPaintProperty(layer.id, 'text-halo-width', 1.8);
@@ -364,7 +345,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'wc-host-countries',
       paint: {
         'fill-color': '#ffffff',
-        'fill-opacity': 0.012,
+        'fill-opacity': 0.006,
       },
     }, beforeId);
     addLayerSafe(map, {
@@ -373,8 +354,8 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
       source: 'wc-host-countries',
       paint: {
         'line-color': '#ffffff',
-        'line-opacity': 0.1,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.75, 4, 1.05, 6, 1.35],
+        'line-opacity': 0.07,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.62, 4, 0.9, 6, 1.16],
       },
     }, beforeId);
 
@@ -388,10 +369,10 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
     addSourceSafe(map, 'wc-canada-provinces', canada);
     addSourceSafe(map, 'wc-mexico-states', mexico);
     const adminPaint = {
-      'line-color': '#cdd0d1',
-      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.3, 3.5, 0.48, 6, 0.66],
+      'line-color': '#a9acae',
+      'line-opacity': ['interpolate', ['linear'], ['zoom'], 2, 0.2, 3.5, 0.32, 6, 0.46],
       'line-dasharray': [3, 2],
-      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.86, 4, 1.15, 6, 1.46],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.62, 4, 0.88, 6, 1.12],
     };
     addLayerSafe(map, { id: 'wc-us-state-lines', type: 'line', source: 'wc-us-states', paint: adminPaint }, beforeId);
     addLayerSafe(map, { id: 'wc-canada-province-lines', type: 'line', source: 'wc-canada-provinces', paint: adminPaint }, beforeId);
