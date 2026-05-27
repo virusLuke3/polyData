@@ -4136,7 +4136,7 @@
   text-align: left !important;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1180px) {
   .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
