@@ -176,14 +176,12 @@ function SchedulePanel({
       status="live"
       count={filtered.length}
       className="wm-worldcup-panel wm-worldcup-schedule-panel"
-      controls={(
-        <div className="wm-worldcup-filter-tabs">
-          {(['all', 'today', 'future', 'market'] as MatchFilter[]).map((item) => (
-            <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item === 'market' ? 'mkt' : item}</button>
-          ))}
-        </div>
-      )}
     >
+      <div className="wm-worldcup-filter-strip">
+        {(['all', 'today', 'future', 'market'] as MatchFilter[]).map((item) => (
+          <button className={filter === item ? 'active' : ''} key={item} type="button" onClick={() => onFilter(item)}>{item === 'market' ? 'mkt' : item}</button>
+        ))}
+      </div>
       <div className="wm-worldcup-match-list">
         {filtered.slice(0, 104).map((match) => (
           <button
