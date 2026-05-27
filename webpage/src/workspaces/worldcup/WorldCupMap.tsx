@@ -74,8 +74,9 @@ const LOCAL_CANADA_PROVINCES_GEOJSON_URL = '/map-data/canada-provinces.geojson';
 const LOCAL_MEXICO_STATES_GEOJSON_URL = '/map-data/mexico-states.geojson';
 const LOCAL_WORLD_COUNTRIES_GEOJSON_URL = '/map-data/world-countries.geojson';
 const WORLDCUP_ATLAS_CENTER: [number, number] = [-95, 38];
-const WORLDCUP_ATLAS_ZOOM = 2.98;
+const WORLDCUP_ATLAS_ZOOM = 3.08;
 const PMTILES_STYLE_URL = import.meta.env.VITE_WORLDCUP_PMTILES_STYLE_URL || import.meta.env.VITE_PMTILES_STYLE_URL || '';
+const NO_COUNTRY_MATCH = '__worldcup_no_country__';
 
 const HOST_COUNTRY_META: Record<string, { key: HostCountryKey; iso2: string; label: string }> = {
   '840': { key: 'us', iso2: 'US', label: 'UNITED STATES' },
@@ -237,7 +238,7 @@ function setupCountryHover(map: MapLibreMap, setRegionHover: (hover: MapRegionHo
     hoveredIso2 = '';
     map.getCanvas().style.cursor = '';
     setRegionHover(null);
-    const noMatch: any = ['==', ['get', 'ISO3166-1-Alpha-2'], ''];
+    const noMatch: any = ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH];
     if (map.getLayer('country-hover-fill')) map.setFilter('country-hover-fill', noMatch);
     if (map.getLayer('country-hover-border')) map.setFilter('country-hover-border', noMatch);
   };
@@ -295,7 +296,7 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
         'fill-color': '#ffffff',
         'fill-opacity': 0.05,
       },
-      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
     addLayerSafe(map, {
       id: 'country-hover-border',
@@ -306,28 +307,28 @@ async function loadMapSupportLayers(map: MapLibreMap, setRegionHover: (hover: Ma
         'line-opacity': 0.22,
         'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.15, 4, 1.55, 6, 2.05],
       },
-      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
     addLayerSafe(map, {
       id: 'country-highlight-fill',
       type: 'fill',
       source: 'country-boundaries',
       paint: {
-        'fill-color': '#3b82f6',
-        'fill-opacity': 0.12,
+        'fill-color': 'rgba(59, 130, 246, 0)',
+        'fill-opacity': 0,
       },
-      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
     addLayerSafe(map, {
       id: 'country-highlight-border',
       type: 'line',
       source: 'country-boundaries',
       paint: {
-        'line-color': '#3b82f6',
-        'line-opacity': 0.5,
+        'line-color': 'rgba(59, 130, 246, 0)',
+        'line-opacity': 0,
         'line-width': ['interpolate', ['linear'], ['zoom'], 2, 1.05, 4, 1.5, 6, 1.9],
       },
-      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], ''],
+      filter: ['==', ['get', 'ISO3166-1-Alpha-2'], NO_COUNTRY_MATCH],
     }, beforeId);
     addSourceSafe(map, 'wc-host-countries', hostCountriesGeoJson());
     addLayerSafe(map, {
@@ -552,6 +553,30 @@ function getActiveSignal(citySignals: CitySignal[], selectedCityId: string | nul
     || null;
 }
 
+function selectedCountryCode(
+  cities: WorldCupVenueCity[],
+  matches: WorldCupMatch[],
+  selectedCityId: string | null,
+  selectedMatchId: string | null,
+  nextMatch: WorldCupMatch | null,
+  explicitSelectedCityId: string | null,
+) {
+  const selectedMatch = selectedMatchId ? matches.find((match) => match.id === selectedMatchId) : null;
+  if (selectedMatch) {
+    const implicitNextMatch = selectedMatch.id === nextMatch?.id
+      && selectedMatch.cityId === nextMatch.cityId
+      && selectedCityId === nextMatch.cityId
+      && explicitSelectedCityId !== selectedMatch.cityId;
+    if (implicitNextMatch) return null;
+    return cities.find((city) => city.id === selectedMatch.cityId)?.country || null;
+  }
+  const selectedCity = selectedCityId ? cities.find((city) => city.id === selectedCityId) : null;
+  if (!selectedCity) return null;
+  if (!nextMatch && selectedCity.id !== explicitSelectedCityId) return null;
+  if (selectedCity.id === nextMatch?.cityId && selectedCity.id !== explicitSelectedCityId) return null;
+  return selectedCity.country;
+}
+
 function buildDeckLayers(
   citySignals: CitySignal[],
   signals: ReturnType<typeof buildDeckSignals>,
@@ -769,6 +794,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const deckOverlayRef = useRef<MapboxOverlay | null>(null);
   const pulseRafRef = useRef<number | null>(null);
   const styleTimeoutRef = useRef<number | null>(null);
+  const explicitSelectedCityRef = useRef<string | null>(null);
   const fallbackAppliedRef = useRef(false);
   const dataRef = useRef({ cities, matches, weather, nextMatch, selectedCityId, selectedMatchId });
   const enabledLayersRef = useRef(DEFAULT_ENABLED_LAYERS);
@@ -819,11 +845,22 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       cancelAnimationFrame(pulseRafRef.current);
       pulseRafRef.current = null;
     }
-    const filter: any = ['==', ['get', 'ISO3166-1-Alpha-2'], iso2 || ''];
+    const filter: any = ['==', ['get', 'ISO3166-1-Alpha-2'], iso2 || NO_COUNTRY_MATCH];
     try {
       if (map.getLayer('country-highlight-fill')) map.setFilter('country-highlight-fill', filter);
       if (map.getLayer('country-highlight-border')) map.setFilter('country-highlight-border', filter);
-      if (!iso2 || !map.getLayer('country-highlight-fill')) return;
+      if (!map.getLayer('country-highlight-fill')) return;
+      if (!iso2) {
+        map.setPaintProperty('country-highlight-fill', 'fill-color', 'rgba(59, 130, 246, 0)');
+        map.setPaintProperty('country-highlight-border', 'line-color', 'rgba(59, 130, 246, 0)');
+        map.setPaintProperty('country-highlight-fill', 'fill-opacity', 0);
+        map.setPaintProperty('country-highlight-border', 'line-opacity', 0);
+        return;
+      }
+      map.setPaintProperty('country-highlight-fill', 'fill-color', '#3b82f6');
+      map.setPaintProperty('country-highlight-border', 'line-color', '#3b82f6');
+      map.setPaintProperty('country-highlight-fill', 'fill-opacity', 0.12);
+      map.setPaintProperty('country-highlight-border', 'line-opacity', 0.5);
       const start = performance.now();
       const step = (now: number) => {
         if (!map.getLayer('country-highlight-fill')) {
@@ -868,7 +905,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       matches,
       nextMatch,
     );
-    highlightCountry(signal?.city.country || null);
+    highlightCountry(signal ? selectedCountryCode(cities, matches, selectedCityId, selectedMatchId, nextMatch, explicitSelectedCityRef.current) : null);
   }, [cities, matches, weather, nextMatch, selectedCityId, selectedMatchId, weatherByCity]);
 
   useEffect(() => {
@@ -903,6 +940,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
           const object = info.object;
           const city = object?.type === 'host-city' ? object.city : object?.city;
           if (!city) return;
+          explicitSelectedCityRef.current = city.id;
           onSelectCity(city.id);
           setInspectorOpen(true);
           map.easeTo({ center: [city.longitude, city.latitude], zoom: Math.max(map.getZoom(), 3.15), duration: 520 });
@@ -919,11 +957,14 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       applyWorldMonitorMapPaint(map);
       loadMapSupportLayers(map, setRegionHover)
         .then(() => {
-          highlightCountry(dataRef.current.selectedCityId
-            ? dataRef.current.cities.find((city) => city.id === dataRef.current.selectedCityId)?.country || null
-            : dataRef.current.nextMatch
-              ? dataRef.current.cities.find((city) => city.id === dataRef.current.nextMatch?.cityId)?.country || null
-              : null);
+          highlightCountry(selectedCountryCode(
+            dataRef.current.cities,
+            dataRef.current.matches,
+            dataRef.current.selectedCityId,
+            dataRef.current.selectedMatchId,
+            dataRef.current.nextMatch,
+            explicitSelectedCityRef.current,
+          ));
         })
         .catch(() => {});
       addDeck();
