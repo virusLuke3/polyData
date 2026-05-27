@@ -219,7 +219,18 @@ export function filterWorldCupNews(content: ContentItem[], selected?: WorldCupMa
       summary: item.summary || '',
       matchId: selected?.id,
     }));
-  return items.length ? items : fallbackNews(selected);
+  const seedItems = fallbackNews(selected);
+  if (items.length >= 8) return items;
+  const seen = new Set(items.map((item) => `${item.source}:${item.title}`.toLowerCase()));
+  return [
+    ...items,
+    ...seedItems.filter((item) => {
+      const key = `${item.source}:${item.title}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ].slice(0, 10);
 }
 
 export function matchPolymarketMarkets(match: WorldCupMatch | null, marketGroups: MarketGroupItem[]): WorldCupPolymarketMarket[] {
@@ -261,6 +272,10 @@ function numeric(value: unknown) {
 
 function fallbackNews(selected?: WorldCupMatch | null): WorldCupNewsItem[] {
   const prefix = selected ? `${selected.homeTeam} vs ${selected.awayTeam}` : 'World Cup 2026';
+  const city = selected?.city || 'host city';
+  const venue = selected?.venue || 'stadium';
+  const group = selected?.group || 'group stage';
+  const matchTime = selected?.kickoffBeijing || 'tournament window';
   return [
     {
       id: 'seed-news-1',
@@ -268,16 +283,65 @@ function fallbackNews(selected?: WorldCupMatch | null): WorldCupNewsItem[] {
       source: 'POLYDATA',
       url: '#',
       publishedAt: new Date().toISOString(),
-      summary: 'Seed item until the worldcup news runtime endpoint is connected.',
+      summary: `${matchTime} · ${city} · ${venue}. Match desk is tracking lineup, liquidity and venue signals.`,
       matchId: selected?.id,
     },
     {
       id: 'seed-news-2',
-      title: 'Host city operations and weather risk enter pre-tournament watch',
+      title: `${city}: host operations and weather risk enter match watch`,
       source: 'WORLD CUP DESK',
       url: '#',
       publishedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
       summary: 'City weather, travel load and pitch conditions are tracked as signals.',
+      cityId: selected?.cityId,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-3',
+      title: `${group}: standings pressure and opening-match context`,
+      source: 'FIFA DESK',
+      url: '#',
+      publishedAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
+      summary: 'Group round, opponent strength and rest-window context are pinned for pre-match monitoring.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-4',
+      title: `${prefix}: squad announcement and injury window remains open`,
+      source: 'TEAM WIRE',
+      url: '#',
+      publishedAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
+      summary: 'Official roster, coach comments and late injury updates will be merged when source feeds connect.',
+      teams: selected ? [selected.homeTeam, selected.awayTeam] : undefined,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-5',
+      title: `${prefix}: market liquidity, odds spread and handle watch`,
+      source: 'MARKET WATCH',
+      url: '#',
+      publishedAt: new Date(Date.now() - 8 * 3600 * 1000).toISOString(),
+      summary: 'Polymarket links, sportsbook consensus and implied probability gaps are surfaced together.',
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-6',
+      title: `${venue}: venue readiness, travel load and security notes`,
+      source: 'VENUE OPS',
+      url: '#',
+      publishedAt: new Date(Date.now() - 10 * 3600 * 1000).toISOString(),
+      summary: 'Capacity, local travel, pitch state and operational notes are included in the match desk.',
+      cityId: selected?.cityId,
+      matchId: selected?.id,
+    },
+    {
+      id: 'seed-news-7',
+      title: `${prefix}: broadcast timezone and fan-flow checklist`,
+      source: 'BROADCAST',
+      url: '#',
+      publishedAt: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
+      summary: 'Beijing and local kickoff times are tracked alongside venue and weather signals.',
+      matchId: selected?.id,
     },
   ];
 }
@@ -307,7 +371,13 @@ function buildWeatherSeed(): WorldCupCityWeather[] {
 }
 
 function buildRosterSeed(): WorldCupTeamRoster[] {
-  return ['Mexico', 'United States', 'Canada', 'Brazil', 'Germany', 'Spain'].map((team) => ({
+  const seededTeams = Array.from(new Set([
+    ...FALLBACK_SOURCE_MATCHES.flatMap((match) => [normalizePlaceholderTeam(match.team1), normalizePlaceholderTeam(match.team2)]),
+    'United States',
+    'Canada',
+    'Mexico',
+  ].filter((team) => team && !/^Winner |^Loser |^TBD$/.test(team))));
+  return seededTeams.map((team) => ({
     team,
     updatedAt: new Date().toISOString(),
     players: [

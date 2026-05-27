@@ -195,10 +195,11 @@ function SchedulePanel({
               <em>{kickoffDay(match)}</em>
             </span>
             <span className="wm-worldcup-match-main">
-              <strong><i>#{match.fifaMatchNumber || '--'}</i> {match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
-              <em>{stageLabel(match.stage)} · {match.city} · {match.venue}</em>
+              <span className="wm-worldcup-match-kicker">#{match.fifaMatchNumber || '--'} · {match.group || stageLabel(match.stage)} · {match.round}</span>
+              <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
+              <em>{match.kickoffBeijing} · {match.city} · {match.venue}</em>
             </span>
-            <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'PM' : match.status.toUpperCase()}</span>
+            <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'PM' : match.status === 'scheduled' ? 'SCHED' : match.status.toUpperCase()}</span>
           </button>
         ))}
       </div>
@@ -228,10 +229,12 @@ function MatchPanel({ match, markets }: { match: WorldCupMatch | null; markets: 
         </div>
       </div>
       <div className="wm-worldcup-match-facts">
-        <div><span>MATCH</span><strong>#{match.fifaMatchNumber || '--'} · {stageLabel(match.stage)} · {match.round}</strong></div>
+        <div><span>MATCH</span><strong>#{match.fifaMatchNumber || '--'} · {match.round}</strong></div>
+        <div><span>GROUP</span><strong>{match.group || stageLabel(match.stage)}</strong></div>
         <div><span>BEIJING</span><strong>{match.kickoffBeijing}</strong></div>
         <div><span>LOCAL</span><strong>{match.kickoffLocal}</strong></div>
-        <div><span>VENUE</span><strong>{match.city} · {match.venue}</strong></div>
+        <div><span>CITY</span><strong>{match.city}</strong></div>
+        <div><span>VENUE</span><strong>{match.venue}</strong></div>
         <div><span>STATE</span><strong>{match.status.toUpperCase()}{match.minute ? ` · ${match.minute}` : ''}</strong></div>
       </div>
     </Panel>
