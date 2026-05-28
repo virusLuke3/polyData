@@ -1182,22 +1182,160 @@ function buildTacticalSignals(match: WorldCupMatch | null): WorldCupSignalItem[]
 
 function buildLocalMediaSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
   const teams = match ? [match.homeTeam, match.awayTeam] : ['Argentina', 'Brazil'];
-  const media = [
-    ['ARG', 'TyC Sports / Ole', 'training-ground note and mood watch'],
-    ['BRA', 'Globo Esporte', 'injury rumor and XI tendency'],
-    ['ESP', 'Marca / AS', 'press-room lineup hint'],
-    ['FRA', "L'Equipe", 'fitness and tactical note'],
-    ['GER', 'Kicker / Bild', 'camp status and player availability'],
-    ['ENG', 'BBC / Sky / The Athletic', 'confirmed squad and presser context'],
-  ] as const;
-  return media.map<WorldCupSignalItem>((item, index) => ({
-    id: `local-media-${item[0]}`,
-    source: item[1],
-    title: `${teams[index % teams.length] || 'Team'}: ${item[2]}`,
-    summary: 'Local-language reporting is monitored before the global feed fully prices training or lineup clues.',
-    age: `${index + 1}h seed`,
-    tags: [{ label: item[0], tone: 'gray' }, { label: index % 2 ? 'RUMOR' : 'WATCH', tone: index % 2 ? 'gold' : 'blue' }],
-    accent: index % 2 ? 'gold' : 'blue',
+  const homeTeam = teams[0] || 'Home team';
+  const awayTeam = teams[1] || 'Away team';
+  const media: Array<{
+    id: string;
+    country: string;
+    source: string;
+    team: string;
+    title: string;
+    summary: string;
+    age: string;
+    tags: WorldCupSignalItem['tags'];
+    accent: WorldCupSignalTone;
+  }> = [
+    {
+      id: 'arg-training',
+      country: 'ARG',
+      source: 'TYC SPORTS / OLE',
+      team: homeTeam,
+      title: 'Open-session minutes, captain workload and mood check',
+      summary: `${homeTeam} local beat watches who trains separately, who leaves drills early, and whether the coach shields a starter.`,
+      age: '1h seed',
+      tags: [{ label: 'ARG', tone: 'gray' }, { label: 'WATCH', tone: 'blue' }, { label: 'TRAINING', tone: 'green' }],
+      accent: 'blue',
+    },
+    {
+      id: 'bra-xi-leak',
+      country: 'BRA',
+      source: 'GLOBO ESPORTE',
+      team: awayTeam,
+      title: 'XI tendency leak: fullback height and second striker role',
+      summary: `${awayTeam} setup hints are treated as early lineup probability before global desks reprice the match.`,
+      age: '2h seed',
+      tags: [{ label: 'BRA', tone: 'gray' }, { label: 'LINEUP', tone: 'purple' }, { label: 'RUMOR', tone: 'gold' }],
+      accent: 'gold',
+    },
+    {
+      id: 'esp-presser',
+      country: 'ESP',
+      source: 'MARCA / AS',
+      team: homeTeam,
+      title: 'Press-room wording: "managed minutes" and late fitness hints',
+      summary: 'Spanish desk flags coach language that often precedes rotation, bench protection, or reduced match load.',
+      age: '3h seed',
+      tags: [{ label: 'ESP', tone: 'gray' }, { label: 'PRESSER', tone: 'blue' }, { label: 'FITNESS', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'fra-medical',
+      country: 'FRA',
+      source: "L'EQUIPE",
+      team: awayTeam,
+      title: 'Medical-room watch: knock recovery and training restrictions',
+      summary: `${awayTeam} injury wording is cross-checked against club notes, federation photos and final media availability.`,
+      age: '4h seed',
+      tags: [{ label: 'FRA', tone: 'gray' }, { label: 'INJURY', tone: 'red' }, { label: 'VERIFY', tone: 'blue' }],
+      accent: 'red',
+    },
+    {
+      id: 'ger-camp',
+      country: 'GER',
+      source: 'KICKER / BILD',
+      team: homeTeam,
+      title: 'Camp status: closed training shape and selection dispute',
+      summary: 'German local reports are useful when tactical shape leaks before official team sheets are released.',
+      age: '5h seed',
+      tags: [{ label: 'GER', tone: 'gray' }, { label: 'CAMP', tone: 'green' }, { label: 'TACTIC', tone: 'gold' }],
+      accent: 'green',
+    },
+    {
+      id: 'eng-confirm',
+      country: 'ENG',
+      source: 'BBC / SKY / THE ATHLETIC',
+      team: awayTeam,
+      title: 'Confirmed squad context and trusted journalist override',
+      summary: 'High-confidence English sources can override weaker social chatter when roster or availability conflicts appear.',
+      age: '6h seed',
+      tags: [{ label: 'ENG', tone: 'gray' }, { label: 'SOURCE', tone: 'blue' }, { label: 'CONFIRM', tone: 'green' }],
+      accent: 'green',
+    },
+    {
+      id: 'mex-venue',
+      country: 'MEX',
+      source: 'MEDIOTIEMPO / TUDN',
+      team: homeTeam,
+      title: 'Host-city signal: venue access, turf note and crowd heat',
+      summary: match ? `${match.city} local desk watches transport load, field condition and fan-flow disruption before kickoff.` : 'Local venue desk tracks access, pitch and crowd-flow risk.',
+      age: 'live seed',
+      tags: [{ label: 'MEX', tone: 'gray' }, { label: 'VENUE', tone: 'blue' }, { label: 'OPS', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'rsa-camp',
+      country: 'RSA',
+      source: 'SOCCER LADUMA',
+      team: awayTeam,
+      title: 'Camp mood and travel recovery after media day',
+      summary: `${awayTeam} local coverage is watched for morale, late travel load and whether senior players front media duties.`,
+      age: '7h seed',
+      tags: [{ label: 'RSA', tone: 'gray' }, { label: 'MOOD', tone: 'gold' }, { label: 'TRAVEL', tone: 'blue' }],
+      accent: 'gold',
+    },
+    {
+      id: 'kor-training',
+      country: 'KOR',
+      source: 'NAVER SPORTS',
+      team: homeTeam,
+      title: 'Training tempo: pressing drills and striker rotation',
+      summary: 'Local-language training descriptions can expose whether a side is preparing to press, sit deeper or rotate forwards.',
+      age: '8h seed',
+      tags: [{ label: 'KOR', tone: 'gray' }, { label: 'TACTIC', tone: 'purple' }, { label: 'WATCH', tone: 'blue' }],
+      accent: 'purple',
+    },
+    {
+      id: 'qat-heat',
+      country: 'QAT',
+      source: 'AL KASS / BEIN',
+      team: awayTeam,
+      title: 'Heat adaptation and late-session workload note',
+      summary: 'Regional desks are monitored for climate adaptation, hydration breaks and lower-tempo match expectation signals.',
+      age: '9h seed',
+      tags: [{ label: 'QAT', tone: 'gray' }, { label: 'WEATHER', tone: 'blue' }, { label: 'TEMPO', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'latam-market',
+      country: 'LATAM',
+      source: 'ESPN DEPORTES',
+      team: homeTeam,
+      title: 'Public sentiment swing around star availability',
+      summary: 'Spanish-language social/news pickup is tracked when a star-player rumor may move liquidity or fan-heavy markets.',
+      age: '10h seed',
+      tags: [{ label: 'LATAM', tone: 'gray' }, { label: 'MARKET', tone: 'purple' }, { label: 'STAR', tone: 'gold' }],
+      accent: 'purple',
+    },
+    {
+      id: 'wire-crosscheck',
+      country: 'WIRE',
+      source: 'LOCAL CROSSCHECK',
+      team: `${homeTeam} / ${awayTeam}`,
+      title: 'Two-source rule before promoting rumor to alert',
+      summary: 'A local signal only becomes ALERT after an official channel, trusted beat reporter or lineup service confirms it.',
+      age: 'policy',
+      tags: [{ label: 'RULE', tone: 'gray' }, { label: 'VERIFY', tone: 'blue' }, { label: 'ALERT', tone: 'red' }],
+      accent: 'red',
+    },
+  ];
+  return media.map<WorldCupSignalItem>((item) => ({
+    id: `local-media-${item.id}`,
+    source: item.source,
+    title: `${item.team}: ${item.title}`,
+    summary: item.summary,
+    age: item.age,
+    tags: item.tags,
+    accent: item.accent,
   }));
 }
 
