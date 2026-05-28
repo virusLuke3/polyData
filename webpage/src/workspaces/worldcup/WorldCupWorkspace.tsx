@@ -36,7 +36,15 @@ type WorldCupPanelId =
   | 'team-wire'
   | 'odds-tape'
   | 'risk-desk'
-  | 'broadcast';
+  | 'broadcast'
+  | 'official-facts'
+  | 'injury-tracker'
+  | 'lineup-watch'
+  | 'player-pool'
+  | 'xg-model'
+  | 'tactical-matchup'
+  | 'local-media'
+  | 'ref-venue';
 type WorldCupSignalItem = {
   id: string;
   source: string;
@@ -48,23 +56,31 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
-const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v2';
+const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v3';
 const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',
   'match-detail',
   'news',
   'weather',
   'markets',
+  'official-facts',
+  'injury-tracker',
+  'lineup-watch',
+  'xg-model',
+  'tactical-matchup',
   'squads',
   'odds',
+  'group-table',
+  'local-media',
+  'ref-venue',
   'match-wire',
   'host-ops',
-  'group-table',
   'liquidity',
   'team-wire',
   'odds-tape',
   'risk-desk',
   'broadcast',
+  'player-pool',
 ];
 
 function readWorldCupPanelOrder(): WorldCupPanelId[] {
@@ -971,6 +987,263 @@ function buildBroadcastSignals(match: WorldCupMatch | null): WorldCupSignalItem[
   ];
 }
 
+function buildOfficialFactSignals(match: WorldCupMatch | null, city: WorldCupDashboardPayload['cities'][number] | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  return [
+    {
+      id: 'facts-match-centre',
+      source: 'FIFA MATCH CENTRE',
+      title: `${match.homeTeam} vs ${match.awayTeam}: fixture identity verified`,
+      summary: `Match #${match.fifaMatchNumber || '--'} · ${match.group || stageLabel(match.stage)} · ${match.round}.`,
+      age: 'seed verified',
+      tags: [{ label: 'FACT', tone: 'green' }, { label: 'OFFICIAL', tone: 'blue' }],
+      accent: 'green',
+    },
+    {
+      id: 'facts-kickoff',
+      source: 'WORLD CUP DESK',
+      title: `Kickoff lock: ${match.kickoffBeijing} BJT / ${match.kickoffLocal} local`,
+      summary: 'Beijing desk, local desk and venue desk should all reference this same match card.',
+      age: 'seed',
+      tags: [{ label: 'TIME', tone: 'blue' }, { label: 'VERIFY', tone: 'gray' }],
+      accent: 'blue',
+    },
+    {
+      id: 'facts-venue',
+      source: 'HOST CITY',
+      title: `${match.venue}, ${match.city}`,
+      summary: `${city?.countryName || 'Host country'} · capacity ${city?.capacity ? city.capacity.toLocaleString() : 'pending'} · timezone ${city?.timezone || 'local'}.`,
+      age: 'venue seed',
+      tags: [{ label: 'VENUE', tone: 'gold' }, { label: 'OPS', tone: 'green' }],
+      accent: 'gold',
+    },
+    {
+      id: 'facts-team-source',
+      source: 'TEAM CHANNELS',
+      title: 'National team official channels remain primary roster source',
+      summary: 'Team website, X/Instagram and press conference notes are weighted above rumor feeds.',
+      age: 'policy',
+      tags: [{ label: 'ROSTER', tone: 'purple' }, { label: 'SOURCE', tone: 'gray' }],
+      accent: 'purple',
+    },
+  ];
+}
+
+function buildInjurySignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  const teams = [match.homeTeam, match.awayTeam];
+  const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
+  const seedRows = rosters.flatMap((roster) => roster.players.map((player, index) => ({
+    id: `injury-${roster.team}-${player.name}`,
+    source: roster.team,
+    title: player.status === 'injured' ? `${player.name}: injury flag requires confirmation` : `${player.name}: availability watch`,
+    summary: `${player.position || 'ALL'} · ${player.club || 'official squad channel'} · source priority: federation / ESPN tracker / club injury note.`,
+    age: index ? 'watch' : 'seed',
+    tags: [
+      { label: player.status === 'injured' ? 'ALERT' : player.status?.toUpperCase() || 'WATCH', tone: player.status === 'injured' ? 'red' : 'gold' },
+      { label: 'INJURY', tone: 'red' },
+    ],
+    accent: player.status === 'injured' ? 'red' : 'gold',
+  } satisfies WorldCupSignalItem)));
+  const extraRows: WorldCupSignalItem[] = [
+    {
+      id: 'injury-suspension',
+      source: 'DISCIPLINE DESK',
+      title: 'Yellow-card accumulation and suspension risk',
+      summary: 'Center backs, defensive midfielders and starting goalkeeper availability are highest betting-impact checks.',
+      age: 'pre-match',
+      tags: [{ label: 'SUSP', tone: 'red' }, { label: 'VERIFY', tone: 'gray' }],
+      accent: 'red',
+    },
+    {
+      id: 'injury-press',
+      source: 'PRESSER',
+      title: 'Coach comments: late fitness and rotation hints',
+      summary: 'Press conference phrasing is tracked for "minor discomfort", "trained alone", and "not with group" signals.',
+      age: 'pending',
+      tags: [{ label: 'COACH', tone: 'blue' }, { label: 'WATCH', tone: 'gold' }],
+      accent: 'blue',
+    },
+  ];
+  return [...seedRows, ...extraRows].slice(0, 10);
+}
+
+function buildLineupSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  const rows = [
+    ['Flashscore', 'Predicted XI and late starting lineup card', 'Core forwards, goalkeeper and center-back pairing are the first checks.'],
+    ['SofaScore', 'Formation drift and player role watch', 'Look for fullback height, pressing line, and midfield balance changes.'],
+    ['FotMob', 'Player rating context and probable lineup', 'Recently injured starters and high-minute players are marked for rotation risk.'],
+    ['WhoScored', 'Style profile and player matchup notes', 'Weak zones and likely overloads are mapped before kickoff.'],
+    ['Official Team Account', 'Confirmed XI override channel', 'Official lineup has priority over all predictive feeds when published.'],
+  ] as const;
+  return rows.map<WorldCupSignalItem>((row, index) => ({
+    id: `lineup-${index}`,
+    source: row[0],
+    title: `${match.homeTeam} / ${match.awayTeam}: ${row[1]}`,
+    summary: row[2],
+    age: index === 4 ? 'T-60m' : `${index + 1}h seed`,
+    tags: [{ label: index === 4 ? 'CONFIRM' : 'PRED XI', tone: index === 4 ? 'green' : 'purple' }, { label: 'LINEUP', tone: 'blue' }],
+    accent: index === 4 ? 'green' : 'purple',
+  }));
+}
+
+function buildPlayerPoolSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const focusTeams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 4).map((roster) => roster.team);
+  return payload.rosters
+    .filter((roster) => focusTeams.includes(roster.team))
+    .flatMap<WorldCupSignalItem>((roster) => [
+      {
+        id: `pool-${roster.team}-status`,
+        source: roster.team,
+        title: `${roster.team}: final roster window`,
+        summary: `${roster.players.length || 0} seed entries · official federation squad page remains authority.`,
+        age: 'seed',
+        tags: [{ label: 'SQUAD', tone: 'green' }, { label: 'OFFICIAL', tone: 'blue' }],
+        accent: 'green',
+      } satisfies WorldCupSignalItem,
+      ...roster.players.map((player) => ({
+        id: `pool-${roster.team}-${player.name}`,
+        source: player.position || 'PLAYER',
+        title: player.name,
+        summary: `${player.club || 'federation source'} · ${player.status || 'probable'} · number ${player.number || '--'}.`,
+        age: player.status || 'pool',
+        tags: [{ label: player.status?.toUpperCase() || 'WATCH', tone: player.status === 'injured' ? 'red' : 'gold' }, { label: 'TEAM', tone: 'gray' }],
+        accent: player.status === 'injured' ? 'red' : 'blue',
+      } satisfies WorldCupSignalItem)),
+    ])
+    .slice(0, 12);
+}
+
+function buildXgSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  const hash = [...match.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const homeXg = 1.05 + (hash % 7) * 0.11;
+  const awayXg = 0.92 + (hash % 5) * 0.1;
+  const metrics = [
+    ['Opta Analyst', 'xG / xGA baseline', `${match.homeTeam} ${homeXg.toFixed(2)} xG · ${match.awayTeam} ${awayXg.toFixed(2)} xG · xGA spread ${(homeXg - awayXg).toFixed(2)}.`],
+    ['FBref', 'Shot quality and box-touch pressure', `Box touches and non-penalty shot quality are treated as pre-match tempo signals.`],
+    ['StatsBomb', 'Set-piece xG and counter efficiency', 'Dead-ball edge, transition prevention and counter volume are separated from open-play xG.'],
+    ['WhoScored', 'PPDA / pressing success', `PPDA watch: high press vulnerability and buildup escape routes for both teams.`],
+    ['SofaScore', 'Keeper saves over expected', 'Goalkeeper shot-stopping delta is used as downside protection for totals markets.'],
+  ] as const;
+  return metrics.map<WorldCupSignalItem>((metric, index) => ({
+    id: `xg-${index}`,
+    source: metric[0],
+    title: metric[1],
+    summary: metric[2],
+    age: index ? 'model seed' : 'primary',
+    tags: [{ label: 'MODEL', tone: 'purple' }, { label: index === 0 ? 'XG' : 'STAT', tone: 'blue' }],
+    accent: index === 0 ? 'purple' : 'blue',
+  }));
+}
+
+function buildTacticalSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  return [
+    {
+      id: 'tactic-press',
+      source: 'THE ATHLETIC',
+      title: `${match.homeTeam}: press resistance vs ${match.awayTeam} transition threat`,
+      summary: 'High press, rest defense and first-pass escape routes are treated as matchup variables.',
+      age: 'analysis seed',
+      tags: [{ label: 'MATCHUP', tone: 'gold' }, { label: 'PRESS', tone: 'blue' }],
+      accent: 'gold',
+    },
+    {
+      id: 'tactic-wide',
+      source: 'TIFO / COACHES VOICE',
+      title: 'Wide-channel speed mismatch and fullback height',
+      summary: 'Aggressive fullbacks against pace wingers can create more risk than rating models show.',
+      age: 'watch',
+      tags: [{ label: 'WIDE', tone: 'blue' }, { label: 'RISK', tone: 'red' }],
+      accent: 'blue',
+    },
+    {
+      id: 'tactic-setpiece',
+      source: 'OPTA ANALYST',
+      title: 'Set-piece edge versus aerial defensive profile',
+      summary: 'Corners, free kicks and second-ball pressure can move totals and first-goal markets.',
+      age: 'model seed',
+      tags: [{ label: 'SET PIECE', tone: 'green' }, { label: 'XG', tone: 'purple' }],
+      accent: 'green',
+    },
+    {
+      id: 'tactic-block',
+      source: 'ZONAL MARKING',
+      title: 'Low-block control versus counterattack outlet',
+      summary: 'Possession strength does not always imply cover ability when the opponent has fast outlets.',
+      age: 'pre-match',
+      tags: [{ label: 'TACTIC', tone: 'gold' }, { label: 'COUNTER', tone: 'red' }],
+      accent: 'red',
+    },
+  ];
+}
+
+function buildLocalMediaSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const teams = match ? [match.homeTeam, match.awayTeam] : ['Argentina', 'Brazil'];
+  const media = [
+    ['ARG', 'TyC Sports / Ole', 'training-ground note and mood watch'],
+    ['BRA', 'Globo Esporte', 'injury rumor and XI tendency'],
+    ['ESP', 'Marca / AS', 'press-room lineup hint'],
+    ['FRA', "L'Equipe", 'fitness and tactical note'],
+    ['GER', 'Kicker / Bild', 'camp status and player availability'],
+    ['ENG', 'BBC / Sky / The Athletic', 'confirmed squad and presser context'],
+  ] as const;
+  return media.map<WorldCupSignalItem>((item, index) => ({
+    id: `local-media-${item[0]}`,
+    source: item[1],
+    title: `${teams[index % teams.length] || 'Team'}: ${item[2]}`,
+    summary: 'Local-language reporting is monitored before the global feed fully prices training or lineup clues.',
+    age: `${index + 1}h seed`,
+    tags: [{ label: item[0], tone: 'gray' }, { label: index % 2 ? 'RUMOR' : 'WATCH', tone: index % 2 ? 'gold' : 'blue' }],
+    accent: index % 2 ? 'gold' : 'blue',
+  }));
+}
+
+function buildRefVenueSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  if (!match) return [];
+  const weather = payload.weather.find((item) => item.cityId === match.cityId);
+  return [
+    {
+      id: 'ref-weather',
+      source: 'WEATHER DESK',
+      title: `${match.city}: ${weather?.current.condition || 'conditions'} at venue window`,
+      summary: `${weather?.current.tempC ?? '--'}C · wind ${weather?.current.windKph ?? '--'} kph · rain ${weather?.current.precipitationProbability ?? 0}% · pitch pace watch.`,
+      age: 'live seed',
+      tags: [{ label: 'WEATHER', tone: 'blue' }, { label: /storm|rain/i.test(weather?.current.condition || '') ? 'ALERT' : 'WATCH', tone: /storm|rain/i.test(weather?.current.condition || '') ? 'red' : 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'ref-referee',
+      source: 'REFEREE DESK',
+      title: 'Referee assignment pending: cards, fouls and penalty tendency',
+      summary: 'Card profile, foul threshold and VAR usage are tracked for totals, bookings and tempo.',
+      age: 'pending',
+      tags: [{ label: 'REF', tone: 'gold' }, { label: 'CARDS', tone: 'red' }],
+      accent: 'gold',
+    },
+    {
+      id: 'ref-pitch',
+      source: 'VENUE OPS',
+      title: `${match.venue}: grass, roof and stadium operations`,
+      summary: 'Pitch speed, surface condition, roof status and local operations can affect tempo and passing risk.',
+      age: 'venue seed',
+      tags: [{ label: 'PITCH', tone: 'green' }, { label: 'OPS', tone: 'gray' }],
+      accent: 'green',
+    },
+    {
+      id: 'ref-travel',
+      source: 'LOCAL OPS',
+      title: 'Travel, crowd flow and security perimeter',
+      summary: 'Ingress timing, airport load and fan movement are tracked as disruption context.',
+      age: 'ops seed',
+      tags: [{ label: 'TRAVEL', tone: 'blue' }, { label: 'SECURITY', tone: 'red' }],
+      accent: 'red',
+    },
+  ];
+}
+
 export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCupWorkspaceProps) {
   const { payload, loading, error } = useWorldCupDashboard(marketGroups);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -1034,6 +1307,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const oddsSignals = buildOddsSignals(displayOdds, selectedMatch);
   const riskSignals = buildRiskSignals(payload, selectedMatch);
   const broadcastSignals = buildBroadcastSignals(selectedMatch);
+  const officialFactSignals = buildOfficialFactSignals(selectedMatch, selectedCity);
+  const injurySignals = buildInjurySignals(payload, selectedMatch);
+  const lineupSignals = buildLineupSignals(selectedMatch);
+  const playerPoolSignals = buildPlayerPoolSignals(payload, selectedMatch);
+  const xgSignals = buildXgSignals(selectedMatch);
+  const tacticalSignals = buildTacticalSignals(selectedMatch);
+  const localMediaSignals = buildLocalMediaSignals(selectedMatch);
+  const refVenueSignals = buildRefVenueSignals(payload, selectedMatch);
   const terminalMetrics = [
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
     { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${selectedCityMatchCount} matches` },
@@ -1068,6 +1349,14 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     'odds-tape': <SignalFeedPanel title="ODDS TAPE" badge="SEED" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />,
     'risk-desk': <SignalFeedPanel title="RISK DESK" badge="SEED" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />,
     broadcast: <SignalFeedPanel title="BROADCAST" badge="SEED" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />,
+    'official-facts': <SignalFeedPanel title="OFFICIAL FACTS" badge="SEED" count={officialFactSignals.length} items={officialFactSignals} className="wm-worldcup-official-panel" />,
+    'injury-tracker': <SignalFeedPanel title="INJURY TRACKER" badge="SEED" count={injurySignals.length} items={injurySignals} className="wm-worldcup-injury-panel" />,
+    'lineup-watch': <SignalFeedPanel title="LINEUP WATCH" badge="SEED" count={lineupSignals.length} items={lineupSignals} className="wm-worldcup-lineup-panel" />,
+    'player-pool': <SignalFeedPanel title="PLAYER POOL" badge="SEED" count={playerPoolSignals.length} items={playerPoolSignals} className="wm-worldcup-player-pool-panel" />,
+    'xg-model': <SignalFeedPanel title="XG MODEL" badge="SEED" count={xgSignals.length} items={xgSignals} className="wm-worldcup-xg-panel" />,
+    'tactical-matchup': <SignalFeedPanel title="TACTICAL MATCHUP" badge="SEED" count={tacticalSignals.length} items={tacticalSignals} className="wm-worldcup-tactical-panel" />,
+    'local-media': <SignalFeedPanel title="LOCAL MEDIA" badge="SEED" count={localMediaSignals.length} items={localMediaSignals} className="wm-worldcup-local-media-panel" />,
+    'ref-venue': <SignalFeedPanel title="REF VENUE" badge="SEED" count={refVenueSignals.length} items={refVenueSignals} className="wm-worldcup-ref-venue-panel" />,
   };
   const orderedPanels = [...panelOrder, ...WORLD_CUP_PANEL_ORDER.filter((id) => !panelOrder.includes(id))]
     .filter((id, index, array) => array.indexOf(id) === index);
