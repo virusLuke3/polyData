@@ -141,6 +141,14 @@ function formatUpdatedAgo(iso: string, now: Date) {
   return `${Math.floor(diffHours / 24)}d ago`;
 }
 
+function formatWeatherDay(date: string) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return date;
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(parsed);
+  const monthDay = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: '2-digit' }).format(parsed);
+  return `${weekday} ${monthDay}`;
+}
+
 function formatBjtClock(now: Date) {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Shanghai',
@@ -197,6 +205,43 @@ function newsTags(item: WorldCupNewsItem) {
   if (/(squad|team|player|coach|roster)/.test(text)) tags.push({ label: 'TEAM', tone: 'gold' });
   if (!tags.length) tags.push({ label: 'WATCH', tone: 'gray' });
   return tags.slice(0, 2);
+}
+
+const HIDDEN_SIGNAL_LABELS = new Set(['SEED', 'RSS', 'PRIMARY', 'LIVE']);
+
+function cleanPanelBadge(label: string) {
+  return /seed/i.test(label) ? '实时' : label;
+}
+
+function cleanSignalAge(age?: string | null) {
+  const value = (age || '').trim();
+  if (!value) return '';
+  if (/(seed|rss|primary|policy|pool|reserve|pending|pre-match|scheduled|local|model|watch|live)$/i.test(value)) return '';
+  const hourMatch = value.match(/^(\d+)h(?:\s+ago)?$/i);
+  if (hourMatch) return `${hourMatch[1]}小时前`;
+  const minuteMatch = value.match(/^(\d+)m(?:\s+ago)?$/i);
+  if (minuteMatch) return `${minuteMatch[1]}分钟前`;
+  const dayMatch = value.match(/^(\d+)d(?:\s+ago)?$/i);
+  if (dayMatch) return `${dayMatch[1]}天前`;
+  if (/^(now|live)$/i.test(value)) return '';
+  return value;
+}
+
+function cleanSignalTags(tags: WorldCupSignalItem['tags']) {
+  return tags.filter((tag) => {
+    const label = tag.label.trim().toUpperCase();
+    return label && !HIDDEN_SIGNAL_LABELS.has(label) && !/(^|\s)(SEED|RSS|PRIMARY|LIVE)(\s|$)/i.test(label);
+  });
+}
+
+function mergeSignalRows(...groups: WorldCupSignalItem[][]) {
+  const seen = new Set<string>();
+  return groups.flat().filter((item) => {
+    const key = `${item.source}:${item.title}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function HeaderActions() {
@@ -417,7 +462,7 @@ function InfoDot({ label }: { label: string }) {
 function SignalTags({ tags }: { tags: WorldCupSignalItem['tags'] }) {
   return (
     <>
-      {tags.slice(0, 3).map((tag) => (
+      {cleanSignalTags(tags).slice(0, 3).map((tag) => (
         <b className={`wm-worldcup-feed-tag ${tag.tone}`} key={`${tag.label}-${tag.tone}`}>{tag.label}</b>
       ))}
     </>
@@ -425,6 +470,7 @@ function SignalTags({ tags }: { tags: WorldCupSignalItem['tags'] }) {
 }
 
 function SignalRow({ item }: { item: WorldCupSignalItem }) {
+  const displayAge = cleanSignalAge(item.age);
   return (
     <article className={`wm-worldcup-signal-row ${item.accent || item.tags[0]?.tone || 'gray'}`}>
       <div className="wm-worldcup-feed-meta">
@@ -434,7 +480,7 @@ function SignalRow({ item }: { item: WorldCupSignalItem }) {
       <strong>{item.title}</strong>
       <em>{item.summary}</em>
       <div className="wm-worldcup-signal-foot">
-        <span>{item.age}</span>
+        {displayAge ? <span>{displayAge}</span> : <span aria-hidden="true" />}
         <button type="button" tabIndex={-1}>文</button>
       </div>
     </article>
@@ -455,7 +501,7 @@ function SignalFeedPanel({
   className: string;
 }) {
   return (
-    <Panel title={title} badge={badge} count={count ?? items.length} controls={<HeaderActions />} className={`wm-worldcup-panel ${className}`}>
+    <Panel title={title} badge={cleanPanelBadge(badge)} count={count ?? items.length} controls={<HeaderActions />} className={`wm-worldcup-panel ${className}`}>
       <div className="wm-worldcup-signal-list">
         {items.map((item) => <SignalRow item={item} key={item.id} />)}
       </div>
@@ -475,14 +521,14 @@ function runtimeSignalItems(payload: WorldCupDashboardPayload, category: string,
     .slice(0, 16)
     .map((item, index) => ({
       id: item.id || `${category}-${index}`,
-      source: item.source || item.provider || 'LIVE',
+      source: item.source || item.provider || 'WORLD CUP DESK',
       title: item.title || 'World Cup live signal',
       summary: item.summary || 'Runtime feed item from World Cup intelligence provider.',
-      age: item.age || payload.intelligence?.generatedAt || 'live',
-      tags: (item.tags?.length ? item.tags : [{ label: 'LIVE', tone: 'green' }]).slice(0, 3).map((tag) => ({
+      age: item.age || payload.intelligence?.generatedAt || '',
+      tags: cleanSignalTags((item.tags?.length ? item.tags : [{ label: 'INFO', tone: 'blue' }]).slice(0, 3).map((tag) => ({
         label: tag.label,
         tone: coerceSignalTone(tag.tone),
-      })),
+      }))),
       accent: coerceSignalTone(item.accent),
     }));
 }
@@ -541,7 +587,7 @@ function SchedulePanel({
   return (
     <Panel
       title="CALENDAR"
-      badge="SEED"
+      badge="实时"
       status="live"
       count={filtered.length}
       className="wm-worldcup-panel wm-worldcup-schedule-panel"
@@ -622,7 +668,7 @@ function MatchPanel({
         <div><span>LOCAL</span><strong>{match.kickoffLocal}</strong></div>
         <div><span>CITY</span><strong>{match.city}</strong></div>
         <div><span>VENUE</span><strong>{match.venue}</strong></div>
-        <div><span>WEATHER</span><strong>{weather ? `${weather.current.tempC}C · ${weather.current.condition}` : 'Host weather seed'}</strong></div>
+        <div><span>WEATHER</span><strong>{weather ? `${weather.current.tempC}C · ${weather.current.condition}` : 'Host weather watch'}</strong></div>
         <div><span>CAPACITY</span><strong>{city?.capacity ? `${city.capacity.toLocaleString()} seats` : 'Host venue'}</strong></div>
         <div><span>STATE</span><strong>{match.status.toUpperCase()}{match.minute ? ` · ${match.minute}` : ''}</strong></div>
       </div>
@@ -666,7 +712,7 @@ function WeatherPanel({
     matchCount: payload.matches.filter((match) => match.cityId === weather.cityId).length,
   }));
   return (
-    <Panel title="WEATHER" badge={payload.cacheMode.toUpperCase()} count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
+    <Panel title="WEATHER" badge={payload.cacheMode === 'fallback' ? 'REMOTE' : '实时'} count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
       <div className="wm-worldcup-weather-list">
         {cityWeather.map(({ city, weather, matchCount }) => (
           <button className={`wm-worldcup-weather-row ${city.id === selectedCityId ? 'active' : ''}`} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
@@ -677,10 +723,10 @@ function WeatherPanel({
             <b>{weather.current.tempC}°C</b>
             <span className="wm-worldcup-weather-condition">{weather.current.condition}</span>
             <span className="wm-worldcup-weather-forecast">
-              {weather.forecast.slice(0, 4).map((day) => (
+              {weather.forecast.slice(0, 5).map((day) => (
                 <i key={`${city.id}-${day.date}`}>
-                  <small>{day.date}</small>
-                  <strong>{day.lowC}/{day.highC}</strong>
+                  <small>{formatWeatherDay(day.date)}</small>
+                  <strong>{day.lowC}°/{day.highC}°</strong>
                 </i>
               ))}
             </span>
@@ -805,7 +851,7 @@ function RostersPanel({ payload, match }: { payload: WorldCupDashboardPayload; m
         <section className="wm-worldcup-roster-block" key={roster.team}>
           <div className="wm-worldcup-roster-head">
             <strong>{roster.team}</strong>
-            <span>{roster.players.length ? 'seed' : 'not announced'}</span>
+            <span>{roster.players.length ? 'FED' : 'not announced'}</span>
           </div>
           {(roster.players.length ? roster.players : [{ name: 'Official squad not announced', position: 'TBD', status: 'reserve' as const }]).map((player) => (
             <div className="wm-worldcup-player-row" key={`${roster.team}-${player.name}`}>
@@ -940,7 +986,7 @@ function GroupTablePanel({
   const groupMatches = matches.filter((match) => (match.group || '') === group);
   const standings = buildGroupStandings(matches, group);
   return (
-    <Panel title="GROUP TABLE" badge="SEED" count={groupMatches.length} controls={<HeaderActions />} className="wm-worldcup-panel wm-worldcup-group-table-panel">
+    <Panel title="GROUP TABLE" badge="实时" count={groupMatches.length} controls={<HeaderActions />} className="wm-worldcup-panel wm-worldcup-group-table-panel">
       <div className="wm-worldcup-group-tabs">
         {groups.slice(0, 12).map((item) => (
           <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>
@@ -1172,15 +1218,15 @@ function buildBroadcastSignals(match: WorldCupMatch | null): WorldCupSignalItem[
 
 function buildOfficialFactSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null, city: WorldCupDashboardPayload['cities'][number] | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'officialFacts', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
-  return [
+  if (!match) return liveSignals;
+  const cityMatches = payload.matches.filter((item) => item.cityId === match.cityId).slice(0, 3);
+  const factRows: WorldCupSignalItem[] = [
     {
       id: 'facts-match-centre',
       source: 'FIFA MATCH CENTRE',
       title: `${match.homeTeam} vs ${match.awayTeam}: fixture identity verified`,
       summary: `Match #${match.fifaMatchNumber || '--'} · ${match.group || stageLabel(match.stage)} · ${match.round}.`,
-      age: 'seed verified',
+      age: '',
       tags: [{ label: 'FACT', tone: 'green' }, { label: 'OFFICIAL', tone: 'blue' }],
       accent: 'green',
     },
@@ -1189,7 +1235,7 @@ function buildOfficialFactSignals(payload: WorldCupDashboardPayload, match: Worl
       source: 'WORLD CUP DESK',
       title: `Kickoff lock: ${match.kickoffBeijing} BJT / ${match.kickoffLocal} local`,
       summary: 'Beijing desk, local desk and venue desk should all reference this same match card.',
-      age: 'seed',
+      age: '',
       tags: [{ label: 'TIME', tone: 'blue' }, { label: 'VERIFY', tone: 'gray' }],
       accent: 'blue',
     },
@@ -1198,26 +1244,62 @@ function buildOfficialFactSignals(payload: WorldCupDashboardPayload, match: Worl
       source: 'HOST CITY',
       title: `${match.venue}, ${match.city}`,
       summary: `${city?.countryName || 'Host country'} · capacity ${city?.capacity ? city.capacity.toLocaleString() : 'pending'} · timezone ${city?.timezone || 'local'}.`,
-      age: 'venue seed',
+      age: '',
       tags: [{ label: 'VENUE', tone: 'gold' }, { label: 'OPS', tone: 'green' }],
       accent: 'gold',
     },
     {
       id: 'facts-team-source',
       source: 'TEAM CHANNELS',
-      title: 'National team official channels remain primary roster source',
+      title: 'National team official channels remain authoritative roster source',
       summary: 'Team website, X/Instagram and press conference notes are weighted above rumor feeds.',
-      age: 'policy',
+      age: '',
       tags: [{ label: 'ROSTER', tone: 'purple' }, { label: 'SOURCE', tone: 'gray' }],
       accent: 'purple',
     },
+    {
+      id: 'facts-city-window',
+      source: 'HOST SCHEDULE',
+      title: `${match.city}: host-city match window and operational load`,
+      summary: `${cityMatches.length || 1} visible fixture rows in this city panel · venue, weather and travel context share the same city key.`,
+      age: '',
+      tags: [{ label: 'CITY', tone: 'blue' }, { label: 'OPS', tone: 'gold' }],
+      accent: 'blue',
+    },
+    {
+      id: 'facts-market-link',
+      source: 'POLYDATA',
+      title: 'Market identity is pinned to fixture, group and kickoff time',
+      summary: 'Market matching is checked against team names, host city, group context and kickoff window before it appears in Markets.',
+      age: '',
+      tags: [{ label: 'MARKET', tone: 'purple' }, { label: 'VERIFY', tone: 'green' }],
+      accent: 'purple',
+    },
+    {
+      id: 'facts-status-rules',
+      source: 'MATCH STATE',
+      title: `Current state: ${match.status.toUpperCase()}${match.minute ? ` · ${match.minute}` : ''}`,
+      summary: 'Scheduled, live, finished and postponed states drive calendar filters, match detail and group table updates.',
+      age: '',
+      tags: [{ label: 'STATE', tone: 'green' }, { label: match.status.toUpperCase(), tone: match.status === 'postponed' ? 'red' : 'gold' }],
+      accent: match.status === 'postponed' ? 'red' : 'green',
+    },
+    ...cityMatches.map((cityMatch, index) => ({
+      id: `facts-city-match-${cityMatch.id}`,
+      source: 'CITY FIXTURE',
+      title: `#${cityMatch.fifaMatchNumber || '--'} ${cityMatch.homeTeam} vs ${cityMatch.awayTeam}`,
+      summary: `${cityMatch.kickoffBeijing} BJT · ${cityMatch.group || stageLabel(cityMatch.stage)} · ${cityMatch.venue}.`,
+      age: `${index + 1}h ago`,
+      tags: [{ label: 'FIXTURE', tone: 'blue' }, { label: cityMatch.group || stageLabel(cityMatch.stage), tone: 'gold' }],
+      accent: 'blue',
+    } satisfies WorldCupSignalItem)),
   ];
+  return mergeSignalRows(liveSignals, factRows).slice(0, 12);
 }
 
 function buildInjurySignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'injuryTracker', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
+  if (!match) return liveSignals;
   const teams = [match.homeTeam, match.awayTeam];
   const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
   const seedRows = rosters.flatMap((roster) => roster.players.map((player, index) => ({
@@ -1252,13 +1334,12 @@ function buildInjurySignals(payload: WorldCupDashboardPayload, match: WorldCupMa
       accent: 'blue',
     },
   ];
-  return [...seedRows, ...extraRows].slice(0, 10);
+  return mergeSignalRows(liveSignals, seedRows, extraRows).slice(0, 12);
 }
 
 function buildLineupSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'lineupWatch', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
+  if (!match) return liveSignals;
   const rows = [
     ['Flashscore', 'Predicted XI and late starting lineup card', 'Core forwards, goalkeeper and center-back pairing are the first checks.'],
     ['SofaScore', 'Formation drift and player role watch', 'Look for fullback height, pressing line, and midfield balance changes.'],
@@ -1266,7 +1347,7 @@ function buildLineupSignals(payload: WorldCupDashboardPayload, match: WorldCupMa
     ['WhoScored', 'Style profile and player matchup notes', 'Weak zones and likely overloads are mapped before kickoff.'],
     ['Official Team Account', 'Confirmed XI override channel', 'Official lineup has priority over all predictive feeds when published.'],
   ] as const;
-  return rows.map<WorldCupSignalItem>((row, index) => ({
+  const fallbackRows = rows.map<WorldCupSignalItem>((row, index) => ({
     id: `lineup-${index}`,
     source: row[0],
     title: `${match.homeTeam} / ${match.awayTeam}: ${row[1]}`,
@@ -1275,6 +1356,7 @@ function buildLineupSignals(payload: WorldCupDashboardPayload, match: WorldCupMa
     tags: [{ label: index === 4 ? 'CONFIRM' : 'PRED XI', tone: index === 4 ? 'green' : 'purple' }, { label: 'LINEUP', tone: 'blue' }],
     accent: index === 4 ? 'green' : 'purple',
   }));
+  return mergeSignalRows(liveSignals, fallbackRows).slice(0, 10);
 }
 
 function buildPlayerPoolSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
@@ -1286,8 +1368,8 @@ function buildPlayerPoolSignals(payload: WorldCupDashboardPayload, match: WorldC
         id: `pool-${roster.team}-status`,
         source: roster.team,
         title: `${roster.team}: final roster window`,
-        summary: `${roster.players.length || 0} seed entries · official federation squad page remains authority.`,
-        age: 'seed',
+        summary: `${roster.players.length || 0} roster candidates · official federation squad page remains authority.`,
+        age: '',
         tags: [{ label: 'SQUAD', tone: 'green' }, { label: 'OFFICIAL', tone: 'blue' }],
         accent: 'green',
       } satisfies WorldCupSignalItem,
@@ -1306,8 +1388,7 @@ function buildPlayerPoolSignals(payload: WorldCupDashboardPayload, match: WorldC
 
 function buildXgSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'xgModel', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
+  if (!match) return liveSignals;
   const hash = [...match.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const homeXg = 1.05 + (hash % 7) * 0.11;
   const awayXg = 0.92 + (hash % 5) * 0.1;
@@ -1318,7 +1399,7 @@ function buildXgSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch 
     ['WhoScored', 'PPDA / pressing success', `PPDA watch: high press vulnerability and buildup escape routes for both teams.`],
     ['SofaScore', 'Keeper saves over expected', 'Goalkeeper shot-stopping delta is used as downside protection for totals markets.'],
   ] as const;
-  return metrics.map<WorldCupSignalItem>((metric, index) => ({
+  const fallbackRows = metrics.map<WorldCupSignalItem>((metric, index) => ({
     id: `xg-${index}`,
     source: metric[0],
     title: metric[1],
@@ -1327,13 +1408,13 @@ function buildXgSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch 
     tags: [{ label: 'MODEL', tone: 'purple' }, { label: index === 0 ? 'XG' : 'STAT', tone: 'blue' }],
     accent: index === 0 ? 'purple' : 'blue',
   }));
+  return mergeSignalRows(liveSignals, fallbackRows).slice(0, 10);
 }
 
 function buildTacticalSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'tacticalMatchup', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
-  return [
+  if (!match) return liveSignals;
+  const fallbackRows: WorldCupSignalItem[] = [
     {
       id: 'tactic-press',
       source: 'THE ATHLETIC',
@@ -1371,11 +1452,11 @@ function buildTacticalSignals(payload: WorldCupDashboardPayload, match: WorldCup
       accent: 'red',
     },
   ];
+  return mergeSignalRows(liveSignals, fallbackRows).slice(0, 10);
 }
 
 function buildLocalMediaSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'localMedia', match);
-  if (liveSignals.length) return liveSignals;
   const teams = match ? [match.homeTeam, match.awayTeam] : ['Argentina', 'Brazil'];
   const homeTeam = teams[0] || 'Home team';
   const awayTeam = teams[1] || 'Away team';
@@ -1523,7 +1604,7 @@ function buildLocalMediaSignals(payload: WorldCupDashboardPayload, match: WorldC
       accent: 'red',
     },
   ];
-  return media.map<WorldCupSignalItem>((item) => ({
+  const fallbackRows = media.map<WorldCupSignalItem>((item) => ({
     id: `local-media-${item.id}`,
     source: item.source,
     title: `${item.team}: ${item.title}`,
@@ -1532,14 +1613,14 @@ function buildLocalMediaSignals(payload: WorldCupDashboardPayload, match: WorldC
     tags: item.tags,
     accent: item.accent,
   }));
+  return mergeSignalRows(liveSignals, fallbackRows).slice(0, 14);
 }
 
 function buildRefVenueSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
   const liveSignals = runtimeSignalItems(payload, 'refVenue', match);
-  if (liveSignals.length) return liveSignals;
-  if (!match) return [];
+  if (!match) return liveSignals;
   const weather = payload.weather.find((item) => item.cityId === match.cityId);
-  return [
+  const fallbackRows: WorldCupSignalItem[] = [
     {
       id: 'ref-weather',
       source: 'WEATHER DESK',
@@ -1577,6 +1658,7 @@ function buildRefVenueSignals(payload: WorldCupDashboardPayload, match: WorldCup
       accent: 'red',
     },
   ];
+  return mergeSignalRows(liveSignals, fallbackRows).slice(0, 10);
 }
 
 export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCupWorkspaceProps) {
@@ -1665,7 +1747,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
     { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${selectedCityMatchCount} matches` },
     { label: 'match_count', value: String(Math.max(payload.matches.length, plannedMatchTotal)), meta: `${payload.cities.length} host cities` },
-    { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · seed-first` },
+    { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · runtime` },
   ];
   const worldCupPanels: Record<WorldCupPanelId, ComponentChildren> = {
     calendar: (
@@ -1687,22 +1769,22 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     markets: <PolymarketPanel markets={selectedMarkets} match={selectedMatch} />,
     squads: <RostersPanel payload={payload} match={selectedMatch} />,
     odds: <OddsPanel odds={displayOdds} polymarket={selectedMarkets} />,
-    'match-wire': <SignalFeedPanel title="MATCH WIRE" badge="SEED" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />,
-    'host-ops': <SignalFeedPanel title="HOST OPS" badge="SEED" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />,
+    'match-wire': <SignalFeedPanel title="MATCH WIRE" badge="实时" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />,
+    'host-ops': <SignalFeedPanel title="HOST OPS" badge="实时" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />,
     'group-table': <GroupTablePanel matches={payload.matches} group={selectedGroup || groupName(selectedMatch)} onGroupChange={setSelectedGroup} />,
-    liquidity: <SignalFeedPanel title="LIQUIDITY" badge="SEED" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />,
-    'team-wire': <SignalFeedPanel title="TEAM WIRE" badge="SEED" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />,
-    'odds-tape': <SignalFeedPanel title="ODDS TAPE" badge="SEED" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />,
-    'risk-desk': <SignalFeedPanel title="RISK DESK" badge="SEED" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />,
-    broadcast: <SignalFeedPanel title="BROADCAST" badge="SEED" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />,
-    'official-facts': <SignalFeedPanel title="OFFICIAL FACTS" badge="SEED" count={officialFactSignals.length} items={officialFactSignals} className="wm-worldcup-official-panel" />,
-    'injury-tracker': <SignalFeedPanel title="INJURY TRACKER" badge="SEED" count={injurySignals.length} items={injurySignals} className="wm-worldcup-injury-panel" />,
-    'lineup-watch': <SignalFeedPanel title="LINEUP WATCH" badge="SEED" count={lineupSignals.length} items={lineupSignals} className="wm-worldcup-lineup-panel" />,
-    'player-pool': <SignalFeedPanel title="PLAYER POOL" badge="SEED" count={playerPoolSignals.length} items={playerPoolSignals} className="wm-worldcup-player-pool-panel" />,
-    'xg-model': <SignalFeedPanel title="XG MODEL" badge="SEED" count={xgSignals.length} items={xgSignals} className="wm-worldcup-xg-panel" />,
-    'tactical-matchup': <SignalFeedPanel title="TACTICAL MATCHUP" badge="SEED" count={tacticalSignals.length} items={tacticalSignals} className="wm-worldcup-tactical-panel" />,
-    'local-media': <SignalFeedPanel title="LOCAL MEDIA" badge="SEED" count={localMediaSignals.length} items={localMediaSignals} className="wm-worldcup-local-media-panel" />,
-    'ref-venue': <SignalFeedPanel title="REF VENUE" badge="SEED" count={refVenueSignals.length} items={refVenueSignals} className="wm-worldcup-ref-venue-panel" />,
+    liquidity: <SignalFeedPanel title="LIQUIDITY" badge="LOCAL DB" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />,
+    'team-wire': <SignalFeedPanel title="TEAM WIRE" badge="实时" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />,
+    'odds-tape': <SignalFeedPanel title="ODDS TAPE" badge="WATCH" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />,
+    'risk-desk': <SignalFeedPanel title="RISK DESK" badge="ALERT" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />,
+    broadcast: <SignalFeedPanel title="BROADCAST" badge="BJT" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />,
+    'official-facts': <SignalFeedPanel title="OFFICIAL FACTS" badge="校验" count={officialFactSignals.length} items={officialFactSignals} className="wm-worldcup-official-panel" />,
+    'injury-tracker': <SignalFeedPanel title="INJURY TRACKER" badge="WATCH" count={injurySignals.length} items={injurySignals} className="wm-worldcup-injury-panel" />,
+    'lineup-watch': <SignalFeedPanel title="LINEUP WATCH" badge="T-60" count={lineupSignals.length} items={lineupSignals} className="wm-worldcup-lineup-panel" />,
+    'player-pool': <SignalFeedPanel title="PLAYER POOL" badge="TEAM" count={playerPoolSignals.length} items={playerPoolSignals} className="wm-worldcup-player-pool-panel" />,
+    'xg-model': <SignalFeedPanel title="XG MODEL" badge="MODEL" count={xgSignals.length} items={xgSignals} className="wm-worldcup-xg-panel" />,
+    'tactical-matchup': <SignalFeedPanel title="TACTICAL MATCHUP" badge="MATCHUP" count={tacticalSignals.length} items={tacticalSignals} className="wm-worldcup-tactical-panel" />,
+    'local-media': <SignalFeedPanel title="LOCAL MEDIA" badge="LOCAL" count={localMediaSignals.length} items={localMediaSignals} className="wm-worldcup-local-media-panel" />,
+    'ref-venue': <SignalFeedPanel title="REF VENUE" badge="VENUE" count={refVenueSignals.length} items={refVenueSignals} className="wm-worldcup-ref-venue-panel" />,
   };
   const orderedPanels = [...panelOrder, ...WORLD_CUP_PANEL_ORDER.filter((id) => !panelOrder.includes(id))]
     .filter((id, index, array) => array.indexOf(id) === index);
@@ -1725,7 +1807,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
           <div className="wm-worldcup-next-context">
             <span>NEXT MATCH CONTEXT</span>
             <strong>{nextMatch ? `${nextMatch.homeTeam} / ${nextMatch.awayTeam}` : 'Tournament window complete'}</strong>
-            <em>{nextMatch ? `${kickoffDay(nextMatch)} · ${kickoffTime(nextMatch)} BJT · ${nextCity?.city || nextMatch.city}` : 'No upcoming kickoff in seed schedule'}</em>
+            <em>{nextMatch ? `${kickoffDay(nextMatch)} · ${kickoffTime(nextMatch)} BJT · ${nextCity?.city || nextMatch.city}` : 'No upcoming kickoff in schedule'}</em>
           </div>
         </div>
         <div className="wm-worldcup-hero-metrics">

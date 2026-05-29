@@ -17249,3 +17249,80 @@ body.panel-resize-active iframe {
   background: linear-gradient(90deg, #23f07e, #37c7f4) !important;
   box-shadow: 0 0 10px rgba(35, 240, 126, 0.9), 0 0 22px rgba(55, 199, 244, 0.42) !important;
 }
+
+/* Remove development-state clutter and give weather dates enough room to read.
+   WorldMonitor rows use one source dot and compact but legible forecast chips. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-feed-meta span::before {
+  display: none !important;
+  content: none !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-signal-foot span:empty {
+  display: none !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row {
+  grid-template-columns: minmax(0, 1fr) 42px !important;
+  min-height: 72px !important;
+  padding: 7px 10px !important;
+  gap: 3px 8px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-main strong {
+  overflow: hidden !important;
+  font-size: 10.8px !important;
+  font-weight: 520 !important;
+  line-height: 1.12 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-main em {
+  display: block !important;
+  margin-top: 3px !important;
+  font-size: 7.8px !important;
+  line-height: 1.1 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-row b {
+  font-size: 10.6px !important;
+  line-height: 1.05 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-condition {
+  font-size: 7.2px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-forecast {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 3px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-forecast i {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  gap: 2px !important;
+  min-height: 28px !important;
+  padding: 3px 4px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-forecast small {
+  display: block !important;
+  overflow: visible !important;
+  color: #78818c !important;
+  font-size: 6.4px !important;
+  line-height: 1.05 !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-weather-forecast strong {
+  display: block !important;
+  color: #d5dae0 !important;
+  font-size: 7.2px !important;
+  font-weight: 520 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
