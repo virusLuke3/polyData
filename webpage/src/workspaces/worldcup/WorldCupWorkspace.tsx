@@ -1,5 +1,5 @@
 import { type ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel, PanelLoading } from '@/components/Panel';
 import {
   filterWorldCupNews,
@@ -57,6 +57,7 @@ type WorldCupSignalItem = {
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
 const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v3';
+const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
 const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',
   'match-detail',
@@ -96,12 +97,12 @@ function readWorldCupPanelOrder(): WorldCupPanelId[] {
   }
 }
 
-function reorderWorldCupPanels(panelIds: WorldCupPanelId[], draggedId: WorldCupPanelId, targetId: WorldCupPanelId) {
+function reorderWorldCupPanels(panelIds: WorldCupPanelId[], draggedId: WorldCupPanelId, targetId: WorldCupPanelId, insertAfter: boolean) {
   if (draggedId === targetId) return panelIds;
   const next = panelIds.filter((id) => id !== draggedId);
   const targetIndex = next.indexOf(targetId);
   if (targetIndex < 0) return panelIds;
-  next.splice(targetIndex, 0, draggedId);
+  next.splice(targetIndex + (insertAfter ? 1 : 0), 0, draggedId);
   return next;
 }
 
@@ -212,39 +213,197 @@ function WorldCupPanelSlot({
   panelId,
   draggingId,
   children,
-  onDragStart,
-  onDragEnd,
-  onDropPanel,
+  onMovePanel,
+  onDragStateChange,
 }: {
   panelId: WorldCupPanelId;
   draggingId: WorldCupPanelId | null;
   children: ComponentChildren;
-  onDragStart: (panelId: WorldCupPanelId) => void;
-  onDragEnd: () => void;
-  onDropPanel: (targetId: WorldCupPanelId) => void;
+  onMovePanel: (draggedId: WorldCupPanelId, targetId: WorldCupPanelId, insertAfter: boolean) => void;
+  onDragStateChange: (panelId: WorldCupPanelId | null) => void;
 }) {
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef({
+    active: false,
+    started: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    offsetX: 0,
+    offsetY: 0,
+    rafId: 0,
+    ghost: null as HTMLElement | null,
+    indicator: null as HTMLElement | null,
+    lastTarget: null as HTMLElement | null,
+  });
+
+  const clearDragVisuals = () => {
+    const state = dragRef.current;
+    if (state.rafId) {
+      window.cancelAnimationFrame(state.rafId);
+      state.rafId = 0;
+    }
+    slotRef.current?.classList.remove('dragging-source');
+    state.lastTarget?.classList.remove('panel-drop-target');
+    state.lastTarget = null;
+    if (state.ghost) {
+      const ghost = state.ghost;
+      ghost.style.opacity = '0';
+      window.setTimeout(() => ghost.remove(), 140);
+      state.ghost = null;
+    }
+    if (state.indicator) {
+      const indicator = state.indicator;
+      indicator.style.opacity = '0';
+      window.setTimeout(() => indicator.remove(), 140);
+      state.indicator = null;
+    }
+    onDragStateChange(null);
+  };
+
+  const findDropTarget = (clientX: number, clientY: number) => {
+    const hit = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const targetSlot = hit?.closest<HTMLElement>('.wm-worldcup-matrix-cell[data-worldcup-panel-id]') || null;
+    if (!targetSlot) return null;
+    const targetPanelId = targetSlot.dataset.worldcupPanelId as WorldCupPanelId | undefined;
+    if (!targetPanelId || targetPanelId === panelId) return null;
+    const rect = targetSlot.getBoundingClientRect();
+    return {
+      targetSlot,
+      targetPanelId,
+      insertAfter: clientY > rect.top + rect.height / 2 || (
+        Math.abs(clientY - (rect.top + rect.height / 2)) < Math.min(44, rect.height / 4)
+        && clientX > rect.left + rect.width / 2
+      ),
+      rect,
+    };
+  };
+
+  const updateDropIndicator = (clientX: number, clientY: number) => {
+    const state = dragRef.current;
+    if (!state.indicator) return;
+    const target = findDropTarget(clientX, clientY);
+    if (!target) {
+      state.indicator.style.opacity = '0';
+      state.lastTarget?.classList.remove('panel-drop-target');
+      state.lastTarget = null;
+      return;
+    }
+    if (target.targetSlot !== state.lastTarget) {
+      state.lastTarget?.classList.remove('panel-drop-target');
+      target.targetSlot.classList.add('panel-drop-target');
+      state.lastTarget = target.targetSlot;
+    }
+    state.indicator.style.left = `${target.rect.left}px`;
+    state.indicator.style.top = `${target.insertAfter ? target.rect.bottom : target.rect.top - 3}px`;
+    state.indicator.style.width = `${target.rect.width}px`;
+    state.indicator.style.opacity = '0.92';
+  };
+
+  const startDrag = (event: MouseEvent) => {
+    if (event.button !== 0 || !slotRef.current) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea, [role="button"]')) return;
+    if (!target.closest('.wm-panel-header')) return;
+    const rect = slotRef.current.getBoundingClientRect();
+    dragRef.current = {
+      active: true,
+      started: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      rafId: 0,
+      ghost: null,
+      indicator: null,
+      lastTarget: null,
+    };
+    event.preventDefault();
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const state = dragRef.current;
+      if (!state.active || !slotRef.current) return;
+      state.lastX = moveEvent.clientX;
+      state.lastY = moveEvent.clientY;
+      if (!state.started) {
+        const dx = Math.abs(moveEvent.clientX - state.startX);
+        const dy = Math.abs(moveEvent.clientY - state.startY);
+        if (dx < WORLD_CUP_PANEL_DRAG_THRESHOLD && dy < WORLD_CUP_PANEL_DRAG_THRESHOLD) return;
+        const sourceRect = slotRef.current.getBoundingClientRect();
+        const sourcePanel = slotRef.current.querySelector<HTMLElement>(':scope > .wm-worldcup-panel') || slotRef.current;
+        state.started = true;
+        onDragStateChange(panelId);
+        const ghost = sourcePanel.cloneNode(true) as HTMLElement;
+        ghost.querySelectorAll('iframe').forEach((frame) => frame.remove());
+        ghost.classList.add('wm-panel-drag-ghost', 'wm-worldcup-drag-ghost');
+        ghost.setAttribute('aria-hidden', 'true');
+        ghost.style.position = 'fixed';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '10000';
+        ghost.style.width = `${sourceRect.width}px`;
+        ghost.style.height = `${sourceRect.height}px`;
+        ghost.style.left = `${moveEvent.clientX - state.offsetX}px`;
+        ghost.style.top = `${moveEvent.clientY - state.offsetY}px`;
+        document.body.appendChild(ghost);
+        state.ghost = ghost;
+        slotRef.current.classList.add('dragging-source');
+        const indicator = document.createElement('div');
+        indicator.className = 'wm-panel-drop-indicator wm-worldcup-drop-indicator';
+        document.body.appendChild(indicator);
+        state.indicator = indicator;
+      }
+      if (state.rafId) window.cancelAnimationFrame(state.rafId);
+      state.rafId = window.requestAnimationFrame(() => {
+        const latest = dragRef.current;
+        if (latest.ghost) {
+          latest.ghost.style.left = `${latest.lastX - latest.offsetX}px`;
+          latest.ghost.style.top = `${latest.lastY - latest.offsetY}px`;
+        }
+        updateDropIndicator(latest.lastX, latest.lastY);
+        latest.rafId = 0;
+      });
+    };
+
+    const finishDrag = () => {
+      const state = dragRef.current;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', finishDrag);
+      document.removeEventListener('keydown', onKeyDown);
+      if (state.active && state.started) {
+        const targetDrop = findDropTarget(state.lastX, state.lastY);
+        if (targetDrop) onMovePanel(panelId, targetDrop.targetPanelId, targetDrop.insertAfter);
+      }
+      state.active = false;
+      state.started = false;
+      clearDragVisuals();
+    };
+
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== 'Escape') return;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', finishDrag);
+      document.removeEventListener('keydown', onKeyDown);
+      dragRef.current.active = false;
+      dragRef.current.started = false;
+      clearDragVisuals();
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', finishDrag);
+    document.addEventListener('keydown', onKeyDown);
+  };
+
+  useEffect(() => clearDragVisuals, []);
+
   return (
     <div
+      ref={slotRef}
       className={`wm-worldcup-matrix-cell wm-worldcup-draggable-cell ${draggingId === panelId ? 'dragging-source' : ''}`}
       data-worldcup-panel-id={panelId}
-      draggable
-      onDragStart={(event) => {
-        const target = event.target as HTMLElement;
-        if (!target.closest('.wm-panel-header') || target.closest('button, a, input, select, textarea, [role="button"]')) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer?.setData('text/plain', panelId);
-        event.dataTransfer?.setDragImage(target.closest('.wm-worldcup-matrix-cell') || target, 18, 18);
-        onDragStart(panelId);
-      }}
-      onDragEnd={onDragEnd}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault();
-        const dragged = event.dataTransfer?.getData('text/plain');
-        if (dragged) onDropPanel(panelId);
-      }}
+      onMouseDown={(event) => startDrag(event as MouseEvent)}
     >
       {children}
     </div>
@@ -1547,9 +1706,8 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   };
   const orderedPanels = [...panelOrder, ...WORLD_CUP_PANEL_ORDER.filter((id) => !panelOrder.includes(id))]
     .filter((id, index, array) => array.indexOf(id) === index);
-  const dropPanel = (targetId: WorldCupPanelId) => {
-    if (!draggingPanelId) return;
-    setPanelOrder((current) => reorderWorldCupPanels(current, draggingPanelId, targetId));
+  const movePanel = (draggedId: WorldCupPanelId, targetId: WorldCupPanelId, insertAfter: boolean) => {
+    setPanelOrder((current) => reorderWorldCupPanels(current, draggedId, targetId, insertAfter));
     setDraggingPanelId(null);
   };
 
@@ -1617,9 +1775,8 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
             draggingId={draggingPanelId}
             key={panelId}
             panelId={panelId}
-            onDragStart={setDraggingPanelId}
-            onDragEnd={() => setDraggingPanelId(null)}
-            onDropPanel={dropPanel}
+            onDragStateChange={setDraggingPanelId}
+            onMovePanel={movePanel}
           >
             {worldCupPanels[panelId]}
           </WorldCupPanelSlot>
