@@ -3557,11 +3557,58 @@ body.panel-resize-active iframe {
   color: rgba(255, 255, 255, 0.42);
 }
 
+.wm-worldcup-map-mode,
+.wm-worldcup-map-time-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 8px;
+}
+
+.wm-worldcup-map-mode button,
+.wm-worldcup-map-time-filter button {
+  height: 24px;
+  min-width: 42px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #8e9698;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wm-worldcup-map-mode button.active,
+.wm-worldcup-map-time-filter button.active {
+  border-color: rgba(255, 186, 54, 0.42);
+  background: rgba(255, 186, 54, 0.11);
+  color: #ffbc3f;
+}
+
 .wm-worldcup-map-layer-list {
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 8px;
   scrollbar-width: thin;
+}
+
+.wm-worldcup-map-layer-group {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 9px;
+}
+
+.wm-worldcup-map-layer-group h4 {
+  margin: 4px 2px 2px;
+  color: #6f777a;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .wm-worldcup-map-layer-row {
@@ -3584,6 +3631,11 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-layer-row.active {
   border-color: rgba(255, 255, 255, 0.13);
   background: rgba(255, 255, 255, 0.042);
+}
+
+.wm-worldcup-map-layer-row.disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .wm-worldcup-map-layer-row:hover {
@@ -3639,10 +3691,10 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-layer-panel footer {
   padding: 9px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
-  color: #a6acad;
-  font-size: 11px;
+  color: #38d7ef;
+  font-size: 10px;
   font-weight: 950;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
 }
 
 .deckgl-tooltip {
@@ -4111,7 +4163,7 @@ body.panel-resize-active iframe {
   right: 16px;
   top: 18px;
   width: min(390px, calc(100% - 318px));
-  max-height: calc(100% - 88px);
+  max-height: calc(100% - 34px);
   overflow: hidden auto;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -4165,12 +4217,15 @@ body.panel-resize-active iframe {
 }
 
 .wm-worldcup-map-inspector-head > span,
-.wm-worldcup-map-inspector > span,
-.wm-worldcup-map-inspector > em,
+.wm-worldcup-map-city-header > span,
+.wm-worldcup-map-city-header > em,
 .wm-worldcup-map-inspector small,
 .wm-worldcup-map-inspector-next span,
 .wm-worldcup-map-inspector-next em,
 .wm-worldcup-map-weather-now span,
+.wm-worldcup-map-market-card > span,
+.wm-worldcup-map-venue-card > span,
+.wm-worldcup-map-team-card > span,
 .wm-worldcup-map-weather-generated,
 .wm-worldcup-map-inspector-section-title span {
   color: #8f9898;
@@ -4181,32 +4236,67 @@ body.panel-resize-active iframe {
   text-transform: uppercase;
 }
 
-.wm-worldcup-map-inspector > strong {
+.wm-worldcup-map-city-header {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding-right: 90px;
+}
+
+.wm-worldcup-map-city-header > strong {
   display: block;
   overflow: hidden;
-  margin-top: 7px;
   color: #f6f7f3;
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1.05;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wm-worldcup-map-inspector.collapsed > strong {
-  margin-top: 5px;
+.wm-worldcup-map-inspector.collapsed .wm-worldcup-map-city-header {
+  padding-right: 0;
+}
+
+.wm-worldcup-map-inspector.collapsed .wm-worldcup-map-city-header > strong {
   font-size: 14px;
 }
 
-.wm-worldcup-map-inspector.collapsed > em {
+.wm-worldcup-map-inspector.collapsed .wm-worldcup-map-city-header > em,
+.wm-worldcup-map-inspector.collapsed .wm-worldcup-map-risk-score {
   display: none;
 }
 
-.wm-worldcup-map-inspector > em {
+.wm-worldcup-map-city-header > em {
   display: block;
   overflow: hidden;
-  margin-top: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wm-worldcup-map-risk-score {
+  position: absolute;
+  right: 0;
+  top: 18px;
+  min-width: 76px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
+  text-align: right;
+}
+
+.wm-worldcup-map-risk-score b {
+  display: block;
+  color: #ffbc3f;
+  font-size: 11px;
+}
+
+.wm-worldcup-map-risk-score.high b {
+  color: #ff555f;
+}
+
+.wm-worldcup-map-risk-score.low b {
+  color: #a8b0b2;
 }
 
 .wm-worldcup-map-inspector-stats {
@@ -4233,7 +4323,7 @@ body.panel-resize-active iframe {
 
 .wm-worldcup-map-inspector-next {
   margin-top: 12px;
-  padding: 11px;
+  padding: 9px;
   border-left: 4px solid var(--wc-gold);
   background: linear-gradient(90deg, rgba(255, 176, 45, 0.11), rgba(87, 214, 247, 0.035));
 }
@@ -4241,7 +4331,7 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-next strong {
   display: block;
   overflow: hidden;
-  margin-top: 7px;
+  margin-top: 5px;
   color: #f5f7f4;
   font-size: 15px;
   text-overflow: ellipsis;
@@ -4251,9 +4341,107 @@ body.panel-resize-active iframe {
 .wm-worldcup-map-inspector-next em {
   display: block;
   overflow: hidden;
-  margin-top: 7px;
+  margin-top: 5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wm-worldcup-map-odds-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.wm-worldcup-map-odds-strip span {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid rgba(155, 104, 255, 0.18);
+  background: rgba(155, 104, 255, 0.055);
+}
+
+.wm-worldcup-map-odds-strip small,
+.wm-worldcup-map-next-risk-line span,
+.wm-worldcup-map-city-summary small,
+.wm-worldcup-map-impact-grid small {
+  display: block;
+  overflow: hidden;
+  color: #858d91;
+  font-size: 8px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-odds-strip b {
+  color: #bda6ff;
+  font-size: 13px;
+}
+
+.wm-worldcup-map-next-risk-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.wm-worldcup-map-city-summary,
+.wm-worldcup-map-impact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.wm-worldcup-map-city-summary span,
+.wm-worldcup-map-impact-grid span {
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.wm-worldcup-map-city-summary b,
+.wm-worldcup-map-impact-grid b {
+  overflow: hidden;
+  margin-top: 3px;
+  color: #e8ecec;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wm-worldcup-map-tabs button {
+  height: 29px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #858d91;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.wm-worldcup-map-tabs button.active {
+  border-bottom-color: #ffbc3f;
+  color: #f3f4f0;
+}
+
+.wm-worldcup-map-tab-body {
+  min-height: 150px;
 }
 
 .wm-worldcup-map-inspector-forecast {
@@ -4273,6 +4461,40 @@ body.panel-resize-active iframe {
   padding: 10px;
   border: 1px solid rgba(87, 214, 247, 0.18);
   background: rgba(4, 14, 16, 0.52);
+}
+
+.wm-worldcup-map-market-card,
+.wm-worldcup-map-venue-card,
+.wm-worldcup-map-team-card {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.wm-worldcup-map-market-card strong,
+.wm-worldcup-map-venue-card strong,
+.wm-worldcup-map-team-card strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 6px;
+  color: #f2f4f2;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-map-venue-card em {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  color: #8f9898;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .wm-worldcup-map-weather-now strong {
@@ -4322,6 +4544,16 @@ body.panel-resize-active iframe {
   gap: 0;
   margin-top: 12px;
   overflow-y: auto;
+}
+
+.wm-worldcup-map-match-group h5 {
+  margin: 10px 0 0;
+  padding: 0 0 6px;
+  color: #8f9898;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .wm-worldcup-map-inspector-matches p {
@@ -4451,6 +4683,15 @@ body.panel-resize-active iframe {
 
 .wm-worldcup-maplibre-legend b.market {
   background: #62beff;
+}
+
+.wm-worldcup-maplibre-legend b.risk {
+  background: #ff555f;
+}
+
+.wm-worldcup-maplibre-legend b.unavailable {
+  border: 1px solid #6d7375;
+  background: transparent;
 }
 
 .wm-worldcup-maplibre-legend b.admin {

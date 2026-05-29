@@ -1437,6 +1437,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     WORLD_CUP_HOST_MATCH_COUNTS[selectedCity.id] || 0,
     payload.matches.filter((match) => match.cityId === selectedCity.id).length,
   );
+  const plannedMatchTotal = payload.cities.reduce((sum, city) => sum + (WORLD_CUP_HOST_MATCH_COUNTS[city.id] || 0), 0);
   const displayOdds = expandOddsSnapshots(selectedOdds.length ? selectedOdds : payload.odds, selectedMatch);
   const matchSignals = buildMatchSignals(selectedMatch, selectedMarkets);
   const hostOpsSignals = buildHostOpsSignals(payload, selectedCity.id);
@@ -1456,7 +1457,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const terminalMetrics = [
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
     { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${selectedCityMatchCount} matches` },
-    { label: 'match_count', value: String(payload.matches.length), meta: `${payload.cities.length} host cities` },
+    { label: 'match_count', value: String(Math.max(payload.matches.length, plannedMatchTotal)), meta: `${payload.cities.length} host cities` },
     { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · seed-first` },
   ];
   const worldCupPanels: Record<WorldCupPanelId, ComponentChildren> = {
@@ -1539,9 +1540,13 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
             <div className="wm-map-title">World Cup Host Atlas</div>
           </div>
           <div className="wm-map-status-strip">
-            <span className="wm-status-chip">WORLD CUP</span>
+            <span className="wm-status-chip">WORLD CUP · PRE-TOURNAMENT</span>
             <div className="wm-map-clock">{formatBjtClock(now)} BJT</div>
-            <span className="wm-map-next-chip">{nextCity ? `NEXT · ${nextCity.city}` : 'NEXT · --'}</span>
+            <span className="wm-map-next-chip">
+              {nextCity && nextMatch
+                ? `NEXT · ${nextCity.city} · M#${nextMatch.fifaMatchNumber || '--'} · ${formatCountdown(nextMatch, now)}`
+                : 'NEXT · --'}
+            </span>
           </div>
         </div>
         <WorldCupMap
