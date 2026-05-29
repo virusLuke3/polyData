@@ -4451,3 +4451,34 @@
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix .wm-worldcup-wire-panel {
   border-top-color: rgba(34, 240, 126, 0.68) !important;
 }
+
+/* Match worldmonitor's terminal typography across the full World Cup workspace.
+   This file is imported after the base panel CSS, so it intentionally wins over
+   the earlier Inter body-text exceptions. */
+.wm-worldcup-dashboard.wm-worldcup-v5 {
+  --wc-worldmonitor-font: "SF Mono", "Monaco", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Liberation Mono", monospace;
+  --font-mono: var(--wc-worldmonitor-font);
+  --font-body: var(--wc-worldmonitor-font);
+  --font-body-base: var(--wc-worldmonitor-font);
+  font-family: var(--wc-worldmonitor-font) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5,
+.wm-worldcup-dashboard.wm-worldcup-v5 *,
+.wm-worldcup-dashboard.wm-worldcup-v5 button,
+.wm-worldcup-dashboard.wm-worldcup-v5 input,
+.wm-worldcup-dashboard.wm-worldcup-v5 select,
+.wm-worldcup-dashboard.wm-worldcup-v5 textarea,
+.wm-worldcup-dashboard.wm-worldcup-v5 .maplibregl-ctrl,
+.wm-worldcup-dashboard.wm-worldcup-v5 .deckgl-tooltip {
+  font-family: var(--wc-worldmonitor-font) !important;
+  font-synthesis: none;
+  font-variant-ligatures: none;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-inspector,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-map-header,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
+  font-family: var(--wc-worldmonitor-font) !important;
+}

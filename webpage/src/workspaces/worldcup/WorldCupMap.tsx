@@ -854,7 +854,7 @@ function buildDeckLayers(
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
       getPixelOffset: [14, 4],
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+      fontFamily: '"SF Mono", "Monaco", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Liberation Mono", monospace',
       fontWeight: 900,
       lineHeight: 0.92,
       background: false,
