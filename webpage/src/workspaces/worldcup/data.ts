@@ -1,4 +1,5 @@
 import type { ContentItem, MarketGroupItem } from '@/types';
+import { fetchRuntimeWorldCupIntel } from '@/services/api';
 import type {
   WorldCupCityWeather,
   WorldCupDashboardPayload,
@@ -181,15 +182,38 @@ export function normalizeWorldCupMatches(matches: any[], marketGroups: MarketGro
 }
 
 export async function loadWorldCupDashboard(marketGroups: MarketGroupItem[] = []): Promise<WorldCupDashboardPayload> {
+  const runtimeIntelPromise = fetchRuntimeWorldCupIntel(120).catch(() => null);
   try {
     const response = await fetch(DATA_URL, { cache: 'no-store' });
     if (!response.ok) throw new Error(`world cup schedule ${response.status}`);
     const data = await response.json();
     const matches = normalizeWorldCupMatches(data.matches || [], marketGroups);
-    return buildWorldCupDashboard(matches, 'remote');
+    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard(matches, 'remote'), await runtimeIntelPromise);
   } catch {
-    return buildWorldCupDashboard(normalizeWorldCupMatches(FALLBACK_SOURCE_MATCHES, marketGroups), 'fallback');
+    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard(normalizeWorldCupMatches(FALLBACK_SOURCE_MATCHES, marketGroups), 'fallback'), await runtimeIntelPromise);
   }
+}
+
+function mergeWorldCupRuntimeIntel(payload: WorldCupDashboardPayload, intel: WorldCupDashboardPayload['intelligence']): WorldCupDashboardPayload {
+  if (!intel) return payload;
+  const news = Array.isArray(intel.news) && intel.news.length ? [...intel.news, ...payload.news] : payload.news;
+  const weather = Array.isArray(intel.weather) && intel.weather.length ? mergeWeather(payload.weather, intel.weather) : payload.weather;
+  return {
+    ...payload,
+    cacheMode: intel.status === 'ok' ? 'remote' : payload.cacheMode,
+    generatedAt: intel.generatedAt || payload.generatedAt,
+    news,
+    weather,
+    intelligence: intel,
+  };
+}
+
+function mergeWeather(seedWeather: WorldCupCityWeather[], runtimeWeather: WorldCupCityWeather[]) {
+  const rows = new Map(seedWeather.map((item) => [item.cityId, item]));
+  runtimeWeather.forEach((item) => {
+    if (item?.cityId) rows.set(item.cityId, item);
+  });
+  return Array.from(rows.values());
 }
 
 function buildWorldCupDashboard(matches: WorldCupMatch[], cacheMode: 'remote' | 'fallback'): WorldCupDashboardPayload {

@@ -29,4 +29,9 @@ def create_runtime_sports_blueprint(helpers: dict) -> Blueprint:
         limit = _bounded_int_arg("limit", 8, lower=1, upper=16)
         return jsonify(helpers["get_nba_matchup_predictor_snapshot"](limit=limit))
 
+    @bp.route("/runtime/sports/worldcup-intel", methods=["GET"])
+    def api_runtime_worldcup_intel():
+        limit = _bounded_int_arg("limit", 96, lower=12, upper=160)
+        return jsonify(helpers["get_worldcup_intel_snapshot"](limit=limit))
+
     return bp

@@ -51,6 +51,7 @@ import type {
   WorkspaceDiagnostics,
   WorkspaceIdentity,
 } from '@/types';
+import type { WorldCupIntelPayload } from '@/workspaces/worldcup/types';
 
 const RAW_BASE = import.meta.env.DEV
   ? '/wm-api'
@@ -282,6 +283,10 @@ export function fetchRuntimeGridEsports(limit = 10) {
 
 export function fetchRuntimeSportsOdds(limit = 8) {
   return apiGet<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`);
+}
+
+export function fetchRuntimeWorldCupIntel(limit = 96) {
+  return apiGet<WorldCupIntelPayload>(`/runtime/sports/worldcup-intel?limit=${limit}`);
 }
 
 export function fetchRuntimeInflationNowcast() {

@@ -304,6 +304,30 @@ function SignalFeedPanel({
   );
 }
 
+function coerceSignalTone(tone?: string | null): WorldCupSignalTone {
+  if (tone === 'red' || tone === 'gold' || tone === 'blue' || tone === 'purple' || tone === 'gray' || tone === 'green') return tone;
+  return 'blue';
+}
+
+function runtimeSignalItems(payload: WorldCupDashboardPayload, category: string, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const signals = payload.intelligence?.signals || [];
+  return signals
+    .filter((item) => item.category === category && (!item.matchId || item.matchId === match?.id))
+    .slice(0, 16)
+    .map((item, index) => ({
+      id: item.id || `${category}-${index}`,
+      source: item.source || item.provider || 'LIVE',
+      title: item.title || 'World Cup live signal',
+      summary: item.summary || 'Runtime feed item from World Cup intelligence provider.',
+      age: item.age || payload.intelligence?.generatedAt || 'live',
+      tags: (item.tags?.length ? item.tags : [{ label: 'LIVE', tone: 'green' }]).slice(0, 3).map((tag) => ({
+        label: tag.label,
+        tone: coerceSignalTone(tag.tone),
+      })),
+      accent: coerceSignalTone(item.accent),
+    }));
+}
+
 function useWorldCupDashboard(marketGroups: WorldCupWorkspaceProps['marketGroups']) {
   const [payload, setPayload] = useState<WorldCupDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -987,7 +1011,9 @@ function buildBroadcastSignals(match: WorldCupMatch | null): WorldCupSignalItem[
   ];
 }
 
-function buildOfficialFactSignals(match: WorldCupMatch | null, city: WorldCupDashboardPayload['cities'][number] | null): WorldCupSignalItem[] {
+function buildOfficialFactSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null, city: WorldCupDashboardPayload['cities'][number] | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'officialFacts', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   return [
     {
@@ -1030,6 +1056,8 @@ function buildOfficialFactSignals(match: WorldCupMatch | null, city: WorldCupDas
 }
 
 function buildInjurySignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'injuryTracker', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   const teams = [match.homeTeam, match.awayTeam];
   const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
@@ -1068,7 +1096,9 @@ function buildInjurySignals(payload: WorldCupDashboardPayload, match: WorldCupMa
   return [...seedRows, ...extraRows].slice(0, 10);
 }
 
-function buildLineupSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+function buildLineupSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'lineupWatch', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   const rows = [
     ['Flashscore', 'Predicted XI and late starting lineup card', 'Core forwards, goalkeeper and center-back pairing are the first checks.'],
@@ -1115,7 +1145,9 @@ function buildPlayerPoolSignals(payload: WorldCupDashboardPayload, match: WorldC
     .slice(0, 12);
 }
 
-function buildXgSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+function buildXgSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'xgModel', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   const hash = [...match.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const homeXg = 1.05 + (hash % 7) * 0.11;
@@ -1138,7 +1170,9 @@ function buildXgSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
   }));
 }
 
-function buildTacticalSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+function buildTacticalSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'tacticalMatchup', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   return [
     {
@@ -1180,7 +1214,9 @@ function buildTacticalSignals(match: WorldCupMatch | null): WorldCupSignalItem[]
   ];
 }
 
-function buildLocalMediaSignals(match: WorldCupMatch | null): WorldCupSignalItem[] {
+function buildLocalMediaSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'localMedia', match);
+  if (liveSignals.length) return liveSignals;
   const teams = match ? [match.homeTeam, match.awayTeam] : ['Argentina', 'Brazil'];
   const homeTeam = teams[0] || 'Home team';
   const awayTeam = teams[1] || 'Away team';
@@ -1340,6 +1376,8 @@ function buildLocalMediaSignals(match: WorldCupMatch | null): WorldCupSignalItem
 }
 
 function buildRefVenueSignals(payload: WorldCupDashboardPayload, match: WorldCupMatch | null): WorldCupSignalItem[] {
+  const liveSignals = runtimeSignalItems(payload, 'refVenue', match);
+  if (liveSignals.length) return liveSignals;
   if (!match) return [];
   const weather = payload.weather.find((item) => item.cityId === match.cityId);
   return [
@@ -1403,7 +1441,17 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const selectedMatch = payload?.matches.find((match) => match.id === selectedMatchId) || nextMatch || payload?.matches[0] || null;
   const selectedOdds = payload?.odds.filter((item) => item.matchId === selectedMatch?.id) || [];
   const selectedMarkets = useMemo(() => matchPolymarketMarkets(selectedMatch, marketGroups), [marketGroups, selectedMatch]);
-  const news = useMemo(() => filterWorldCupNews(latestContent, selectedMatch), [latestContent, selectedMatch]);
+  const news = useMemo(() => {
+    const runtimeNews = payload?.news || [];
+    const contentNews = filterWorldCupNews(latestContent, selectedMatch);
+    const seen = new Set<string>();
+    return [...runtimeNews, ...contentNews].filter((item) => {
+      const key = `${item.source}:${item.title}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 24);
+  }, [latestContent, payload?.news, selectedMatch]);
 
   useEffect(() => {
     if (selectedMatch?.group) setSelectedGroup(selectedMatch.group);
@@ -1446,13 +1494,13 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
   const oddsSignals = buildOddsSignals(displayOdds, selectedMatch);
   const riskSignals = buildRiskSignals(payload, selectedMatch);
   const broadcastSignals = buildBroadcastSignals(selectedMatch);
-  const officialFactSignals = buildOfficialFactSignals(selectedMatch, selectedCity);
+  const officialFactSignals = buildOfficialFactSignals(payload, selectedMatch, selectedCity);
   const injurySignals = buildInjurySignals(payload, selectedMatch);
-  const lineupSignals = buildLineupSignals(selectedMatch);
+  const lineupSignals = buildLineupSignals(payload, selectedMatch);
   const playerPoolSignals = buildPlayerPoolSignals(payload, selectedMatch);
-  const xgSignals = buildXgSignals(selectedMatch);
-  const tacticalSignals = buildTacticalSignals(selectedMatch);
-  const localMediaSignals = buildLocalMediaSignals(selectedMatch);
+  const xgSignals = buildXgSignals(payload, selectedMatch);
+  const tacticalSignals = buildTacticalSignals(payload, selectedMatch);
+  const localMediaSignals = buildLocalMediaSignals(payload, selectedMatch);
   const refVenueSignals = buildRefVenueSignals(payload, selectedMatch);
   const terminalMetrics = [
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },

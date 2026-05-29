@@ -57,6 +57,41 @@ export type WorldCupNewsItem = {
   matchId?: string;
 };
 
+export type WorldCupRuntimeSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
+
+export type WorldCupRuntimeSignal = {
+  id: string;
+  source: string;
+  title: string;
+  summary: string;
+  category: string;
+  age: string;
+  url?: string;
+  tags?: Array<{ label: string; tone: WorldCupRuntimeSignalTone }>;
+  accent?: WorldCupRuntimeSignalTone;
+  provider?: string;
+  matchId?: string | null;
+  cityId?: string | null;
+};
+
+export type WorldCupIntelPayload = {
+  generatedAt?: string;
+  status?: string;
+  cacheMode?: string;
+  source?: string;
+  sourceUrl?: string;
+  providerStates?: Record<string, string>;
+  summary?: {
+    signals?: number;
+    news?: number;
+    weatherCities?: number;
+    liveProviders?: number;
+  };
+  news?: WorldCupNewsItem[];
+  weather?: WorldCupCityWeather[];
+  signals?: WorldCupRuntimeSignal[];
+};
+
 export type WorldCupCityWeather = {
   cityId: string;
   current: {
@@ -133,6 +168,7 @@ export type WorldCupDashboardPayload = {
   weather: WorldCupCityWeather[];
   rosters: WorldCupTeamRoster[];
   odds: WorldCupOddsSnapshot[];
+  intelligence?: WorldCupIntelPayload | null;
 };
 
 export type WorldCupWorkspaceProps = {
