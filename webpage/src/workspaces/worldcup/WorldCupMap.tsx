@@ -446,7 +446,7 @@ function weatherRiskScore(weather: WorldCupCityWeather | null) {
 }
 
 function cityRole(signal: CitySignal) {
-  if (FINAL_CITY_IDS.has(signal.city.id) || signal.matches.some((match) => match.stage === 'final')) return 'Final City';
+  if (FINAL_CITY_IDS.has(signal.city.id)) return 'Final City';
   if (OPENING_CITY_IDS.has(signal.city.id)) return 'Opening Match City';
   if (signal.matches.some((match) => match.stage !== 'group') || (KNOCKOUT_SLOT_COUNTS[signal.city.id] || 0) > 0) return 'Knockout Venue';
   return 'Group Stage Host';
