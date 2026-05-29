@@ -277,15 +277,20 @@ export function filterWorldCupNews(content: ContentItem[], selected?: WorldCupMa
 }
 
 export function matchPolymarketMarkets(match: WorldCupMatch | null, marketGroups: MarketGroupItem[]): WorldCupPolymarketMarket[] {
-  const baseTerms = ['world cup', 'fifa', 'soccer'];
-  const teamTerms = match ? [match.homeTeam, match.awayTeam].map((item) => item.toLowerCase()) : [];
+  const worldCup2026Terms = ['fifa world cup', 'world cup 2026', '2026 world cup', 'fifa 2026'];
+  const blockedTerms = ['club world cup', 'fifa club', 'uefa', 'champions league'];
+  const teamTerms = match ? [match.homeTeam, match.awayTeam].map((item) => item.toLowerCase()).filter((item) => item && item !== 'tbd') : [];
+  const venueTerms = match ? [match.city, match.venue].map((item) => item.toLowerCase()).filter(Boolean) : [];
   return marketGroups
     .map((group) => {
       const text = `${group.title} ${group.slug || ''} ${(group.tags || []).join(' ')}`.toLowerCase();
-      const baseScore = baseTerms.some((term) => text.includes(term)) ? 0.45 : 0;
-      const teamScore = teamTerms.filter((term) => term && term !== 'tbd' && text.includes(term)).length * 0.25;
-      const soccerScore = text.includes('sports') || text.includes('soccer') ? 0.12 : 0;
-      const confidence = Math.min(0.99, baseScore + teamScore + soccerScore);
+      if (blockedTerms.some((term) => text.includes(term))) return { group, confidence: 0 };
+      const hasWorldCup2026 = worldCup2026Terms.some((term) => text.includes(term));
+      const teamScore = teamTerms.filter((term) => text.includes(term)).length * 0.28;
+      const venueScore = venueTerms.some((term) => text.includes(term)) ? 0.18 : 0;
+      const baseScore = hasWorldCup2026 ? 0.45 : 0;
+      const broadSoccerScore = !match && (text.includes('world cup') || text.includes('soccer') || text.includes('football')) ? 0.12 : 0;
+      const confidence = Math.min(0.99, baseScore + teamScore + venueScore + broadSoccerScore);
       return { group, confidence };
     })
     .filter((item) => item.confidence >= (match ? 0.45 : 0.3))
