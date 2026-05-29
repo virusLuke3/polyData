@@ -17,6 +17,7 @@ ESPN_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world
 ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+WTTR_URL = "https://wttr.in"
 
 HOST_CITIES = [
     {"id": "atlanta", "city": "Atlanta", "latitude": 33.7554, "longitude": -84.4008},
@@ -289,6 +290,61 @@ def _open_meteo_weather(ctx: dict) -> List[Dict[str, Any]]:
     return rows
 
 
+def _wttr_weather(ctx: dict, used_city_ids: set[str] | None = None) -> List[Dict[str, Any]]:
+    used_city_ids = used_city_ids or set()
+    rows: List[Dict[str, Any]] = []
+    for city in HOST_CITIES:
+        if city["id"] in used_city_ids:
+            continue
+        query_city = city["city"].split("/")[0].strip()
+        try:
+            payload = ctx["http_json_get"](
+                f"{WTTR_URL}/{quote_plus(query_city)}",
+                params={"format": "j1"},
+                timeout=8,
+                headers=_headers(),
+            )
+        except Exception:
+            continue
+        current_rows = payload.get("current_condition") if isinstance(payload, dict) else []
+        current = current_rows[0] if current_rows and isinstance(current_rows[0], dict) else {}
+        weather_rows = payload.get("weather") if isinstance(payload, dict) else []
+        forecast = []
+        for row in weather_rows[:5]:
+            if not isinstance(row, dict):
+                continue
+            hourly = row.get("hourly") or []
+            midday = hourly[len(hourly) // 2] if hourly and isinstance(hourly[len(hourly) // 2], dict) else {}
+            desc_rows = midday.get("weatherDesc") or current.get("weatherDesc") or []
+            condition = desc_rows[0].get("value") if desc_rows and isinstance(desc_rows[0], dict) else "Weather watch"
+            forecast.append(
+                {
+                    "date": str(row.get("date") or ""),
+                    "highC": _safe_int(row.get("maxtempC")) or 0,
+                    "lowC": _safe_int(row.get("mintempC")) or 0,
+                    "condition": _clean_text(condition),
+                    "precipitationProbability": _safe_int(midday.get("chanceofrain")) or 0,
+                }
+            )
+        current_desc = current.get("weatherDesc") or []
+        condition = current_desc[0].get("value") if current_desc and isinstance(current_desc[0], dict) else "Weather watch"
+        rows.append(
+            {
+                "cityId": city["id"],
+                "current": {
+                    "tempC": _safe_int(current.get("temp_C")) or 0,
+                    "condition": _clean_text(condition),
+                    "windKph": _safe_int(current.get("windspeedKmph")),
+                    "precipitationProbability": _safe_int(current.get("precipMM")),
+                },
+                "forecast": forecast,
+                "generatedAt": _utc_now_iso(),
+                "source": "wttr.in",
+            }
+        )
+    return rows
+
+
 def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
     generated_at = _utc_now_iso()
     news = _espn_news(ctx, 18)
@@ -306,6 +362,12 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
     ]:
         local_items.extend(_rss_items(ctx, query, limit=3, language=language, region=region))
     weather = _open_meteo_weather(ctx)
+    weather_source = "open-meteo"
+    if len(weather) < len(HOST_CITIES):
+        missing_weather = _wttr_weather(ctx, {str(item.get("cityId")) for item in weather})
+        if missing_weather:
+            weather = [*weather, *missing_weather]
+            weather_source = "open-meteo+wttr" if weather_source == "open-meteo" and len(weather) > len(missing_weather) else "wttr"
 
     signals: List[Dict[str, Any]] = []
     signals.extend(_espn_scoreboard_signals(ctx))
@@ -318,15 +380,15 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
         condition = item.get("current", {}).get("condition") or "weather"
         signals.append(
             _signal(
-                source="OPEN-METEO",
+                source=str(item.get("source") or "WEATHER"),
                 title=f"{next((city['city'] for city in HOST_CITIES if city['id'] == item.get('cityId')), item.get('cityId'))}: {condition}",
                 summary=f"{item.get('current', {}).get('tempC')}C · wind {item.get('current', {}).get('windKph')} kph · 5-day venue forecast attached.",
                 category="refVenue",
                 tags=["WEATHER", "LIVE"],
                 age="live",
-                url="https://open-meteo.com/",
+                url="https://open-meteo.com/" if item.get("source") != "wttr.in" else "https://wttr.in/",
                 accent="blue",
-                provider="open-meteo",
+                provider=str(item.get("source") or "weather"),
                 city_id=str(item.get("cityId") or ""),
             )
         )
@@ -335,7 +397,8 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
         "espnNews": "ok" if news else "empty",
         "espnScoreboard": "ok" if any(signal.get("provider") == "espn-scoreboard" for signal in signals) else "empty",
         "googleNewsRss": "ok" if injury_items or lineup_items or xg_items or tactic_items or local_items else "empty",
-        "openMeteo": "ok" if weather else "empty",
+        "openMeteo": "ok" if weather_source.startswith("open-meteo") and weather else "empty",
+        "wttr": "ok" if "wttr" in weather_source and weather else "empty",
         "fifaMatchCentre": "restricted-or-html-only",
         "flashscore": "restricted-no-public-api",
         "sofascore": "restricted",
