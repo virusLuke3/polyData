@@ -1761,7 +1761,7 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
     { label: 'next_kickoff', value: formatCountdown(nextMatch, now), meta: nextMatch ? `${nextMatch.homeTeam} vs ${nextMatch.awayTeam}` : 'schedule complete' },
     { label: 'selected_city', value: selectedCity.city, meta: `${selectedCity.country} · ${selectedCityMatchCount} matches` },
     { label: 'match_count', value: String(Math.max(payload.matches.length, plannedMatchTotal)), meta: `${payload.cities.length} host cities` },
-    { label: 'market_links', value: String(linkedMarketCount), meta: `${payload.cacheMode.toUpperCase()} · runtime` },
+    { label: 'market_links', value: String(linkedMarketCount), meta: 'Dashboard feed' },
   ];
   const worldCupPanels: Record<WorldCupPanelId, ComponentChildren> = {
     calendar: (
