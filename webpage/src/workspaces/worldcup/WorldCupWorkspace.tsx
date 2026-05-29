@@ -142,11 +142,28 @@ function formatUpdatedAgo(iso: string, now: Date) {
 }
 
 function formatWeatherDay(date: string) {
-  const parsed = new Date(`${date}T00:00:00Z`);
+  const normalized = /^\d{2}-\d{2}$/.test(date) ? `2026-${date}` : date;
+  const parsed = new Date(`${normalized}T00:00:00Z`);
   if (!Number.isFinite(parsed.getTime())) return date;
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(parsed);
   const monthDay = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: '2-digit' }).format(parsed);
   return `${weekday} ${monthDay}`;
+}
+
+function weatherIcon(condition = '') {
+  if (/storm|thunder/i.test(condition)) return '⚡';
+  if (/rain|mist|shower/i.test(condition)) return '☔';
+  if (/humid|warm|heat/i.test(condition)) return '◐';
+  if (/cloud/i.test(condition)) return '☁';
+  return '☀';
+}
+
+function weatherTone(condition = '', tempC = 0) {
+  if (/storm|thunder|rain|mist|shower/i.test(condition)) return 'weather-rain';
+  if (/humid/i.test(condition)) return 'weather-humid';
+  if (tempC >= 27 || /warm|heat/i.test(condition)) return 'weather-warm';
+  if (/cloud/i.test(condition)) return 'weather-cloud';
+  return 'weather-clear';
 }
 
 function formatBjtClock(now: Date) {
@@ -203,14 +220,15 @@ function newsTags(item: WorldCupNewsItem) {
   if (/(market|odds|price|trading|polymarket)/.test(text)) tags.push({ label: 'MARKET', tone: 'purple' });
   if (/(weather|storm|heat|rain|travel)/.test(text)) tags.push({ label: 'WEATHER', tone: 'blue' });
   if (/(squad|team|player|coach|roster)/.test(text)) tags.push({ label: 'TEAM', tone: 'gold' });
-  if (!tags.length) tags.push({ label: 'WATCH', tone: 'gray' });
   return tags.slice(0, 2);
 }
 
-const HIDDEN_SIGNAL_LABELS = new Set(['SEED', 'RSS', 'PRIMARY', 'LIVE']);
+const HIDDEN_SIGNAL_LABELS = new Set(['SEED', 'RSS', 'PRIMARY', 'LIVE', 'LOCAL DB', 'REMOTE', 'WATCH']);
 
 function cleanPanelBadge(label: string) {
-  return /seed/i.test(label) ? '实时' : label;
+  if (!label) return '';
+  if (/(seed|rss|primary|local db|remote|watch|pending|scheduled|live|实时)/i.test(label)) return '';
+  return label;
 }
 
 function cleanSignalAge(age?: string | null) {
@@ -227,10 +245,19 @@ function cleanSignalAge(age?: string | null) {
   return value;
 }
 
+function cleanSignalSource(source?: string | null) {
+  const value = (source || '').trim();
+  if (!value) return 'WORLD CUP DESK';
+  if (/^(seed|rss|primary|inferred|manual|fallback)$/i.test(value)) return 'WORLD CUP DESK';
+  if (/local\s*db/i.test(value)) return 'MARKET DESK';
+  if (/remote/i.test(value)) return 'DATA DESK';
+  return value.replace(/[-_]/g, ' ').toUpperCase();
+}
+
 function cleanSignalTags(tags: WorldCupSignalItem['tags']) {
   return tags.filter((tag) => {
     const label = tag.label.trim().toUpperCase();
-    return label && !HIDDEN_SIGNAL_LABELS.has(label) && !/(^|\s)(SEED|RSS|PRIMARY|LIVE)(\s|$)/i.test(label);
+    return label && !HIDDEN_SIGNAL_LABELS.has(label) && !/(^|\s)(SEED|RSS|PRIMARY|LIVE|WATCH)(\s|$)/i.test(label);
   });
 }
 
@@ -242,16 +269,6 @@ function mergeSignalRows(...groups: WorldCupSignalItem[][]) {
     seen.add(key);
     return true;
   });
-}
-
-function HeaderActions() {
-  return (
-    <div className="wm-worldcup-header-actions" aria-hidden="true">
-      <span className="wm-worldcup-new-pill">新</span>
-      <button type="button" tabIndex={-1}>↓</button>
-      <button type="button" tabIndex={-1}>✦</button>
-    </div>
-  );
 }
 
 function WorldCupPanelSlot({
@@ -474,7 +491,7 @@ function SignalRow({ item }: { item: WorldCupSignalItem }) {
   return (
     <article className={`wm-worldcup-signal-row ${item.accent || item.tags[0]?.tone || 'gray'}`}>
       <div className="wm-worldcup-feed-meta">
-        <span>{item.source}</span>
+        <span>{cleanSignalSource(item.source)}</span>
         <SignalTags tags={item.tags} />
       </div>
       <strong>{item.title}</strong>
@@ -501,7 +518,7 @@ function SignalFeedPanel({
   className: string;
 }) {
   return (
-    <Panel title={title} badge={cleanPanelBadge(badge)} count={count ?? items.length} controls={<HeaderActions />} className={`wm-worldcup-panel ${className}`}>
+    <Panel title={title} badge={cleanPanelBadge(badge) || undefined} count={count ?? items.length} className={`wm-worldcup-panel ${className}`}>
       <div className="wm-worldcup-signal-list">
         {items.map((item) => <SignalRow item={item} key={item.id} />)}
       </div>
@@ -587,8 +604,6 @@ function SchedulePanel({
   return (
     <Panel
       title="CALENDAR"
-      badge="实时"
-      status="live"
       count={filtered.length}
       className="wm-worldcup-panel wm-worldcup-schedule-panel"
     >
@@ -614,7 +629,7 @@ function SchedulePanel({
               <strong>{match.homeTeam} <i>{scoreText(match)}</i> {match.awayTeam}</strong>
               <em>{match.kickoffBeijing} · {match.city} · {match.venue}</em>
             </span>
-            <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'PM' : match.status === 'scheduled' ? 'SCHED' : match.status.toUpperCase()}</span>
+            <span className={`wm-worldcup-status ${match.status}`}>{match.marketLinked ? 'MKT' : match.status === 'scheduled' ? 'FIX' : match.status.toUpperCase()}</span>
           </button>
         ))}
       </div>
@@ -637,13 +652,13 @@ function MatchPanel({
 }) {
   if (!match) {
     return (
-      <Panel title="MATCH DETAIL" badge="WARMING" count={0} className="wm-worldcup-panel">
+      <Panel title="MATCH DETAIL" count={0} className="wm-worldcup-panel">
         <div className="wm-worldcup-empty">No match selected.</div>
       </Panel>
     );
   }
   return (
-    <Panel title="MATCH DETAIL" badge={match.status === 'live' ? 'LIVE' : 'SCHEDULED'} count={markets.length + odds.length} className="wm-worldcup-panel wm-worldcup-match-panel">
+    <Panel title="MATCH DETAIL" count={markets.length + odds.length} className="wm-worldcup-panel wm-worldcup-match-panel">
       <div className="wm-worldcup-scoreboard">
         <div>
           <span>HOME</span>
@@ -678,7 +693,7 @@ function MatchPanel({
 
 function NewsPanel({ items }: { items: ReturnType<typeof filterWorldCupNews> }) {
   return (
-    <Panel title="NEWS" badge="INTEL" count={items.length} className="wm-worldcup-panel wm-worldcup-news-panel">
+    <Panel title="NEWS" count={items.length} className="wm-worldcup-panel wm-worldcup-news-panel">
       <div className="wm-worldcup-feed">
         {items.map((item) => (
           <a className="wm-worldcup-feed-row" href={item.url || '#'} key={item.id} target={item.url === '#' ? undefined : '_blank'} rel="noreferrer">
@@ -712,13 +727,13 @@ function WeatherPanel({
     matchCount: payload.matches.filter((match) => match.cityId === weather.cityId).length,
   }));
   return (
-    <Panel title="WEATHER" badge={payload.cacheMode === 'fallback' ? 'REMOTE' : '实时'} count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
+    <Panel title="WEATHER" count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-weather-panel">
       <div className="wm-worldcup-weather-list">
         {cityWeather.map(({ city, weather, matchCount }) => (
-          <button className={`wm-worldcup-weather-row ${city.id === selectedCityId ? 'active' : ''}`} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
+          <button className={`wm-worldcup-weather-row ${city.id === selectedCityId ? 'active' : ''} ${weatherTone(weather.current.condition, weather.current.tempC)}`} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
             <span className="wm-worldcup-weather-main">
-              <strong>{city.city}</strong>
-              <em>{city.country} · {matchCount} matches</em>
+              <strong><i aria-hidden="true">{weatherIcon(weather.current.condition)}</i>{city.city}</strong>
+              <em>{city.country} · {matchCount} matches · wind {weather.current.windKph ?? '--'} kph · rain {weather.current.precipitationProbability ?? 0}%</em>
             </span>
             <b>{weather.current.tempC}°C</b>
             <span className="wm-worldcup-weather-condition">{weather.current.condition}</span>
@@ -727,6 +742,7 @@ function WeatherPanel({
                 <i key={`${city.id}-${day.date}`}>
                   <small>{formatWeatherDay(day.date)}</small>
                   <strong>{day.lowC}°/{day.highC}°</strong>
+                  <em>{day.precipitationProbability ?? 0}%</em>
                 </i>
               ))}
             </span>
@@ -809,7 +825,6 @@ function PolymarketPanel({ markets, match }: { markets: WorldCupPolymarketMarket
   return (
     <Panel
       title="MARKETS"
-      badge="LOCAL DB"
       count={displayMarkets.length}
       titleControls={<InfoDot label="Local Polymarket market matches are ranked by team, venue and kickoff context confidence." />}
       className="wm-worldcup-panel wm-worldcup-polymarket-panel"
@@ -819,9 +834,9 @@ function PolymarketPanel({ markets, match }: { markets: WorldCupPolymarketMarket
           {displayMarkets.map((market) => (
             <article className="wm-worldcup-market-row" key={`${market.eventId || market.title}`}>
               <div>
-                <span>{Math.round(market.confidence * 100)} CONF · {market.source.toUpperCase()}</span>
+                <span>{formatCompact(market.volume24h)} 24H · {Math.round(market.confidence * 100)}% match</span>
                 <strong>{market.title}</strong>
-                <em>24H VOL {formatCompact(market.volume24h)}</em>
+                <em>Polymarket-style probability board</em>
               </div>
               <div className="wm-worldcup-outcomes">
                 {market.outcomes.slice(0, 3).map((outcome) => (
@@ -846,7 +861,7 @@ function RostersPanel({ payload, match }: { payload: WorldCupDashboardPayload; m
   const teams = match ? [match.homeTeam, match.awayTeam] : [];
   const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
   return (
-    <Panel title="SQUADS" badge="PENDING" count={rosters.length || teams.length} className="wm-worldcup-panel wm-worldcup-rosters-panel">
+    <Panel title="SQUADS" count={rosters.length || teams.length} className="wm-worldcup-panel wm-worldcup-rosters-panel">
       {(rosters.length ? rosters : teams.map((team) => ({ team, updatedAt: payload.generatedAt, players: [] }))).map((roster) => (
         <section className="wm-worldcup-roster-block" key={roster.team}>
           <div className="wm-worldcup-roster-head">
@@ -869,7 +884,6 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
   return (
     <Panel
       title="ODDS"
-      badge="WATCH"
       count={odds.length}
       titleControls={<InfoDot label="Bookmaker snapshots show decimal odds and implied probability for the selected match." />}
       className="wm-worldcup-panel wm-worldcup-odds-panel"
@@ -986,7 +1000,7 @@ function GroupTablePanel({
   const groupMatches = matches.filter((match) => (match.group || '') === group);
   const standings = buildGroupStandings(matches, group);
   return (
-    <Panel title="GROUP TABLE" badge="实时" count={groupMatches.length} controls={<HeaderActions />} className="wm-worldcup-panel wm-worldcup-group-table-panel">
+    <Panel title="GROUP TABLE" count={groupMatches.length} className="wm-worldcup-panel wm-worldcup-group-table-panel">
       <div className="wm-worldcup-group-tabs">
         {groups.slice(0, 12).map((item) => (
           <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>

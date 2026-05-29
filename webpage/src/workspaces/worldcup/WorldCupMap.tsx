@@ -237,6 +237,26 @@ function primaryBasemapStyle(): string {
   return PMTILES_STYLE_URL || OPENFREEMAP_DARK_STYLE;
 }
 
+function formatInspectorWeatherDate(date: string) {
+  const normalized = /^\d{2}-\d{2}$/.test(date) ? `2026-${date}` : date;
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  if (!Number.isFinite(parsed.getTime())) return date.replace(/^2026-/, '');
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'short',
+    day: '2-digit',
+  }).format(parsed);
+}
+
+function weatherToneClass(condition = '') {
+  if (/storm|thunder|rain|mist|shower/i.test(condition)) return 'rain';
+  if (/humid/i.test(condition)) return 'humid';
+  if (/warm|heat/i.test(condition)) return 'warm';
+  if (/cloud/i.test(condition)) return 'cloud';
+  return 'clear';
+}
+
 function hostCountriesGeoJson() {
   return {
     type: 'FeatureCollection',
@@ -976,7 +996,7 @@ function getDeckTooltip(info: PickingInfo<DeckObject>) {
   const obj = info.object;
   if (obj.type === 'host-city') {
     return {
-      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.city.city)}</strong><br/>${escapeHtml(obj.city.venue)}<br/>${obj.plannedMatchCount} matches · ${escapeHtml(obj.weather?.current.condition || 'weather seed')}</div>`,
+      html: `<div class="deckgl-tooltip"><strong>${escapeHtml(obj.city.city)}</strong><br/>${escapeHtml(obj.city.venue)}<br/>${obj.plannedMatchCount} matches · ${escapeHtml(obj.weather?.current.condition || 'weather pending')}</div>`,
     };
   }
   if (obj.type === 'schedule') {
@@ -1023,37 +1043,44 @@ function LayerPanel({
   ];
   const layerGroups: Array<{
     title: string;
-    rows: Array<{ key?: WorldCupLayerKey; icon: string; label: string; status: string; disabled?: boolean }>;
+    rows: Array<{
+      key?: WorldCupLayerKey;
+      icon: string;
+      label: string;
+      status: string;
+      disabled?: boolean;
+      tone: 'core' | 'match' | 'weather' | 'market' | 'risk' | 'ops';
+    }>;
   }> = [
     {
       title: 'Core',
       rows: [
-        { key: 'cities', icon: '●', label: 'Host Cities', status: '16' },
-        { key: 'schedule', icon: '#', label: 'Match Schedule', status: 'Live' },
-        { icon: '▣', label: 'Venues', status: 'Active', disabled: true },
+        { key: 'cities', icon: '●', label: 'Host Cities', status: '16', tone: 'core' },
+        { key: 'schedule', icon: '#', label: 'Match Schedule', status: '104', tone: 'match' },
+        { icon: '▣', label: 'Venues', status: 'Active', disabled: true, tone: 'core' },
       ],
     },
     {
       title: 'Risk',
       rows: [
-        { key: 'weather', icon: '☁', label: 'Weather Risk', status: 'Forecast' },
-        { key: 'transit', icon: '⌁', label: 'Airport / Transit', status: 'Seed' },
-        { key: 'teams', icon: '◆', label: 'Team Bases', status: 'Pending' },
+        { key: 'weather', icon: '☁', label: 'Weather Risk', status: 'Forecast', tone: 'weather' },
+        { key: 'transit', icon: '⌁', label: 'Airport / Transit', status: 'Ops', tone: 'ops' },
+        { key: 'teams', icon: '◆', label: 'Team Bases', status: 'Squads', tone: 'core' },
       ],
     },
     {
       title: 'Markets',
       rows: [
-        { key: 'markets', icon: '$', label: 'Polymarket Markets', status: 'Local DB' },
-        { key: 'odds', icon: '◒', label: 'Sportsbook Odds', status: 'Watch' },
-        { icon: '≋', label: 'Liquidity', status: 'Seed', disabled: true },
+        { key: 'markets', icon: '$', label: 'Polymarket Markets', status: 'Markets', tone: 'market' },
+        { key: 'odds', icon: '◒', label: 'Sportsbook Odds', status: 'Odds', tone: 'market' },
+        { icon: '≋', label: 'Liquidity', status: 'Volume', disabled: true, tone: 'market' },
       ],
     },
     {
       title: 'Operations',
       rows: [
-        { icon: '◷', label: 'Broadcast Time', status: 'Seed', disabled: true },
-        { icon: '◎', label: 'Local Ops', status: 'Seed', disabled: true },
+        { icon: '◷', label: 'Broadcast Time', status: 'BJT', tone: 'ops' },
+        { icon: '◎', label: 'Local Ops', status: 'Ops', tone: 'ops' },
       ],
     },
   ];
@@ -1089,6 +1116,8 @@ function LayerPanel({
                 <button
                   type="button"
                   className={`wm-worldcup-map-layer-row ${active ? 'active' : ''} ${row.disabled ? 'disabled' : ''}`}
+                  data-layer-key={row.key || row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}
+                  data-layer-tone={row.tone}
                   key={`${group.title}-${row.label}`}
                   onClick={() => row.key && !row.disabled ? onToggle(row.key) : undefined}
                   disabled={row.disabled}
@@ -1538,8 +1567,8 @@ export function WorldCupMap({
                   ))}
                 </div>
                 <div className="wm-worldcup-map-next-risk-line">
-                  <span>Weather: {activeSignal.weather?.current.condition || 'Seed forecast'}</span>
-                  <span>Market: {activeSignal.marketCount ? 'Local DB' : 'Seed watch'}</span>
+                  <span>Weather: {activeSignal.weather?.current.condition || 'Forecast pending'}</span>
+                  <span>Market: {activeSignal.marketCount ? 'Linked' : 'Coverage pending'}</span>
                 </div>
               </section>
             ) : null}
@@ -1548,7 +1577,7 @@ export function WorldCupMap({
               <span><small>Venue</small><b>{activeSignal.city.venue}</b></span>
               <span><small>Matches</small><b>{activeSignal.plannedMatchCount}</b></span>
               <span><small>Knockout</small><b>{knockoutSlotCount(activeSignal)}</b></span>
-              <span><small>Weather risk</small><b>{activeSignal.weather?.current.condition || 'Seed'}</b></span>
+              <span><small>Weather risk</small><b>{activeSignal.weather?.current.condition || 'Pending'}</b></span>
               <span><small>Market coverage</small><b>{marketCoverage(activeSignal)}</b></span>
               <span><small>Ops status</small><b>{opsStatus(activeSignal)}</b></span>
             </section>
@@ -1585,7 +1614,7 @@ export function WorldCupMap({
                             {matchStageLabel(null, slot.slotNumber, activeSignal)}
                             <small>{activeSignal.city.venue} · runtime schedule pending</small>
                           </span>
-                          <em>FIFA slot · SEED</em>
+                          <em>FIFA slot · TBD</em>
                         </p>
                       ))}
                     </div>
@@ -1593,10 +1622,10 @@ export function WorldCupMap({
                 </div>
               ) : null}
               {activeDetailTab === 'weather' ? (
-                <div className="wm-worldcup-map-weather-card">
+                <div className={`wm-worldcup-map-weather-card ${weatherToneClass(activeSignal.weather?.current.condition || '')}`}>
                   <div className="wm-worldcup-map-weather-now">
                     <span>Weather Risk</span>
-                    <strong>{activeSignal.weather?.current.condition || 'Seed forecast pending'}</strong>
+                    <strong>{activeSignal.weather?.current.condition || 'Forecast pending'}</strong>
                     <em>
                       {activeSignal.weather ? `${activeSignal.weather.current.tempC}°C · wind ${activeSignal.weather.current.windKph || '--'} kph · rain ${activeSignal.weather.current.precipitationProbability ?? 0}%` : 'Runtime weather pending'}
                     </em>
@@ -1614,7 +1643,8 @@ export function WorldCupMap({
                       {activeSignal.weather.forecast.slice(0, 5).map((item) => (
                         <span key={item.date}>
                           <b>{item.lowC}°/{item.highC}°</b>
-                          <small>{item.date.replace(/^2026-/, '')} · {item.condition} · {item.precipitationProbability ?? 0}%</small>
+                          <small>{formatInspectorWeatherDate(item.date)}</small>
+                          <em>{item.condition} · {item.precipitationProbability ?? 0}% rain</em>
                         </span>
                       ))}
                     </div>
@@ -1622,7 +1652,7 @@ export function WorldCupMap({
                   <div className="wm-worldcup-map-weather-impact">
                     <b>Betting impact</b>
                     <p>{activeImpact?.fatigue === 'High' ? 'Humidity can slow pressing teams and increase late-game fatigue. Totals lean slightly under until lineups and pitch reports confirm.' : activeImpact?.pitch === 'Watch' ? 'Storm watch creates delay and pitch-speed risk. Track totals, cards and live liquidity before kickoff.' : 'Weather profile is currently neutral. Keep standard market weight unless forecast shifts inside 24h.'}</p>
-                    <small>Updated {activeSignal.weather?.generatedAt ? new Date(activeSignal.weather.generatedAt).toLocaleString('en-US', { hour12: false }) : 'seed runtime'}</small>
+                    <small>Updated {activeSignal.weather?.generatedAt ? new Date(activeSignal.weather.generatedAt).toLocaleString('en-US', { hour12: false }) : 'pending runtime'}</small>
                   </div>
                   <div className="wm-worldcup-map-affected-list">
                     <span>Affected city matches</span>
@@ -1644,7 +1674,7 @@ export function WorldCupMap({
                     {activeMarkets.map((market) => (
                       <article className="wm-worldcup-map-market-row" key={`${market.marketId || market.eventId || market.title}`}>
                         <div>
-                          <small>{Math.round(market.confidence * 100)} conf · {market.source.toUpperCase()} · 24h {formatCompact(market.volume24h)}</small>
+                          <small>{formatCompact(market.volume24h)} 24H · {Math.round(market.confidence * 100)}% match confidence</small>
                           <b>{market.title}</b>
                         </div>
                         <div className="wm-worldcup-map-market-outcomes">
@@ -1673,7 +1703,7 @@ export function WorldCupMap({
                         </div>
                       </article>
                     ))}
-                    {!activeOdds.length ? <p className="wm-worldcup-map-empty-row">No bookmaker row connected for this city yet. Seed odds remain visible in the next-match card.</p> : null}
+                    {!activeOdds.length ? <p className="wm-worldcup-map-empty-row">No bookmaker row connected for this city yet. Reference odds remain visible in the next-match card.</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -1688,13 +1718,13 @@ export function WorldCupMap({
                     <span><small>Ops</small><b>{opsStatus(activeSignal)}</b></span>
                     <span><small>Timezone</small><b>{activeSignal.city.timezone.replace('America/', '')}</b></span>
                     <span><small>Stage mix</small><b>{knockoutSlotCount(activeSignal)} KO</b></span>
-                    <span><small>Forecast</small><b>{activeSignal.weather?.current.condition || 'Seed'}</b></span>
+                    <span><small>Forecast</small><b>{activeSignal.weather?.current.condition || 'Pending'}</b></span>
                   </div>
                   <div className="wm-worldcup-map-venue-ops">
                     <b>Venue ops checklist</b>
                     <p>Ingress, broadcast handoff, pitch state and airport load are pinned to this city. Travel layer will add airport/transit markers around the stadium when runtime feeds connect.</p>
                     <div>
-                      <span>Airport / transit <b>{enabledLayers.transit ? 'Layer on' : 'Seed'}</b></span>
+                      <span>Airport / transit <b>{enabledLayers.transit ? 'Layer on' : 'Ops pending'}</b></span>
                       <span>Pitch watch <b>{activeImpact?.pitch}</b></span>
                       <span>Local ops <b>{opsStatus(activeSignal)}</b></span>
                     </div>
