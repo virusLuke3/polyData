@@ -9,7 +9,7 @@ from urllib.parse import quote_plus
 
 
 WORLDCUP_INTEL_NAMESPACE = "snapshot:sports:worldcup-intel"
-WORLDCUP_INTEL_CACHE_KEY = "worldcup-v2-live-intel-v1"
+WORLDCUP_INTEL_CACHE_KEY = "worldcup-v2-live-intel-v2"
 DEFAULT_LIMIT = 96
 DEFAULT_TTL_SECONDS = 900
 
