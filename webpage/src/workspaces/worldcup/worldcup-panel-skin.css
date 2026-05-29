@@ -4482,3 +4482,186 @@
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-panel-matrix {
   font-family: var(--wc-worldmonitor-font) !important;
 }
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-weather-impact,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-list,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list {
+  display: grid !important;
+  gap: 7px !important;
+  margin-top: 10px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-weather-impact,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-row,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list article,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list article,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-empty-row {
+  padding: 9px !important;
+  border: 1px solid rgba(255, 255, 255, 0.075) !important;
+  background: rgba(255, 255, 255, 0.026) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-weather-impact b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list > span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list > span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops > b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list article > strong {
+  color: #f3f5f2 !important;
+  font-size: 11px !important;
+  font-weight: 850 !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-weather-impact p,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops p,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-empty-row {
+  margin: 0 !important;
+  color: #9aa3a6 !important;
+  font-size: 10px !important;
+  line-height: 1.45 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-weather-impact small,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-row small,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list small,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list small {
+  color: #7f888c !important;
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list p,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list p {
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr) 86px !important;
+  gap: 7px !important;
+  align-items: center !important;
+  min-height: 28px !important;
+  margin: 0 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.055) !important;
+  color: #d8ddde !important;
+  font-size: 9px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list p b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list p b {
+  color: #37c7f4 !important;
+  font-size: 9px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list p em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list p small,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list p span,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list p em {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-affected-list p small,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list p em {
+  color: #8b9497 !important;
+  font-size: 8px !important;
+  font-style: normal !important;
+  text-align: right !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-row {
+  display: grid !important;
+  gap: 8px !important;
+  border-left: 3px solid rgba(155, 108, 255, 0.72) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-row b {
+  display: block !important;
+  overflow: hidden !important;
+  margin-top: 4px !important;
+  color: #f2f4f2 !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 5px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span {
+  position: relative !important;
+  min-width: 0 !important;
+  min-height: 43px !important;
+  overflow: hidden !important;
+  padding: 5px 6px !important;
+  border: 1px solid rgba(155, 108, 255, 0.16) !important;
+  background: rgba(155, 108, 255, 0.05) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list article em {
+  display: block !important;
+  overflow: hidden !important;
+  color: #8f98a0 !important;
+  font-size: 8px !important;
+  font-style: normal !important;
+  text-overflow: ellipsis !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes strong {
+  display: block !important;
+  margin-top: 3px !important;
+  color: #c5a4ff !important;
+  font-size: 12px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes i {
+  position: absolute !important;
+  left: 0 !important;
+  bottom: 0 !important;
+  height: 2px !important;
+  background: #c5a4ff !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list article {
+  display: grid !important;
+  gap: 5px !important;
+  border-left: 3px solid rgba(255, 179, 43, 0.72) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-odds-list article > div {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 4px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops > div {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 5px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops span {
+  min-width: 0 !important;
+  padding: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.065) !important;
+  color: #8d969a !important;
+  font-size: 8px !important;
+  text-transform: uppercase !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-ops span b {
+  margin-top: 3px !important;
+  color: #f2f4f2 !important;
+  font-size: 10px !important;
+}

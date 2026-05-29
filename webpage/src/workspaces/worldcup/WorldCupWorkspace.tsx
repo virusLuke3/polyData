@@ -1601,6 +1601,9 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
           cities={payload.cities}
           matches={payload.matches}
           weather={payload.weather}
+          marketGroups={marketGroups}
+          odds={payload.odds}
+          rosters={payload.rosters}
           nextMatch={nextMatch}
           selectedCityId={selectedCityId}
           selectedMatchId={selectedMatch?.id || null}

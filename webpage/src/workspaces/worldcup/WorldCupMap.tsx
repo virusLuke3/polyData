@@ -6,13 +6,24 @@ import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import { feature } from 'topojson-client';
 import countriesAtlas from 'world-atlas/countries-50m.json';
 import { OPENFREEMAP_DARK_STYLE } from '@/config/weatherBasemap';
-import { WORLD_CUP_HOST_MATCH_COUNTS } from './data';
-import type { WorldCupCityWeather, WorldCupMatch, WorldCupVenueCity } from './types';
+import type { MarketGroupItem } from '@/types';
+import { matchPolymarketMarkets, WORLD_CUP_HOST_MATCH_COUNTS } from './data';
+import type {
+  WorldCupCityWeather,
+  WorldCupMatch,
+  WorldCupOddsSnapshot,
+  WorldCupPolymarketMarket,
+  WorldCupTeamRoster,
+  WorldCupVenueCity,
+} from './types';
 
 type WorldCupMapProps = {
   cities: WorldCupVenueCity[];
   matches: WorldCupMatch[];
   weather: WorldCupCityWeather[];
+  marketGroups: MarketGroupItem[];
+  odds: WorldCupOddsSnapshot[];
+  rosters: WorldCupTeamRoster[];
   nextMatch: WorldCupMatch | null;
   selectedCityId: string | null;
   selectedMatchId: string | null;
@@ -508,6 +519,101 @@ function seedOdds(match: WorldCupMatch | null) {
     { label: 'Draw', value: base[1]! },
     { label: match.awayTeam, value: base[2]! },
   ];
+}
+
+function formatCompact(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '--';
+  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+function probabilityWidth(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '0%';
+  return `${Math.max(3, Math.min(100, value * 100))}%`;
+}
+
+function filterMatchesForTime(matches: WorldCupMatch[], nextMatch: WorldCupMatch | null, filter: WorldCupTimeFilter) {
+  if (filter === 'all') return matches;
+  if (filter === 'group') return matches.filter((match) => match.stage === 'group');
+  if (filter === 'knockout') return matches.filter((match) => match.stage !== 'group');
+
+  const upcoming = matches.filter((match) => match.status !== 'finished').sort((a, b) => Date.parse(a.kickoffUtc) - Date.parse(b.kickoffUtc));
+  const anchor = nextMatch || upcoming[0] || null;
+  if (!anchor) return [];
+  if (filter === 'now') return [anchor];
+
+  const anchorTime = Date.parse(anchor.kickoffUtc);
+  const windowMs = filter === '24h' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  return upcoming.filter((match) => {
+    const kickoff = Date.parse(match.kickoffUtc);
+    return kickoff >= anchorTime && kickoff <= anchorTime + windowMs;
+  });
+}
+
+function visibleCitySignalsForFilter(citySignals: CitySignal[], filteredMatches: WorldCupMatch[], filter: WorldCupTimeFilter) {
+  if (filter === 'all') return citySignals;
+  const cityIds = new Set(filteredMatches.map((match) => match.cityId));
+  if (filter === 'knockout') {
+    citySignals.forEach((signal) => {
+      if (knockoutSlotCount(signal) > 0) cityIds.add(signal.city.id);
+    });
+  }
+  citySignals.forEach((signal) => {
+    if (signal.selected || signal.next) cityIds.add(signal.city.id);
+  });
+  const visible = citySignals.filter((signal) => cityIds.has(signal.city.id));
+  return visible.length ? visible : citySignals;
+}
+
+function seedPolymarketMarketsForMatch(match: WorldCupMatch | null, weather: WorldCupCityWeather | null): WorldCupPolymarketMarket[] {
+  if (!match) return [];
+  const matchup = `${match.homeTeam} vs ${match.awayTeam}`;
+  return [
+    {
+      matchId: match.id,
+      title: `${matchup}: match winner market watch`,
+      confidence: 0.58,
+      source: 'inferred',
+      volume24h: 47100,
+      outcomes: [
+        { name: match.homeTeam, yesPrice: 0.44, volume24h: 18200 },
+        { name: 'Draw', yesPrice: 0.28, volume24h: 12600 },
+        { name: match.awayTeam, yesPrice: 0.31, volume24h: 16300 },
+      ],
+    },
+    {
+      matchId: match.id,
+      title: `${match.city}: weather and venue-risk basket`,
+      confidence: 0.51,
+      source: 'manual',
+      volume24h: 18400,
+      outcomes: [
+        { name: weather?.current.condition || 'Weather clear', yesPrice: weatherRiskScore(weather) > 44 ? 0.38 : 0.22 },
+        { name: 'Delay risk', yesPrice: weatherRiskScore(weather) > 58 ? 0.2 : 0.08 },
+        { name: 'High travel load', yesPrice: 0.34 },
+      ],
+    },
+  ];
+}
+
+function cityPolymarketMarkets(signal: CitySignal | null, marketGroups: MarketGroupItem[]) {
+  if (!signal) return [];
+  const linked = signal.matches.flatMap((match) => matchPolymarketMarkets(match, marketGroups));
+  if (linked.length) return linked.slice(0, 8);
+  return seedPolymarketMarketsForMatch(signal.nextMatch || signal.matches[0] || null, signal.weather);
+}
+
+function cityOddsSnapshots(signal: CitySignal | null, odds: WorldCupOddsSnapshot[]) {
+  if (!signal) return [];
+  const matchIds = new Set(signal.matches.map((match) => match.id));
+  return odds.filter((snapshot) => matchIds.has(snapshot.matchId)).slice(0, 6);
+}
+
+function cityRosterRows(signal: CitySignal | null, rosters: WorldCupTeamRoster[]) {
+  if (!signal) return [];
+  const teams = new Set(signal.matches.flatMap((match) => [match.homeTeam, match.awayTeam]).filter((team) => team && !/^TBD|^Winner|^Loser|^[A-L][123]|^3rd/i.test(team)));
+  return rosters.filter((roster) => teams.has(roster.team)).slice(0, 6);
 }
 
 function stageGroupLabel(match: WorldCupMatch | null, fallbackSlot = 0, signal?: CitySignal) {
@@ -1012,7 +1118,18 @@ function MapControls({ map }: { map: MapLibreMap | null }) {
   );
 }
 
-export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityId, selectedMatchId, onSelectCity }: WorldCupMapProps) {
+export function WorldCupMap({
+  cities,
+  matches,
+  weather,
+  marketGroups,
+  odds,
+  rosters,
+  nextMatch,
+  selectedCityId,
+  selectedMatchId,
+  onSelectCity,
+}: WorldCupMapProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mapHostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -1023,6 +1140,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const fallbackAppliedRef = useRef(false);
   const dataRef = useRef({ cities, matches, weather, nextMatch, selectedCityId, selectedMatchId });
   const enabledLayersRef = useRef(DEFAULT_ENABLED_LAYERS);
+  const timeFilterRef = useRef<WorldCupTimeFilter>('all');
   const [enabledLayers, setEnabledLayers] = useState<EnabledLayers>(DEFAULT_ENABLED_LAYERS);
   const [activeMode, setActiveMode] = useState<WorldCupMapMode>('schedule');
   const [timeFilter, setTimeFilter] = useState<WorldCupTimeFilter>('all');
@@ -1042,10 +1160,18 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     () => buildCitySignals(cities, matches, weatherByCity, nextMatch, selectedMatchId, explicitSelectedCityRef.current),
     [cities, matches, nextMatch, selectedCityId, selectedMatchId, weatherByCity],
   );
+  const filteredMatches = useMemo(() => filterMatchesForTime(matches, nextMatch, timeFilter), [matches, nextMatch, timeFilter]);
+  const visibleCitySignals = useMemo(
+    () => visibleCitySignalsForFilter(citySignals, filteredMatches, timeFilter),
+    [citySignals, filteredMatches, timeFilter],
+  );
   const activeSignal = getActiveSignal(citySignals, selectedCityId, selectedMatchId, matches, nextMatch);
   const activeMatches = activeSignal?.matches || [];
   const activeRisk = activeSignal ? cityRisk(activeSignal) : null;
   const activeImpact = activeSignal ? weatherImpact(activeSignal.weather) : null;
+  const activeMarkets = useMemo(() => cityPolymarketMarkets(activeSignal, marketGroups), [activeSignal, marketGroups]);
+  const activeOdds = useMemo(() => cityOddsSnapshots(activeSignal, odds), [activeSignal, odds]);
+  const activeRosters = useMemo(() => cityRosterRows(activeSignal, rosters), [activeSignal, rosters]);
   const activeMatchSlots = useMemo(() => {
     if (!activeSignal) return [];
     const seeded = activeMatches.map((match) => ({ type: 'match' as const, match, key: match.id }));
@@ -1074,8 +1200,9 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   const mapSummary = useMemo(() => {
     const enabledCount = Object.values(enabledLayers).filter(Boolean).length;
     const plannedMatches = cities.reduce((sum, city) => sum + (WORLD_CUP_HOST_MATCH_COUNTS[city.id] || 0), 0);
-    return `Showing ${cities.length} cities · ${Math.max(matches.length, plannedMatches)} matches · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
-  }, [cities, enabledLayers, matches.length, timeFilter]);
+    const visibleMatches = timeFilter === 'all' ? Math.max(matches.length, plannedMatches) : filteredMatches.length;
+    return `Showing ${visibleCitySignals.length} cities · ${visibleMatches} matches · ${enabledCount} layers · ${timeFilter.toUpperCase()}`;
+  }, [cities, enabledLayers, filteredMatches.length, matches.length, timeFilter, visibleCitySignals.length]);
 
   const updateDeckLayers = () => {
     const map = mapRef.current;
@@ -1084,6 +1211,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const current = dataRef.current;
     const weatherIndex = new Map<string, WorldCupCityWeather>();
     current.weather.forEach((item) => weatherIndex.set(item.cityId, item));
+    const currentFilteredMatches = filterMatchesForTime(current.matches, current.nextMatch, timeFilterRef.current);
     const currentCitySignals = buildCitySignals(
       current.cities,
       current.matches,
@@ -1092,8 +1220,14 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
       current.selectedMatchId,
       explicitSelectedCityRef.current,
     );
+    const currentVisibleCitySignals = visibleCitySignalsForFilter(currentCitySignals, currentFilteredMatches, timeFilterRef.current);
     overlay.setProps({
-      layers: buildDeckLayers(currentCitySignals, buildDeckSignals(currentCitySignals, current.matches), enabledLayersRef.current, map.getZoom()),
+      layers: buildDeckLayers(
+        currentVisibleCitySignals,
+        buildDeckSignals(currentVisibleCitySignals, currentFilteredMatches),
+        enabledLayersRef.current,
+        map.getZoom(),
+      ),
     });
   };
 
@@ -1146,6 +1280,11 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
   };
 
   const toggleLayer = (key: WorldCupLayerKey) => {
+    if (key === 'weather') setActiveDetailTab('weather');
+    if (key === 'markets' || key === 'odds') setActiveDetailTab('markets');
+    if (key === 'transit') setActiveDetailTab('venue');
+    if (key === 'teams') setActiveDetailTab('teams');
+    if (key !== 'cities') setInspectorOpen(true);
     setEnabledLayers((current) => {
       const next = { ...current, [key]: !current[key] };
       enabledLayersRef.current = next;
@@ -1159,12 +1298,29 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
     const next = MODE_LAYER_PRESETS[mode];
     enabledLayersRef.current = next;
     setEnabledLayers(next);
+    setActiveDetailTab(mode === 'weather' || mode === 'risk' ? 'weather' : mode === 'market' ? 'markets' : mode === 'travel' ? 'venue' : 'matches');
+    setInspectorOpen(true);
     window.requestAnimationFrame(updateDeckLayers);
   };
 
-  useEffect(() => {
-    setActiveDetailTab('matches');
-  }, [activeSignal?.city.id]);
+  const changeTimeFilter = (filter: WorldCupTimeFilter) => {
+    timeFilterRef.current = filter;
+    setTimeFilter(filter);
+    const current = dataRef.current;
+    const focusMatch = filterMatchesForTime(current.matches, current.nextMatch, filter)[0] || current.nextMatch;
+    if (focusMatch) {
+      explicitSelectedCityRef.current = focusMatch.cityId;
+      onSelectCity(focusMatch.cityId);
+      setInspectorOpen(true);
+      setActiveDetailTab('matches');
+      const city = current.cities.find((item) => item.id === focusMatch.cityId);
+      const map = mapRef.current;
+      if (city && map) {
+        map.easeTo({ center: [city.longitude, city.latitude], zoom: Math.max(map.getZoom(), 3.18), duration: 360, offset: [-190, 0] });
+      }
+    }
+    window.requestAnimationFrame(updateDeckLayers);
+  };
 
   useEffect(() => {
     dataRef.current = { cities, matches, weather, nextMatch, selectedCityId, selectedMatchId };
@@ -1225,6 +1381,11 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
           explicitSelectedCityRef.current = city.id;
           onSelectCity(city.id);
           setInspectorOpen(true);
+          if (object?.type === 'weather') setActiveDetailTab('weather');
+          else if (object?.type === 'market' || object?.type === 'odds') setActiveDetailTab('markets');
+          else if (object?.type === 'transit') setActiveDetailTab('venue');
+          else if (object?.type === 'team') setActiveDetailTab('teams');
+          else if (object?.type === 'schedule') setActiveDetailTab('matches');
           const targetZoom = Math.min(3.35, Math.max(map.getZoom(), 3.04));
           map.easeTo({ center: [city.longitude, city.latitude], zoom: targetZoom, duration: 360, offset: [-190, 0] });
         },
@@ -1331,7 +1492,7 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
         activeMode={activeMode}
         onModeChange={changeMode}
         timeFilter={timeFilter}
-        onTimeFilterChange={setTimeFilter}
+        onTimeFilterChange={changeTimeFilter}
         summary={mapSummary}
       />
       {regionHover ? (
@@ -1445,6 +1606,8 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
                     <span><small>Fatigue</small><b>{activeImpact?.fatigue}</b></span>
                     <span><small>Pitch</small><b>{activeImpact?.pitch}</b></span>
                     <span><small>Totals</small><b>{activeImpact?.totals}</b></span>
+                    <span><small>Wind</small><b>{activeSignal.weather?.current.windKph ?? '--'} kph</b></span>
+                    <span><small>Rain</small><b>{activeSignal.weather?.current.precipitationProbability ?? 0}%</b></span>
                   </div>
                   {activeSignal.weather ? (
                     <div className="wm-worldcup-map-inspector-forecast">
@@ -1456,17 +1619,61 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
                       ))}
                     </div>
                   ) : null}
+                  <div className="wm-worldcup-map-weather-impact">
+                    <b>Betting impact</b>
+                    <p>{activeImpact?.fatigue === 'High' ? 'Humidity can slow pressing teams and increase late-game fatigue. Totals lean slightly under until lineups and pitch reports confirm.' : activeImpact?.pitch === 'Watch' ? 'Storm watch creates delay and pitch-speed risk. Track totals, cards and live liquidity before kickoff.' : 'Weather profile is currently neutral. Keep standard market weight unless forecast shifts inside 24h.'}</p>
+                    <small>Updated {activeSignal.weather?.generatedAt ? new Date(activeSignal.weather.generatedAt).toLocaleString('en-US', { hour12: false }) : 'seed runtime'}</small>
+                  </div>
+                  <div className="wm-worldcup-map-affected-list">
+                    <span>Affected city matches</span>
+                    {activeMatches.slice(0, 4).map((match) => (
+                      <p key={`weather-${match.id}`}>
+                        <b>#{match.fifaMatchNumber || '--'}</b>
+                        <em>{matchTitle(match)}</em>
+                        <small>{shortKickoff(match)} local</small>
+                      </p>
+                    ))}
+                  </div>
                 </div>
               ) : null}
               {activeDetailTab === 'markets' ? (
                 <div className="wm-worldcup-map-market-card">
-                  <span>Market coverage</span>
-                  <strong>{marketCoverage(activeSignal)} city matches</strong>
-                  <div className="wm-worldcup-map-impact-grid">
-                    <span><small>Polymarket</small><b>{activeSignal.marketCount ? 'Local DB' : 'Seed watch'}</b></span>
-                    <span><small>Sportsbook</small><b>{activeSignal.oddsCount ? `${activeSignal.oddsCount} odds` : 'Pending'}</b></span>
-                    <span><small>Liquidity</small><b>{activeSignal.marketCount ? 'Available' : 'Thin'}</b></span>
-                    <span><small>Spread</small><b>{activeSignal.oddsCount ? 'Watch' : 'Seed'}</b></span>
+                  <span>Polymarket coverage</span>
+                  <strong>{activeMarkets.length} market candidates · {marketCoverage(activeSignal)} city matches</strong>
+                  <div className="wm-worldcup-map-market-list">
+                    {activeMarkets.map((market) => (
+                      <article className="wm-worldcup-map-market-row" key={`${market.marketId || market.eventId || market.title}`}>
+                        <div>
+                          <small>{Math.round(market.confidence * 100)} conf · {market.source.toUpperCase()} · 24h {formatCompact(market.volume24h)}</small>
+                          <b>{market.title}</b>
+                        </div>
+                        <div className="wm-worldcup-map-market-outcomes">
+                          {market.outcomes.slice(0, 3).map((outcome) => (
+                            <span key={`${market.title}-${outcome.name}`}>
+                              <em>{outcome.name}</em>
+                              <strong>{outcome.yesPrice == null ? '--' : `${(outcome.yesPrice * 100).toFixed(1)}%`}</strong>
+                              <i style={{ width: probabilityWidth(outcome.yesPrice) }} />
+                            </span>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                    {!activeMarkets.length ? <p className="wm-worldcup-map-empty-row">No matched Polymarket market yet. Local DB connector will populate this city when tagged markets arrive.</p> : null}
+                  </div>
+                  <div className="wm-worldcup-map-odds-list">
+                    <span>Sportsbook / odds snapshots</span>
+                    {(activeOdds.length ? activeOdds : []).map((snapshot) => (
+                      <article key={`${snapshot.matchId}-${snapshot.provider}`}>
+                        <b>{snapshot.provider}</b>
+                        <small>{snapshot.providerType.replace(/_/g, ' ')} · {snapshot.marketType.replace(/_/g, ' ')}</small>
+                        <div>
+                          {snapshot.outcomes.slice(0, 3).map((outcome) => (
+                            <em key={`${snapshot.provider}-${outcome.name}`}>{outcome.name} {outcome.decimalOdds?.toFixed(2) || '--'}</em>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                    {!activeOdds.length ? <p className="wm-worldcup-map-empty-row">No bookmaker row connected for this city yet. Seed odds remain visible in the next-match card.</p> : null}
                   </div>
                 </div>
               ) : null}
@@ -1480,6 +1687,17 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
                     <span><small>Host role</small><b>{cityRole(activeSignal)}</b></span>
                     <span><small>Ops</small><b>{opsStatus(activeSignal)}</b></span>
                     <span><small>Timezone</small><b>{activeSignal.city.timezone.replace('America/', '')}</b></span>
+                    <span><small>Stage mix</small><b>{knockoutSlotCount(activeSignal)} KO</b></span>
+                    <span><small>Forecast</small><b>{activeSignal.weather?.current.condition || 'Seed'}</b></span>
+                  </div>
+                  <div className="wm-worldcup-map-venue-ops">
+                    <b>Venue ops checklist</b>
+                    <p>Ingress, broadcast handoff, pitch state and airport load are pinned to this city. Travel layer will add airport/transit markers around the stadium when runtime feeds connect.</p>
+                    <div>
+                      <span>Airport / transit <b>{enabledLayers.transit ? 'Layer on' : 'Seed'}</b></span>
+                      <span>Pitch watch <b>{activeImpact?.pitch}</b></span>
+                      <span>Local ops <b>{opsStatus(activeSignal)}</b></span>
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -1492,6 +1710,22 @@ export function WorldCupMap({ cities, matches, weather, nextMatch, selectedCityI
                     <span><small>Away base</small><b>{nextCityMatch?.awayTeam || 'TBD'}</b></span>
                     <span><small>Lineups</small><b>Pending</b></span>
                     <span><small>Travel</small><b>{enabledLayers.transit ? 'Layer on' : 'Normal'}</b></span>
+                  </div>
+                  <div className="wm-worldcup-map-team-list">
+                    {activeRosters.map((roster) => (
+                      <article key={roster.team}>
+                        <strong>{roster.team}</strong>
+                        <small>Updated {new Date(roster.updatedAt).toLocaleString('en-US', { hour12: false })}</small>
+                        {roster.players.slice(0, 4).map((player) => (
+                          <p key={`${roster.team}-${player.name}`}>
+                            <b>{player.position || 'SQUAD'}</b>
+                            <span>{player.name}</span>
+                            <em>{player.status || 'probable'}</em>
+                          </p>
+                        ))}
+                      </article>
+                    ))}
+                    {!activeRosters.length ? <p className="wm-worldcup-map-empty-row">Official squads are pending for the selected city matches. Team-base markers still follow the next scheduled match.</p> : null}
                   </div>
                 </div>
               ) : null}
