@@ -118,7 +118,12 @@ def _rss_items(ctx: dict, query: str, *, limit: int = 10, language: str = "en-US
         text = ctx["http_text_get"](url, timeout=9, headers=_headers("application/rss+xml, application/xml, text/xml"))
     except Exception:
         return []
-    soup = ctx["BeautifulSoup"](text, "xml") if ctx.get("BeautifulSoup") is not None else None
+    soup = None
+    if ctx.get("BeautifulSoup") is not None:
+        try:
+            soup = ctx["BeautifulSoup"](text, "xml")
+        except Exception:
+            soup = ctx["BeautifulSoup"](text, "html.parser")
     if soup is None:
         return []
     rows: List[Dict[str, str]] = []
