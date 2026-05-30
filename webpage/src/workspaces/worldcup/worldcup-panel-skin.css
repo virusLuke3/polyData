@@ -5495,7 +5495,7 @@
   display: flex !important;
   grid-template-columns: none !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 8px !important;
   border: 1px solid transparent !important;
   border-radius: 3px !important;
   background: #050606 !important;
@@ -5503,7 +5503,7 @@
   cursor: pointer !important;
   font-size: 10px !important;
   line-height: 1.2 !important;
-  text-transform: uppercase !important;
+  text-transform: none !important;
   transition: background 0.15s ease, border-color 0.15s ease !important;
 }
 
@@ -5562,15 +5562,16 @@
 }
 
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-icon {
-  width: 16px !important;
-  height: 16px !important;
-  min-width: 16px !important;
+  width: 20px !important;
+  height: 18px !important;
+  min-width: 20px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   overflow: hidden !important;
   color: #f0f3f2 !important;
-  font-size: 12px !important;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif !important;
+  font-size: 13px !important;
   font-style: normal !important;
   font-weight: 700 !important;
   line-height: 1 !important;
@@ -5581,8 +5582,8 @@
   display: block !important;
   overflow: hidden !important;
   color: #f0f3f2 !important;
-  font-size: 10px !important;
-  font-weight: 500 !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
   letter-spacing: 0.5px !important;
   line-height: 1.2 !important;
   text-overflow: ellipsis !important;

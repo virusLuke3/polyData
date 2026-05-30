@@ -1055,32 +1055,32 @@ function LayerPanel({
     {
       title: 'Core',
       rows: [
-        { key: 'cities', icon: '●', label: 'Host Cities', status: '16', tone: 'core' },
-        { key: 'schedule', icon: '#', label: 'Match Schedule', status: '104', tone: 'match' },
-        { icon: '▣', label: 'Venues', status: 'Active', disabled: true, tone: 'core' },
+        { key: 'cities', icon: '⚽', label: 'Host Cities', status: '16', tone: 'core' },
+        { key: 'schedule', icon: '🗓️', label: 'Match Schedule', status: '104', tone: 'match' },
+        { icon: '🏟️', label: 'Venues', status: 'Active', disabled: true, tone: 'core' },
       ],
     },
     {
       title: 'Risk',
       rows: [
-        { key: 'weather', icon: '☁', label: 'Weather Risk', status: 'Forecast', tone: 'weather' },
-        { key: 'transit', icon: '⌁', label: 'Airport / Transit', status: 'Ops', tone: 'ops' },
-        { key: 'teams', icon: '◆', label: 'Team Bases', status: 'Squads', tone: 'core' },
+        { key: 'weather', icon: '🌦️', label: 'Weather Risk', status: 'Forecast', tone: 'weather' },
+        { key: 'transit', icon: '✈️', label: 'Airport / Transit', status: 'Ops', tone: 'ops' },
+        { key: 'teams', icon: '🏨', label: 'Team Bases', status: 'Squads', tone: 'core' },
       ],
     },
     {
       title: 'Markets',
       rows: [
-        { key: 'markets', icon: '$', label: 'Polymarket Markets', status: 'Markets', tone: 'market' },
-        { key: 'odds', icon: '◒', label: 'Sportsbook Odds', status: 'Odds', tone: 'market' },
-        { icon: '≋', label: 'Liquidity', status: 'Volume', disabled: true, tone: 'market' },
+        { key: 'markets', icon: '🎯', label: 'Polymarket Markets', status: 'Markets', tone: 'market' },
+        { key: 'odds', icon: '💵', label: 'Sportsbook Odds', status: 'Odds', tone: 'market' },
+        { icon: '💧', label: 'Liquidity', status: 'Volume', disabled: true, tone: 'market' },
       ],
     },
     {
       title: 'Operations',
       rows: [
-        { icon: '◷', label: 'Broadcast Time', status: 'BJT', tone: 'ops' },
-        { icon: '◎', label: 'Local Ops', status: 'Ops', tone: 'ops' },
+        { icon: '🕘', label: 'Broadcast Time', status: 'BJT', tone: 'ops' },
+        { icon: '🛠️', label: 'Local Ops', status: 'Ops', tone: 'ops' },
       ],
     },
   ];
