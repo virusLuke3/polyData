@@ -5301,35 +5301,67 @@
 
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(1) {
   border-color: rgba(79,195,255,0.28) !important;
-  background: rgba(79,195,255,0.08) !important;
+  background:
+    linear-gradient(180deg, rgba(79,195,255,0.075), rgba(8,12,15,0.84)) !important;
 }
 
-.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(1) strong,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(1) strong {
+  color: #72d9ff !important;
+  background: transparent !important;
+}
+
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(1) i {
-  color: #76dbff !important;
   background: #4fc3ff !important;
 }
 
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(2) {
   border-color: rgba(255,189,66,0.28) !important;
-  background: rgba(255,189,66,0.07) !important;
+  background:
+    linear-gradient(180deg, rgba(255,189,66,0.075), rgba(14,11,4,0.82)) !important;
 }
 
-.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(2) strong,
-.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(2) i {
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(2) strong {
   color: #ffcb62 !important;
+  background: transparent !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(2) i {
   background: #ffbd42 !important;
 }
 
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(3) {
   border-color: rgba(182,146,255,0.28) !important;
-  background: rgba(182,146,255,0.08) !important;
+  background:
+    linear-gradient(180deg, rgba(182,146,255,0.075), rgba(12,10,18,0.84)) !important;
 }
 
-.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(3) strong,
-.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(3) i {
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(3) strong {
   color: #c9b0ff !important;
+  background: transparent !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span:nth-child(3) i {
   background: #b692ff !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes span::after {
+  content: "" !important;
+  position: absolute !important;
+  left: 8px !important;
+  right: 8px !important;
+  bottom: 7px !important;
+  height: 3px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,0.12) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-market-outcomes i {
+  left: 8px !important;
+  bottom: 7px !important;
+  z-index: 1 !important;
+  max-width: calc(100% - 16px) !important;
+  height: 3px !important;
+  border-radius: 999px !important;
 }
 
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-venue-card > span,

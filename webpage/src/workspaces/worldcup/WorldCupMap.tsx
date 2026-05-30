@@ -550,7 +550,8 @@ function formatCompact(value: number | null | undefined) {
 
 function probabilityWidth(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return '0%';
-  return `${Math.max(3, Math.min(100, value * 100))}%`;
+  const percentage = value > 1 ? value : value * 100;
+  return `${Math.max(3, Math.min(100, percentage))}%`;
 }
 
 function filterMatchesForTime(matches: WorldCupMatch[], nextMatch: WorldCupMatch | null, filter: WorldCupTimeFilter) {
