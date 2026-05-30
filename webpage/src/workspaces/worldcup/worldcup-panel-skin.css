@@ -5349,3 +5349,264 @@
 .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-team-list article p b {
   color: #33f286 !important;
 }
+
+/* v20: Worldmonitor-matched Layers tray. Keep this final so it wins over
+   earlier World Cup dashboard treatments. */
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles {
+  position: absolute !important;
+  left: 10px !important;
+  top: 12px !important;
+  bottom: auto !important;
+  z-index: 28 !important;
+  width: 260px !important;
+  max-width: 260px !important;
+  max-height: 50vh !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  overflow: hidden !important;
+  border: 1px solid #242728 !important;
+  border-radius: 4px !important;
+  background: #050606 !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.62) !important;
+  font-family: var(--font-mono, "SF Mono", "Monaco", "Cascadia Code", "Fira Code", "DejaVu Sans Mono", "Liberation Mono", monospace) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-header {
+  min-height: 0 !important;
+  height: auto !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 6px 10px !important;
+  border-bottom: 1px solid #242728 !important;
+  background: #050606 !important;
+  color: #8f9496 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 1px !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+  flex-shrink: 0 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-header span:first-child {
+  margin-right: auto !important;
+  color: #8f9496 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-help-btn {
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid #2c3032 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: #9aa0a2 !important;
+  font: inherit !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-collapse {
+  width: 18px !important;
+  min-width: 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  color: #9aa0a2 !important;
+  font: inherit !important;
+  font-size: 10px !important;
+  cursor: pointer !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-search {
+  width: calc(100% - 16px) !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 4px 8px !important;
+  padding: 4px 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 4px !important;
+  outline: none !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #f0f3f2 !important;
+  font-family: inherit !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-search::placeholder {
+  color: rgba(255, 255, 255, 0.42) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-search:focus {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .wm-worldcup-map-hidden-presets {
+  display: none !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-list {
+  flex: 1 !important;
+  min-height: 0 !important;
+  max-height: 32vh !important;
+  padding: 4px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: #a8a8a8 transparent !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-list::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-list::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-list::-webkit-scrollbar-thumb {
+  border-radius: 3px !important;
+  background: #a8a8a8 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle {
+  position: relative !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 28px !important;
+  padding: 5px 8px !important;
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center !important;
+  gap: 6px !important;
+  border: 1px solid transparent !important;
+  border-radius: 3px !important;
+  background: #050606 !important;
+  color: #f0f3f2 !important;
+  cursor: pointer !important;
+  font-size: 10px !important;
+  line-height: 1.2 !important;
+  text-transform: uppercase !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: #080909 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle.active,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle.has-data {
+  border-color: transparent !important;
+  background: #050606 !important;
+  box-shadow: none !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle.disabled,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle-locked {
+  opacity: 0.58 !important;
+  cursor: default !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle input[type="checkbox"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  margin: 0 !important;
+  position: relative !important;
+  flex-shrink: 0 !important;
+  border: 2px solid #2d3133 !important;
+  border-radius: 3px !important;
+  background: transparent !important;
+  cursor: pointer !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle input[type="checkbox"]:checked {
+  border-color: #44ff88 !important;
+  background: #44ff88 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle input[type="checkbox"]:checked::after {
+  content: "✓" !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  color: #050606 !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .layer-toggle input[type="checkbox"]:disabled {
+  cursor: default !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-icon {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  color: #f0f3f2 !important;
+  font-size: 12px !important;
+  font-style: normal !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .toggle-label {
+  min-width: 0 !important;
+  display: block !important;
+  overflow: hidden !important;
+  color: #f0f3f2 !important;
+  font-size: 10px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.5px !important;
+  line-height: 1.2 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles .map-author-badge {
+  display: block !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  padding: 6px 10px !important;
+  border-top: 1px solid rgba(0, 229, 255, 0.22) !important;
+  background: #050606 !important;
+  color: #00e5ff !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 2px !important;
+  line-height: 1.2 !important;
+  text-transform: none !important;
+}
+
+@media (max-width: 760px) {
+  .wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-map-layer-panel.deckgl-layer-toggles {
+    width: 230px !important;
+    max-width: calc(100vw - 20px) !important;
+  }
+}

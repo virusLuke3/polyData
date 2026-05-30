@@ -1084,55 +1084,58 @@ function LayerPanel({
       ],
     },
   ];
+  const layerRows = layerGroups.flatMap((group) => group.rows.map((row) => ({ ...row, group: group.title })));
+
   return (
-    <aside className="wm-worldcup-map-layer-panel">
-      <div className="wm-worldcup-map-layer-head">
-        <strong>LAYERS</strong>
-        <button type="button" aria-label="Layer help">?</button>
-        <span>▼</span>
+    <aside
+      className="wm-worldcup-map-layer-panel deckgl-layer-toggles"
+      data-active-mode={activeMode}
+      data-time-filter={timeFilter}
+      data-summary={summary}
+    >
+      <div className="wm-worldcup-map-layer-head toggle-header">
+        <span>LAYERS</span>
+        <button type="button" className="layer-help-btn" aria-label="Layer help">?</button>
+        <button type="button" className="toggle-collapse" aria-label="Collapse layers">▼</button>
       </div>
-      <input aria-label="Search World Cup map" placeholder="Search city, team, match, venue..." />
-      <div className="wm-worldcup-map-mode" aria-label="Map mode">
+      <input className="layer-search" aria-label="Search World Cup map layers" placeholder="Search layers..." />
+      <div className="wm-worldcup-map-hidden-presets" hidden aria-hidden="true">
         {modes.map(([mode, label]) => (
           <button type="button" className={activeMode === mode ? 'active' : ''} key={mode} onClick={() => onModeChange(mode)}>
             {label}
           </button>
         ))}
-      </div>
-      <div className="wm-worldcup-map-time-filter" aria-label="Time filter">
         {filters.map(([filter, label]) => (
           <button type="button" className={timeFilter === filter ? 'active' : ''} key={filter} onClick={() => onTimeFilterChange(filter)}>
             {label}
           </button>
         ))}
       </div>
-      <div className="wm-worldcup-map-layer-list">
-        {layerGroups.map((group) => (
-          <section className="wm-worldcup-map-layer-group" key={group.title}>
-            <h4>{group.title}</h4>
-            {group.rows.map((row) => {
-              const active = row.key ? enabledLayers[row.key] : false;
-              return (
-                <button
-                  type="button"
-                  className={`wm-worldcup-map-layer-row ${active ? 'active' : ''} ${row.disabled ? 'disabled' : ''}`}
-                  data-layer-key={row.key || row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}
-                  data-layer-tone={row.tone}
-                  key={`${group.title}-${row.label}`}
-                  onClick={() => row.key && !row.disabled ? onToggle(row.key) : undefined}
-                  disabled={row.disabled}
-                >
-                  <i>{row.disabled ? '⊘' : active ? '✓' : ''}</i>
-                  <b>{row.icon}</b>
-                  <span>{row.label}</span>
-                  <em>{row.status}</em>
-                </button>
-              );
-            })}
-          </section>
-        ))}
+      <div className="wm-worldcup-map-layer-list toggle-list">
+        {layerRows.map((row) => {
+          const active = row.key ? enabledLayers[row.key] : false;
+          const layerKey = row.key || row.label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          return (
+            <label
+              className={`wm-worldcup-map-layer-row layer-toggle ${active ? 'active has-data' : ''} ${row.disabled ? 'disabled layer-toggle-locked' : ''}`}
+              data-layer-key={layerKey}
+              data-layer-tone={row.tone}
+              data-layer-group={row.group}
+              key={`${row.group}-${row.label}`}
+            >
+              <input
+                type="checkbox"
+                checked={active}
+                disabled={row.disabled || !row.key}
+                onChange={() => row.key && !row.disabled ? onToggle(row.key) : undefined}
+              />
+              <span className="toggle-icon">{row.icon}</span>
+              <span className="toggle-label">{row.label}</span>
+            </label>
+          );
+        })}
       </div>
-      <footer>{summary}</footer>
+      <footer className="map-author-badge">© PolyMonitor · WorldCup™</footer>
     </aside>
   );
 }
