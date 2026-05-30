@@ -23,28 +23,17 @@ type MatchFilter = 'all' | 'today' | 'future' | 'finished' | 'market';
 type WorldCupSignalTone = 'red' | 'gold' | 'blue' | 'purple' | 'gray' | 'green';
 type WorldCupPanelId =
   | 'calendar'
-  | 'match-detail'
+  | 'match-control'
   | 'news'
-  | 'weather'
-  | 'markets'
-  | 'squads'
-  | 'odds'
-  | 'match-wire'
-  | 'host-ops'
+  | 'host-venue'
+  | 'market-board'
+  | 'team-status'
+  | 'lineup-board'
+  | 'match-model'
   | 'group-table'
-  | 'liquidity'
-  | 'team-wire'
-  | 'odds-tape'
-  | 'risk-desk'
-  | 'broadcast'
-  | 'official-facts'
-  | 'injury-tracker'
-  | 'lineup-watch'
-  | 'player-pool'
-  | 'xg-model'
-  | 'tactical-matchup'
-  | 'local-media'
-  | 'ref-venue';
+  | 'media-wire'
+  | 'odds-liquidity'
+  | 'venue-ref';
 type WorldCupSignalItem = {
   id: string;
   source: string;
@@ -56,32 +45,21 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
-const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v3';
+const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v4';
 const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
 const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',
-  'match-detail',
+  'match-control',
   'news',
-  'weather',
-  'markets',
-  'official-facts',
-  'injury-tracker',
-  'lineup-watch',
-  'xg-model',
-  'tactical-matchup',
-  'squads',
-  'odds',
+  'host-venue',
+  'market-board',
+  'team-status',
+  'lineup-board',
+  'match-model',
   'group-table',
-  'local-media',
-  'ref-venue',
-  'match-wire',
-  'host-ops',
-  'liquidity',
-  'team-wire',
-  'odds-tape',
-  'risk-desk',
-  'broadcast',
-  'player-pool',
+  'media-wire',
+  'odds-liquidity',
+  'venue-ref',
 ];
 
 function readWorldCupPanelOrder(): WorldCupPanelId[] {
@@ -211,6 +189,16 @@ function kickoffTime(match: WorldCupMatch) {
 function probabilityWidth(value?: number | null) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '2%';
   return `${Math.max(2, Math.min(100, Number(value) * 100))}%`;
+}
+
+function percentLabel(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return `${Number(value).toFixed(digits)}%`;
+}
+
+function probabilityLabel(value?: number | null, digits = 1) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
+  return `${(Number(value) * 100).toFixed(digits)}%`;
 }
 
 function newsTags(item: WorldCupNewsItem) {
@@ -908,6 +896,425 @@ function OddsPanel({ odds, polymarket }: { odds: WorldCupOddsSnapshot[]; polymar
           </article>
         ))}
         {polymarket.length ? <div className="wm-worldcup-odds-note">Polymarket linked markets: {polymarket.length}. Spread comparison comes after bookmaker provider is wired.</div> : null}
+      </div>
+    </Panel>
+  );
+}
+
+void [SignalFeedPanel, MatchPanel, WeatherPanel, PolymarketPanel, RostersPanel, OddsPanel];
+
+function MatchControlPanel({
+  match,
+  markets,
+  odds,
+  weather,
+  city,
+  facts,
+  broadcast,
+}: {
+  match: WorldCupMatch | null;
+  markets: WorldCupPolymarketMarket[];
+  odds: WorldCupOddsSnapshot[];
+  weather?: WorldCupDashboardPayload['weather'][number] | null;
+  city?: WorldCupDashboardPayload['cities'][number] | null;
+  facts: WorldCupSignalItem[];
+  broadcast: WorldCupSignalItem[];
+}) {
+  if (!match) {
+    return (
+      <Panel title="MATCH CONTROL" count={0} className="wm-worldcup-panel wm-worldcup-match-control-panel">
+        <div className="wm-worldcup-empty">No match selected.</div>
+      </Panel>
+    );
+  }
+  const factCards = [
+    ['MATCH', `#${match.fifaMatchNumber || '--'}`, match.round],
+    ['GROUP', match.group || stageLabel(match.stage), 'table / fixtures'],
+    ['BJT', match.kickoffBeijing, 'desk clock'],
+    ['LOCAL', match.kickoffLocal, city?.timezone || 'venue time'],
+    ['VENUE', match.venue, `${match.city} · ${city?.capacity ? city.capacity.toLocaleString() : '--'} seats`],
+    ['WEATHER', weather ? `${weather.current.tempC}C · ${weather.current.condition}` : 'pending', `wind ${weather?.current.windKph ?? '--'} kph · rain ${weather?.current.precipitationProbability ?? 0}%`],
+  ];
+  return (
+    <Panel title="MATCH CONTROL" count={facts.length + broadcast.length} className="wm-worldcup-panel wm-worldcup-match-control-panel">
+      <div className="wm-worldcup-control-score">
+        <span><em>HOME</em><strong>{match.homeTeam}</strong></span>
+        <b>{scoreText(match)}</b>
+        <span><em>AWAY</em><strong>{match.awayTeam}</strong></span>
+      </div>
+      <div className="wm-worldcup-control-ticker">
+        <i>{match.status.toUpperCase()}</i>
+        <i>{markets.length || 5} markets</i>
+        <i>{odds.length} odds feeds</i>
+        <i>{match.city}</i>
+      </div>
+      <div className="wm-worldcup-control-grid">
+        {factCards.map(([label, value, meta]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+            <em>{meta}</em>
+          </div>
+        ))}
+      </div>
+      <div className="wm-worldcup-mini-feed">
+        {[...facts.slice(0, 3), ...broadcast.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function HostVenuePanel({
+  payload,
+  selectedCityId,
+  onSelectCity,
+  hostOps,
+  risk,
+  refVenue,
+}: {
+  payload: WorldCupDashboardPayload;
+  selectedCityId: string | null;
+  onSelectCity: (cityId: string) => void;
+  hostOps: WorldCupSignalItem[];
+  risk: WorldCupSignalItem[];
+  refVenue: WorldCupSignalItem[];
+}) {
+  const cityWeather = payload.weather.map((weather) => ({
+    weather,
+    city: matchCity(payload.cities, weather.cityId),
+    matchCount: payload.matches.filter((match) => match.cityId === weather.cityId).length,
+  }));
+  const selectedWeather = payload.weather.find((item) => item.cityId === selectedCityId) || payload.weather[0] || null;
+  const opsMetrics = [
+    ['WIND', selectedWeather?.current.windKph ?? 0, 'kph', 36],
+    ['RAIN', selectedWeather?.current.precipitationProbability ?? 0, '%', 100],
+    ['TRAVEL LOAD', Math.min(100, (payload.matches.filter((match) => match.cityId === selectedCityId).length || 1) * 9), '%', 100],
+    ['DELAY RISK', /storm|rain/i.test(selectedWeather?.current.condition || '') ? 42 : 12, '%', 100],
+  ] as const;
+  return (
+    <Panel title="HOST / VENUE OPS" count={cityWeather.length} className="wm-worldcup-panel wm-worldcup-host-venue-panel">
+      <div className="wm-worldcup-ops-metrics">
+        {opsMetrics.map(([label, value, unit, max]) => (
+          <span key={label}>
+            <em>{label}</em>
+            <strong>{value}{unit}</strong>
+            <i style={{ width: `${Math.max(4, Math.min(100, (Number(value) / Number(max)) * 100))}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="wm-worldcup-city-strip">
+        {cityWeather.slice(0, 16).map(({ city, weather, matchCount }) => (
+          <button className={city.id === selectedCityId ? 'active' : ''} key={city.id} type="button" onClick={() => onSelectCity(city.id)}>
+            <span>
+              <strong>{city.city}</strong>
+              <em>{city.country} · {matchCount} matches · {weather.current.condition}</em>
+            </span>
+            <b>{weather.current.tempC}C</b>
+            <i>{weather.forecast.slice(0, 4).map((day) => `${formatWeatherDay(day.date)} ${day.lowC}/${day.highC}`).join(' · ')}</i>
+          </button>
+        ))}
+      </div>
+      <div className="wm-worldcup-mini-feed wm-worldcup-mini-feed-compact">
+        {[...hostOps.slice(0, 2), ...risk.slice(0, 2), ...refVenue.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function MarketBoardPanel({
+  markets,
+  match,
+  odds,
+}: {
+  markets: WorldCupPolymarketMarket[];
+  match: WorldCupMatch | null;
+  odds: WorldCupOddsSnapshot[];
+}) {
+  const displayMarkets = markets.length ? markets : seedPolymarketMarkets(match);
+  const firstMarket = displayMarkets[0] || null;
+  const totalVolume = displayMarkets.reduce((sum, market) => sum + (market.volume24h || 0), 0);
+  return (
+    <Panel
+      title="MARKET BOARD"
+      count={displayMarkets.length}
+      titleControls={<InfoDot label="Markets, odds, liquidity and inferred World Cup event links are consolidated here." />}
+      className="wm-worldcup-panel wm-worldcup-market-board-panel"
+    >
+      <div className="wm-worldcup-board-stats">
+        <span><em>24H VOL</em><strong>{formatCompact(totalVolume)}</strong></span>
+        <span><em>LINKS</em><strong>{displayMarkets.length}</strong></span>
+        <span><em>BOOKS</em><strong>{odds.length}</strong></span>
+        <span><em>CONF</em><strong>{firstMarket ? percentLabel(firstMarket.confidence * 100, 0) : '--'}</strong></span>
+      </div>
+      {displayMarkets.slice(0, 4).map((market, index) => (
+        <article className="wm-worldcup-market-card" key={`${market.eventId || market.title}`}>
+          <div className="wm-worldcup-card-head">
+            <span>{formatCompact(market.volume24h)} · {Math.round(market.confidence * 100)} conf</span>
+            <b>{index === 0 ? 'PRIMARY' : market.source.toUpperCase()}</b>
+          </div>
+          <strong>{market.title}</strong>
+          <div className="wm-worldcup-prob-grid">
+            {market.outcomes.slice(0, 3).map((outcome) => (
+              <span key={outcome.name}>
+                <em>{outcome.name}</em>
+                <strong>{probabilityLabel(outcome.yesPrice)}</strong>
+                <i style={{ width: probabilityWidth(outcome.yesPrice) }} />
+              </span>
+            ))}
+          </div>
+        </article>
+      ))}
+    </Panel>
+  );
+}
+
+function TeamStatusPanel({
+  payload,
+  match,
+  injuries,
+  players,
+}: {
+  payload: WorldCupDashboardPayload;
+  match: WorldCupMatch | null;
+  injuries: WorldCupSignalItem[];
+  players: WorldCupSignalItem[];
+}) {
+  const teams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 2).map((roster) => roster.team);
+  const rosters = payload.rosters.filter((roster) => teams.includes(roster.team));
+  const rosterRows = (rosters.length ? rosters : teams.map((team) => ({ team, updatedAt: payload.generatedAt, players: [] }))).slice(0, 2);
+  return (
+    <Panel title="TEAM STATUS" count={injuries.length + players.length} className="wm-worldcup-panel wm-worldcup-team-status-panel">
+      <div className="wm-worldcup-team-grid">
+        {rosterRows.map((roster) => {
+          const confirmed = roster.players.filter((player) => player.status === 'confirmed').length;
+          const injured = roster.players.filter((player) => player.status === 'injured').length;
+          const ready = roster.players.length ? Math.round((confirmed / roster.players.length) * 100) : 0;
+          return (
+            <section key={roster.team}>
+              <header><strong>{roster.team}</strong><span>{roster.players.length || '--'} players</span></header>
+              <div className="wm-worldcup-team-meter"><i style={{ width: `${Math.max(8, ready || 36)}%` }} /><b>{ready || 36}% ready</b></div>
+              <p>{injured ? `${injured} injury flags` : 'No injury flag in current panel feed'}</p>
+              {(roster.players.length ? roster.players : [
+                { name: 'Official squad pending', position: 'ALL', status: 'probable' as const },
+                { name: 'Final roster window not closed', position: 'NOTE', status: 'reserve' as const },
+              ]).slice(0, 4).map((player) => (
+                <div className="wm-worldcup-team-row" key={`${roster.team}-${player.name}`}>
+                  <span>{player.position || 'ALL'}</span>
+                  <strong>{player.name}</strong>
+                  <em>{player.status || 'watch'}</em>
+                </div>
+              ))}
+            </section>
+          );
+        })}
+      </div>
+      <div className="wm-worldcup-status-table">
+        {[...injuries.slice(0, 3), ...players.slice(0, 3)].map((item) => (
+          <div key={item.id}>
+            <span>{cleanSignalSource(item.source)}</span>
+            <strong>{item.title}</strong>
+            <SignalTags tags={item.tags} />
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function LineupBoardPanel({
+  lineups,
+  squadSignals,
+  match,
+}: {
+  lineups: WorldCupSignalItem[];
+  squadSignals: WorldCupSignalItem[];
+  match: WorldCupMatch | null;
+}) {
+  const teams = match ? [match.homeTeam, match.awayTeam] : ['Home', 'Away'];
+  return (
+    <Panel title="LINEUP BOARD" count={lineups.length} className="wm-worldcup-panel wm-worldcup-lineup-board-panel">
+      <div className="wm-worldcup-formation-board">
+        {teams.map((team, teamIndex) => (
+          <section key={team}>
+            <header><strong>{team}</strong><span>{teamIndex ? '4-2-3-1' : '4-3-3'}</span></header>
+            {['GK', 'CB', 'MID', 'WING', 'ST'].map((role, index) => (
+              <div key={`${team}-${role}`}>
+                <span>{role}</span>
+                <strong>{teamIndex ? ['keeper', 'line', 'pivot', 'wide', 'nine'][index] : ['keeper', 'pair', 'eight', 'pace', 'press'][index]}</strong>
+                <i style={{ width: `${72 - index * 8 + teamIndex * 3}%` }} />
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+      <div className="wm-worldcup-mini-feed wm-worldcup-mini-feed-compact">
+        {[...lineups.slice(0, 4), ...squadSignals.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function MatchModelPanel({
+  match,
+  xgSignals,
+  tacticalSignals,
+}: {
+  match: WorldCupMatch | null;
+  xgSignals: WorldCupSignalItem[];
+  tacticalSignals: WorldCupSignalItem[];
+}) {
+  const hash = match ? [...match.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) : 11;
+  const homeXg = 1.05 + (hash % 7) * 0.11;
+  const awayXg = 0.92 + (hash % 5) * 0.1;
+  const metrics = [
+    ['HOME xG', homeXg, 2.4, 'green'],
+    ['AWAY xG', awayXg, 2.4, 'blue'],
+    ['SET PIECE', 0.31 + (hash % 4) * 0.04, 0.7, 'gold'],
+    ['TRANSITION', 0.42 + (hash % 5) * 0.05, 0.9, 'red'],
+  ] as const;
+  return (
+    <Panel title="MATCH MODEL" count={xgSignals.length + tacticalSignals.length} className="wm-worldcup-panel wm-worldcup-model-panel">
+      <div className="wm-worldcup-model-grid">
+        {metrics.map(([label, value, max, tone]) => (
+          <span className={tone} key={label}>
+            <em>{label}</em>
+            <strong>{Number(value).toFixed(2)}</strong>
+            <i style={{ width: `${Math.max(4, Math.min(100, (Number(value) / Number(max)) * 100))}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="wm-worldcup-model-table">
+        {[...xgSignals.slice(0, 3), ...tacticalSignals.slice(0, 3)].map((item) => (
+          <div key={item.id}>
+            <span>{cleanSignalSource(item.source)}</span>
+            <strong>{item.title}</strong>
+            <em>{item.summary}</em>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function MediaWirePanel({
+  news,
+  matchSignals,
+  localMedia,
+}: {
+  news: ReturnType<typeof filterWorldCupNews>;
+  matchSignals: WorldCupSignalItem[];
+  localMedia: WorldCupSignalItem[];
+}) {
+  const newsSignals: WorldCupSignalItem[] = news.slice(0, 8).map((item) => {
+    const tags = newsTags(item);
+    const firstTone = tags[0]?.tone;
+    return {
+      id: `news-wire-${item.id}`,
+      source: item.source,
+      title: item.title,
+      summary: item.summary || 'World Cup desk monitors source, tag, match and market context.',
+      age: item.publishedAt,
+      tags: tags.map((tag) => ({ label: tag.label, tone: coerceSignalTone(tag.tone) })),
+      accent: firstTone ? coerceSignalTone(firstTone) : 'blue',
+    };
+  });
+  return (
+    <Panel title="MEDIA / INTEL WIRE" count={news.length + localMedia.length} className="wm-worldcup-panel wm-worldcup-media-wire-panel">
+      <div className="wm-worldcup-wire-columns">
+        <section>
+          <header><strong>GLOBAL</strong><span>{newsSignals.length}</span></header>
+          {newsSignals.slice(0, 4).map((item) => <SignalRow item={item} key={item.id} />)}
+        </section>
+        <section>
+          <header><strong>LOCAL / MATCH</strong><span>{localMedia.length + matchSignals.length}</span></header>
+          {[...localMedia.slice(0, 3), ...matchSignals.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
+        </section>
+      </div>
+    </Panel>
+  );
+}
+
+function OddsLiquidityPanel({
+  odds,
+  markets,
+  oddsSignals,
+  marketSignals,
+}: {
+  odds: WorldCupOddsSnapshot[];
+  markets: WorldCupPolymarketMarket[];
+  oddsSignals: WorldCupSignalItem[];
+  marketSignals: WorldCupSignalItem[];
+}) {
+  const liquidity = markets.reduce((sum, market) => sum + (market.liquidity || market.volume24h || 0), 0);
+  return (
+    <Panel title="ODDS / LIQUIDITY" count={odds.length + markets.length} className="wm-worldcup-panel wm-worldcup-odds-liquidity-panel">
+      <div className="wm-worldcup-liquidity-strip">
+        <span><em>LIQUIDITY</em><strong>{formatCompact(liquidity)}</strong></span>
+        <span><em>ODDS FEEDS</em><strong>{odds.length}</strong></span>
+        <span><em>MARKETS</em><strong>{markets.length || 5}</strong></span>
+      </div>
+      <div className="wm-worldcup-odds-table">
+        {odds.slice(0, 5).map((snapshot) => (
+          <article key={`${snapshot.matchId}-${snapshot.provider}`}>
+            <header><strong>{snapshot.provider}</strong><span>{snapshot.providerType.replace('_', ' ')}</span></header>
+            <div>
+              {snapshot.outcomes.slice(0, 3).map((outcome) => (
+                <span key={outcome.name}>
+                  <em>{outcome.name}</em>
+                  <b>{formatNumber(outcome.decimalOdds, 2)}</b>
+                  <i style={{ width: `${Math.max(3, Math.min(100, outcome.impliedProbability || 0))}%` }} />
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="wm-worldcup-mini-feed wm-worldcup-mini-feed-tight">
+        {[...oddsSignals.slice(0, 2), ...marketSignals.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function VenueRefPanel({
+  refVenue,
+  risk,
+  payload,
+  match,
+}: {
+  refVenue: WorldCupSignalItem[];
+  risk: WorldCupSignalItem[];
+  payload: WorldCupDashboardPayload;
+  match: WorldCupMatch | null;
+}) {
+  const city = match ? matchCity(payload.cities, match.cityId) : payload.cities[0];
+  if (!city) {
+    return (
+      <Panel title="REF / VENUE BOARD" count={0} className="wm-worldcup-panel wm-worldcup-venue-ref-panel">
+        <div className="wm-worldcup-empty">No venue selected.</div>
+      </Panel>
+    );
+  }
+  const venueCity = city;
+  const nearbyMatches = payload.matches.filter((item) => item.cityId === venueCity.id).slice(0, 5);
+  return (
+    <Panel title="REF / VENUE BOARD" count={refVenue.length + nearbyMatches.length} className="wm-worldcup-panel wm-worldcup-venue-ref-panel">
+      <div className="wm-worldcup-venue-card">
+        <span>{venueCity.countryName}</span>
+        <strong>{venueCity.venue}</strong>
+        <em>{venueCity.city} · {venueCity.capacity ? venueCity.capacity.toLocaleString() : '--'} seats · {venueCity.timezone}</em>
+      </div>
+      <div className="wm-worldcup-venue-fixtures">
+        {nearbyMatches.map((item) => (
+          <span key={item.id}>
+            <em>#{item.fifaMatchNumber || '--'} {item.group || stageLabel(item.stage)}</em>
+            <strong>{item.homeTeam} vs {item.awayTeam}</strong>
+            <b>{item.kickoffBeijing}</b>
+          </span>
+        ))}
+      </div>
+      <div className="wm-worldcup-mini-feed wm-worldcup-mini-feed-compact">
+        {[...refVenue.slice(0, 3), ...risk.slice(0, 2)].map((item) => <SignalRow item={item} key={item.id} />)}
       </div>
     </Panel>
   );
@@ -1777,28 +2184,36 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
         }}
       />
     ),
-    'match-detail': <MatchPanel match={selectedMatch} markets={selectedMarkets} odds={displayOdds} weather={selectedWeather} city={selectedCity} />,
+    'match-control': (
+      <MatchControlPanel
+        match={selectedMatch}
+        markets={selectedMarkets}
+        odds={displayOdds}
+        weather={selectedWeather}
+        city={selectedCity}
+        facts={officialFactSignals}
+        broadcast={broadcastSignals}
+      />
+    ),
     news: <NewsPanel items={news} />,
-    weather: <WeatherPanel payload={payload} selectedCityId={selectedCity.id} onSelectCity={setSelectedCityId} />,
-    markets: <PolymarketPanel markets={selectedMarkets} match={selectedMatch} />,
-    squads: <RostersPanel payload={payload} match={selectedMatch} />,
-    odds: <OddsPanel odds={displayOdds} polymarket={selectedMarkets} />,
-    'match-wire': <SignalFeedPanel title="MATCH WIRE" badge="实时" count={matchSignals.length} items={matchSignals} className="wm-worldcup-wire-panel" />,
-    'host-ops': <SignalFeedPanel title="HOST OPS" badge="实时" count={hostOpsSignals.length} items={hostOpsSignals} className="wm-worldcup-host-panel" />,
+    'host-venue': (
+      <HostVenuePanel
+        payload={payload}
+        selectedCityId={selectedCity.id}
+        onSelectCity={setSelectedCityId}
+        hostOps={hostOpsSignals}
+        risk={riskSignals}
+        refVenue={refVenueSignals}
+      />
+    ),
+    'market-board': <MarketBoardPanel markets={selectedMarkets} match={selectedMatch} odds={displayOdds} />,
+    'team-status': <TeamStatusPanel payload={payload} match={selectedMatch} injuries={injurySignals} players={playerPoolSignals} />,
+    'lineup-board': <LineupBoardPanel lineups={lineupSignals} squadSignals={squadSignals} match={selectedMatch} />,
+    'match-model': <MatchModelPanel match={selectedMatch} xgSignals={xgSignals} tacticalSignals={tacticalSignals} />,
     'group-table': <GroupTablePanel matches={payload.matches} group={selectedGroup || groupName(selectedMatch)} onGroupChange={setSelectedGroup} />,
-    liquidity: <SignalFeedPanel title="LIQUIDITY" badge="LOCAL DB" count={marketSignals.length} items={marketSignals} className="wm-worldcup-liquidity-panel" />,
-    'team-wire': <SignalFeedPanel title="TEAM WIRE" badge="实时" count={squadSignals.length} items={squadSignals} className="wm-worldcup-team-panel" />,
-    'odds-tape': <SignalFeedPanel title="ODDS TAPE" badge="WATCH" count={oddsSignals.length} items={oddsSignals} className="wm-worldcup-odds-tape-panel" />,
-    'risk-desk': <SignalFeedPanel title="RISK DESK" badge="ALERT" count={riskSignals.length} items={riskSignals} className="wm-worldcup-risk-panel" />,
-    broadcast: <SignalFeedPanel title="BROADCAST" badge="BJT" count={broadcastSignals.length} items={broadcastSignals} className="wm-worldcup-broadcast-panel" />,
-    'official-facts': <SignalFeedPanel title="OFFICIAL FACTS" badge="校验" count={officialFactSignals.length} items={officialFactSignals} className="wm-worldcup-official-panel" />,
-    'injury-tracker': <SignalFeedPanel title="INJURY TRACKER" badge="WATCH" count={injurySignals.length} items={injurySignals} className="wm-worldcup-injury-panel" />,
-    'lineup-watch': <SignalFeedPanel title="LINEUP WATCH" badge="T-60" count={lineupSignals.length} items={lineupSignals} className="wm-worldcup-lineup-panel" />,
-    'player-pool': <SignalFeedPanel title="PLAYER POOL" badge="TEAM" count={playerPoolSignals.length} items={playerPoolSignals} className="wm-worldcup-player-pool-panel" />,
-    'xg-model': <SignalFeedPanel title="XG MODEL" badge="MODEL" count={xgSignals.length} items={xgSignals} className="wm-worldcup-xg-panel" />,
-    'tactical-matchup': <SignalFeedPanel title="TACTICAL MATCHUP" badge="MATCHUP" count={tacticalSignals.length} items={tacticalSignals} className="wm-worldcup-tactical-panel" />,
-    'local-media': <SignalFeedPanel title="LOCAL MEDIA" badge="LOCAL" count={localMediaSignals.length} items={localMediaSignals} className="wm-worldcup-local-media-panel" />,
-    'ref-venue': <SignalFeedPanel title="REF VENUE" badge="VENUE" count={refVenueSignals.length} items={refVenueSignals} className="wm-worldcup-ref-venue-panel" />,
+    'media-wire': <MediaWirePanel news={news} matchSignals={matchSignals} localMedia={localMediaSignals} />,
+    'odds-liquidity': <OddsLiquidityPanel odds={displayOdds} markets={selectedMarkets} oddsSignals={oddsSignals} marketSignals={marketSignals} />,
+    'venue-ref': <VenueRefPanel refVenue={refVenueSignals} risk={riskSignals} payload={payload} match={selectedMatch} />,
   };
   const orderedPanels = [...panelOrder, ...WORLD_CUP_PANEL_ORDER.filter((id) => !panelOrder.includes(id))]
     .filter((id, index, array) => array.indexOf(id) === index);
