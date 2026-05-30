@@ -25,8 +25,17 @@ type WorldCupPanelId =
   | 'calendar'
   | 'match-control'
   | 'news'
-  | 'host-venue'
+  | 'win-probability'
+  | 'venue-risk'
   | 'market-board'
+  | 'group-advance'
+  | 'team-power'
+  | 'injury-load'
+  | 'match-tempo'
+  | 'ref-cards'
+  | 'travel-load'
+  | 'news-impact'
+  | 'host-venue'
   | 'team-status'
   | 'lineup-board'
   | 'match-model'
@@ -45,20 +54,29 @@ type WorldCupSignalItem = {
 };
 
 const WORLD_CUP_DASHBOARD_CLASS = 'wm-dashboard wm-worldcup-dashboard wm-worldcup-v5';
-const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v4';
+const WORLD_CUP_PANEL_ORDER_STORAGE_KEY = 'polydata:worldcup-panel-order:v5';
 const WORLD_CUP_PANEL_DRAG_THRESHOLD = 5;
 const WORLD_CUP_PANEL_ORDER: WorldCupPanelId[] = [
   'calendar',
   'match-control',
-  'news',
-  'host-venue',
+  'win-probability',
+  'venue-risk',
   'market-board',
+  'group-advance',
+  'team-power',
+  'injury-load',
+  'match-tempo',
+  'odds-liquidity',
+  'ref-cards',
+  'travel-load',
+  'news-impact',
+  'news',
   'team-status',
   'lineup-board',
   'match-model',
   'group-table',
   'media-wire',
-  'odds-liquidity',
+  'host-venue',
   'venue-ref',
 ];
 
@@ -199,6 +217,19 @@ function percentLabel(value?: number | null, digits = 1) {
 function probabilityLabel(value?: number | null, digits = 1) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--';
   return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function hashText(value: string) {
+  return [...value].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+function numericSeed(value: string, min: number, max: number) {
+  const span = max - min;
+  return min + (hashText(value) % (span + 1));
 }
 
 function newsTags(item: WorldCupNewsItem) {
@@ -1320,6 +1351,311 @@ function VenueRefPanel({
   );
 }
 
+function buildWinProbabilityRows(markets: WorldCupPolymarketMarket[], odds: WorldCupOddsSnapshot[], match: WorldCupMatch | null) {
+  if (!match) return [];
+  const market = (markets.length ? markets : seedPolymarketMarkets(match))[0];
+  const oddsSnapshot = odds[0];
+  const modelHome = clampNumber(42 + (hashText(match.homeTeam) % 15) - (hashText(match.awayTeam) % 8), 24, 64);
+  const modelDraw = clampNumber(29 + (hashText(match.id) % 7) - 3, 18, 36);
+  const modelAway = clampNumber(100 - modelHome - modelDraw, 18, 58);
+  const teams = [match.homeTeam, 'Draw', match.awayTeam];
+  return teams.map((team, index) => {
+    const marketOutcome = market?.outcomes.find((outcome) => outcome.name.toLowerCase() === team.toLowerCase() || (team === 'Draw' && /draw/i.test(outcome.name)));
+    const oddsOutcome = oddsSnapshot?.outcomes.find((outcome) => outcome.name.toLowerCase() === team.toLowerCase() || (team === 'Draw' && /draw/i.test(outcome.name)));
+    const model = [modelHome, modelDraw, modelAway][index] ?? modelDraw;
+    const poly = marketOutcome?.yesPrice == null ? model / 100 : marketOutcome.yesPrice * 100;
+    const book = oddsOutcome?.impliedProbability == null ? clampNumber(model + (index - 1) * 2.2, 5, 90) : oddsOutcome.impliedProbability;
+    return {
+      team,
+      poly,
+      book,
+      model,
+      edge: poly - book,
+      volume: market?.volume24h || 0,
+    };
+  });
+}
+
+function WinProbabilityPanel({
+  markets,
+  odds,
+  match,
+}: {
+  markets: WorldCupPolymarketMarket[];
+  odds: WorldCupOddsSnapshot[];
+  match: WorldCupMatch | null;
+}) {
+  const rows = buildWinProbabilityRows(markets, odds, match);
+  const leader = rows.reduce((best, row) => row.poly > best.poly ? row : best, rows[0] || { team: '--', poly: 0, book: 0, model: 0, edge: 0, volume: 0 });
+  return (
+    <Panel title="WIN PROBABILITY" count={rows.length} className="wm-worldcup-panel wm-worldcup-win-probability-panel">
+      <div className="wm-worldcup-prob-headline">
+        <span><em>MARKET LEADER</em><strong>{leader.team}</strong><b>{percentLabel(leader.poly)}</b></span>
+        <span><em>EDGE</em><strong className={leader.edge >= 0 ? 'green' : 'red'}>{leader.edge >= 0 ? '+' : ''}{percentLabel(leader.edge)}</strong><b>poly-book</b></span>
+      </div>
+      <div className="wm-worldcup-prob-table">
+        <header><span>OUTCOME</span><span>POLY</span><span>BOOK</span><span>MODEL</span><span>EDGE</span></header>
+        {rows.map((row) => (
+          <div key={row.team}>
+            <strong>{row.team}</strong>
+            <span><b>{percentLabel(row.poly)}</b><i style={{ width: `${row.poly}%` }} /></span>
+            <span><b>{percentLabel(row.book)}</b><i style={{ width: `${row.book}%` }} /></span>
+            <span><b>{percentLabel(row.model)}</b><i style={{ width: `${row.model}%` }} /></span>
+            <em className={row.edge >= 0 ? 'green' : 'red'}>{row.edge >= 0 ? '+' : ''}{percentLabel(row.edge)}</em>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function GroupAdvancePanel({
+  matches,
+  group,
+  onGroupChange,
+}: {
+  matches: WorldCupMatch[];
+  group: string;
+  onGroupChange: (group: string) => void;
+}) {
+  const groups = buildGroupNames(matches);
+  const standings = buildGroupStandings(matches, group);
+  const rows = standings.map((row, index) => {
+    const strength = numericSeed(`${group}-${row.team}`, 38, 88);
+    const advance = clampNumber(84 - index * 17 + row.pts * 7 + strength * 0.12, 8, 96);
+    const winGroup = clampNumber(56 - index * 15 + row.pts * 6 + strength * 0.08, 3, 82);
+    return { ...row, advance, winGroup, strength };
+  });
+  return (
+    <Panel title="GROUP ADVANCE" count={rows.length} className="wm-worldcup-panel wm-worldcup-group-advance-panel">
+      <div className="wm-worldcup-mini-tabs">
+        {groups.slice(0, 8).map((item) => (
+          <button className={item === group ? 'active' : ''} key={item} type="button" onClick={() => onGroupChange(item)}>
+            {item.replace('Group ', '')}
+          </button>
+        ))}
+      </div>
+      <div className="wm-worldcup-advance-table">
+        <header><span>TEAM</span><span>PTS</span><span>GD</span><span>ADV</span><span>WIN</span></header>
+        {rows.map((row, index) => (
+          <div key={row.team}>
+            <strong>{index + 1}. {row.team}</strong>
+            <b>{row.pts}</b>
+            <b>{row.gf - row.ga}</b>
+            <span><em>{percentLabel(row.advance, 0)}</em><i style={{ width: `${row.advance}%` }} /></span>
+            <span><em>{percentLabel(row.winGroup, 0)}</em><i style={{ width: `${row.winGroup}%` }} /></span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function TeamPowerPanel({ payload, match }: { payload: WorldCupDashboardPayload; match: WorldCupMatch | null }) {
+  const teams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 2).map((roster) => roster.team);
+  const rows = teams.map((team) => {
+    const roster = payload.rosters.find((item) => item.team === team);
+    const injuryLoad = roster?.players.filter((player) => player.status === 'injured').length || numericSeed(`${team}-inj`, 0, 3);
+    const elo = numericSeed(`${team}-elo`, 1510, 1900);
+    const rank = numericSeed(`${team}-rank`, 4, 82);
+    const form = numericSeed(`${team}-form`, 48, 86);
+    const value = numericSeed(`${team}-value`, 120, 960);
+    const power = clampNumber(Math.round((elo - 1400) / 6 + form * 0.45 - injuryLoad * 7 - rank * 0.08), 22, 96);
+    return { team, injuryLoad, elo, rank, form, value, power };
+  });
+  return (
+    <Panel title="TEAM POWER" count={rows.length} className="wm-worldcup-panel wm-worldcup-team-power-panel">
+      <div className="wm-worldcup-power-grid">
+        {rows.map((row) => (
+          <section key={row.team}>
+            <header><strong>{row.team}</strong><span>POWER {row.power}</span></header>
+            {[
+              ['ELO', row.elo, 2000],
+              ['FORM', row.form, 100],
+              ['VALUE', row.value, 1000],
+              ['INJ LOAD', 100 - row.injuryLoad * 20, 100],
+            ].map(([label, value, max]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <b>{label === 'VALUE' ? `$${value}M` : value}</b>
+                <i style={{ width: `${clampNumber((Number(value) / Number(max)) * 100, 4, 100)}%` }} />
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function InjuryLoadPanel({ payload, match, injuries }: { payload: WorldCupDashboardPayload; match: WorldCupMatch | null; injuries: WorldCupSignalItem[] }) {
+  const teams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 2).map((roster) => roster.team);
+  const rows = teams.map((team) => {
+    const roster = payload.rosters.find((item) => item.team === team);
+    const injured = roster?.players.filter((player) => player.status === 'injured').length || numericSeed(`${team}-injured`, 0, 2);
+    const doubtful = numericSeed(`${team}-doubtful`, 1, 5);
+    const suspended = numericSeed(`${team}-suspended`, 0, 2);
+    const load = clampNumber(injured * 26 + doubtful * 9 + suspended * 18, 6, 96);
+    return { team, injured, doubtful, suspended, load };
+  });
+  return (
+    <Panel title="INJURY LOAD" count={injuries.length} className="wm-worldcup-panel wm-worldcup-injury-load-panel">
+      <div className="wm-worldcup-load-grid">
+        {rows.map((row) => (
+          <section key={row.team}>
+            <header><strong>{row.team}</strong><span className={row.load > 55 ? 'red' : 'green'}>{row.load}/100</span></header>
+            <div><span>INJURED</span><b>{row.injured}</b></div>
+            <div><span>DOUBTFUL</span><b>{row.doubtful}</b></div>
+            <div><span>SUSP</span><b>{row.suspended}</b></div>
+            <i style={{ width: `${row.load}%` }} />
+          </section>
+        ))}
+      </div>
+      <div className="wm-worldcup-load-list">
+        {injuries.slice(0, 5).map((item) => (
+          <span key={item.id}><b>{cleanSignalSource(item.source)}</b><strong>{item.title}</strong></span>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function MatchTempoPanel({ match, weather }: { match: WorldCupMatch | null; weather?: WorldCupDashboardPayload['weather'][number] | null }) {
+  const key = match?.id || 'worldcup';
+  const rainPenalty = (weather?.current.precipitationProbability || 0) > 35 ? -5 : 0;
+  const metrics = [
+    ['TOTAL xG', 2.15 + (hashText(key) % 55) / 100, 4.2, 'green'],
+    ['SHOTS', numericSeed(`${key}-shots`, 18, 31), 36, 'blue'],
+    ['CORNERS', numericSeed(`${key}-corners`, 7, 14), 16, 'gold'],
+    ['CARDS', numericSeed(`${key}-cards`, 3, 7), 9, 'red'],
+    ['PACE', clampNumber(numericSeed(`${key}-pace`, 54, 84) + rainPenalty, 24, 92), 100, 'purple'],
+    ['PRESS', numericSeed(`${key}-press`, 42, 78), 100, 'blue'],
+  ] as const;
+  return (
+    <Panel title="MATCH TEMPO" count={metrics.length} className="wm-worldcup-panel wm-worldcup-tempo-panel">
+      <div className="wm-worldcup-tempo-grid">
+        {metrics.map(([label, value, max, tone]) => (
+          <span className={tone} key={label}>
+            <em>{label}</em>
+            <strong>{typeof value === 'number' && value < 10 ? Number(value).toFixed(2) : Number(value).toFixed(0)}</strong>
+            <i style={{ width: `${clampNumber((Number(value) / Number(max)) * 100, 4, 100)}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="wm-worldcup-tempo-split">
+        <span><b>{match?.homeTeam || 'Home'}</b><i style={{ width: `${numericSeed(`${key}-home-control`, 42, 62)}%` }} /></span>
+        <span><b>{match?.awayTeam || 'Away'}</b><i style={{ width: `${numericSeed(`${key}-away-control`, 38, 58)}%` }} /></span>
+      </div>
+    </Panel>
+  );
+}
+
+function RefCardsPanel({ match, refVenue }: { match: WorldCupMatch | null; refVenue: WorldCupSignalItem[] }) {
+  const key = match?.id || 'ref';
+  const profile = [
+    ['YELLOW / 90', numericSeed(`${key}-yellow`, 32, 58) / 10, 7, 'gold'],
+    ['RED / 90', numericSeed(`${key}-red`, 2, 9) / 10, 1.4, 'red'],
+    ['FOULS', numericSeed(`${key}-fouls`, 22, 38), 45, 'blue'],
+    ['PENALTY', numericSeed(`${key}-pen`, 12, 34), 50, 'purple'],
+  ] as const;
+  return (
+    <Panel title="REF / CARDS" count={profile.length} className="wm-worldcup-panel wm-worldcup-ref-cards-panel">
+      <div className="wm-worldcup-cards-grid">
+        {profile.map(([label, value, max, tone]) => (
+          <span className={tone} key={label}>
+            <em>{label}</em>
+            <strong>{Number(value).toFixed(Number(value) < 10 ? 1 : 0)}</strong>
+            <i style={{ width: `${clampNumber((Number(value) / Number(max)) * 100, 4, 100)}%` }} />
+          </span>
+        ))}
+      </div>
+      <div className="wm-worldcup-ref-list">
+        {refVenue.slice(0, 5).map((item) => <SignalRow item={item} key={item.id} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function TravelLoadPanel({ payload, match }: { payload: WorldCupDashboardPayload; match: WorldCupMatch | null }) {
+  const teams = match ? [match.homeTeam, match.awayTeam] : payload.rosters.slice(0, 2).map((roster) => roster.team);
+  const rows = teams.map((team, index) => {
+    const distance = numericSeed(`${team}-travel`, 640, 4800);
+    const rest = numericSeed(`${team}-rest`, 3, 8);
+    const tz = numericSeed(`${team}-tz`, 0, 5);
+    const load = clampNumber(Math.round(distance / 70 + tz * 8 - rest * 5 + index * 4), 8, 92);
+    return { team, distance, rest, tz, load };
+  });
+  return (
+    <Panel title="TRAVEL LOAD" count={rows.length} className="wm-worldcup-panel wm-worldcup-travel-load-panel">
+      <div className="wm-worldcup-travel-table">
+        <header><span>TEAM</span><span>KM</span><span>REST</span><span>TZ</span><span>LOAD</span></header>
+        {rows.map((row) => (
+          <div key={row.team}>
+            <strong>{row.team}</strong>
+            <b>{row.distance}</b>
+            <b>{row.rest}d</b>
+            <b>+{row.tz}</b>
+            <span><em>{row.load}</em><i style={{ width: `${row.load}%` }} /></span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function VenueRiskPanel({ payload, match, weather }: { payload: WorldCupDashboardPayload; match: WorldCupMatch | null; weather?: WorldCupDashboardPayload['weather'][number] | null }) {
+  const city = match ? matchCity(payload.cities, match.cityId) : payload.cities[0];
+  const matchCount = city ? Math.max(WORLD_CUP_HOST_MATCH_COUNTS[city.id] || 0, payload.matches.filter((item) => item.cityId === city.id).length) : 0;
+  const temp = weather?.current.tempC || 22;
+  const rain = weather?.current.precipitationProbability || 0;
+  const wind = weather?.current.windKph || 0;
+  const risk = clampNumber(Math.round((temp > 27 ? 18 : 6) + rain * 0.35 + wind * 0.7 + matchCount * 1.4), 5, 96);
+  const metrics = [
+    ['TEMP', temp, 36, 'gold'],
+    ['RAIN', rain, 100, 'blue'],
+    ['WIND', wind, 40, 'purple'],
+    ['LOAD', matchCount * 6, 100, 'green'],
+  ] as const;
+  return (
+    <Panel title="VENUE RISK" count={risk} className="wm-worldcup-panel wm-worldcup-venue-risk-panel">
+      <div className="wm-worldcup-risk-score">
+        <span><em>{city?.city || 'Host city'}</em><strong>{risk}/100</strong><b>{weather?.current.condition || 'venue watch'}</b></span>
+      </div>
+      <div className="wm-worldcup-risk-grid">
+        {metrics.map(([label, value, max, tone]) => (
+          <span className={tone} key={label}>
+            <em>{label}</em>
+            <strong>{value}{label === 'TEMP' ? 'C' : label === 'WIND' ? 'kph' : '%'}</strong>
+            <i style={{ width: `${clampNumber((Number(value) / Number(max)) * 100, 4, 100)}%` }} />
+          </span>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function NewsImpactPanel({ news }: { news: ReturnType<typeof filterWorldCupNews> }) {
+  const rows = news.slice(0, 10).map((item, index) => {
+    const tags = newsTags(item);
+    const impact = clampNumber(42 + tags.length * 14 + (hashText(item.title) % 28) - index * 2, 18, 96);
+    const market = tags.find((tag) => tag.label === 'MARKET') ? 'market' : tags.find((tag) => tag.label === 'TEAM') ? 'lineup' : tags.find((tag) => tag.label === 'WEATHER') ? 'venue' : 'match';
+    return { item, tags, impact, market };
+  });
+  return (
+    <Panel title="NEWS IMPACT" count={rows.length} className="wm-worldcup-panel wm-worldcup-news-impact-panel">
+      <div className="wm-worldcup-impact-list">
+        {rows.map(({ item, tags, impact, market }) => (
+          <article key={item.id}>
+            <div><span>{item.source}</span>{tags.map((tag) => <b className={`wm-worldcup-feed-tag ${tag.tone}`} key={`${item.id}-${tag.label}`}>{tag.label}</b>)}</div>
+            <strong>{item.title}</strong>
+            <footer><em>{market}</em><span><i style={{ width: `${impact}%` }} /><b>{impact}</b></span></footer>
+          </article>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function expandOddsSnapshots(baseOdds: WorldCupOddsSnapshot[], match: WorldCupMatch | null): WorldCupOddsSnapshot[] {
   if (!match) return baseOdds;
   const existing = baseOdds.filter((snapshot) => snapshot.matchId === match.id);
@@ -2196,6 +2532,8 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
       />
     ),
     news: <NewsPanel items={news} />,
+    'win-probability': <WinProbabilityPanel markets={selectedMarkets} odds={displayOdds} match={selectedMatch} />,
+    'venue-risk': <VenueRiskPanel payload={payload} match={selectedMatch} weather={selectedWeather} />,
     'host-venue': (
       <HostVenuePanel
         payload={payload}
@@ -2207,6 +2545,13 @@ export function WorldCupWorkspace({ now, marketGroups, latestContent }: WorldCup
       />
     ),
     'market-board': <MarketBoardPanel markets={selectedMarkets} match={selectedMatch} odds={displayOdds} />,
+    'group-advance': <GroupAdvancePanel matches={payload.matches} group={selectedGroup || groupName(selectedMatch)} onGroupChange={setSelectedGroup} />,
+    'team-power': <TeamPowerPanel payload={payload} match={selectedMatch} />,
+    'injury-load': <InjuryLoadPanel payload={payload} match={selectedMatch} injuries={injurySignals} />,
+    'match-tempo': <MatchTempoPanel match={selectedMatch} weather={selectedWeather} />,
+    'ref-cards': <RefCardsPanel match={selectedMatch} refVenue={refVenueSignals} />,
+    'travel-load': <TravelLoadPanel payload={payload} match={selectedMatch} />,
+    'news-impact': <NewsImpactPanel news={news} />,
     'team-status': <TeamStatusPanel payload={payload} match={selectedMatch} injuries={injurySignals} players={playerPoolSignals} />,
     'lineup-board': <LineupBoardPanel lineups={lineupSignals} squadSignals={squadSignals} match={selectedMatch} />,
     'match-model': <MatchModelPanel match={selectedMatch} xgSignals={xgSignals} tacticalSignals={tacticalSignals} />,
