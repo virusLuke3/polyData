@@ -208,6 +208,7 @@ GCP_UNITS=(
   polydata-suspicious-trades-seed.service
   polydata-weather-news-seed.service
   polydata-whale-trades-seed.service
+  polydata-worldcup-dashboard-seed.service
 )
 for unit in "${GCP_UNITS[@]}"; do
   src="${REMOTE_REPO_ROOT}/deploy/systemd/${unit}"

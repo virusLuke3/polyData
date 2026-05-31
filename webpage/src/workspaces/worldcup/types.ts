@@ -154,7 +154,7 @@ export type WorldCupOddsSnapshot = {
 
 export type WorldCupDashboardPayload = {
   generatedAt: string;
-  cacheMode: 'seed' | 'remote' | 'fallback';
+  cacheMode: 'seed' | 'seeded' | 'redis' | 'sqlite' | 'stale' | 'preserved' | 'remote' | 'fallback';
   tournament: {
     id: 'fifa-world-cup-2026';
     name: string;

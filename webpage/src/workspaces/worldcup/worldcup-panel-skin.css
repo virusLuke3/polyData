@@ -5643,3 +5643,78 @@
     max-width: calc(100vw - 20px) !important;
   }
 }
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  min-height: 120px;
+  border-left: 3px solid #ffb32c;
+  background:
+    linear-gradient(90deg, rgba(255, 179, 44, 0.08), rgba(15, 18, 20, 0.24) 42%, transparent),
+    rgba(16, 18, 19, 0.82);
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required > strong {
+  color: #ffcf5c;
+  font-family: var(--mono-font);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 1.7px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required > p {
+  max-width: 58ch;
+  margin: 0;
+  color: #b6bec8;
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.45;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list {
+  display: grid;
+  gap: 7px;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list span {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.85fr) minmax(78px, 0.45fr) minmax(0, 1.2fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list b,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list em,
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list b {
+  color: #f0f3f2;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list em {
+  color: #ff4d55;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 780;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.wm-worldcup-dashboard.wm-worldcup-v5 .wm-worldcup-source-required-list small {
+  color: #8f99a6;
+  font-size: 10px;
+  font-weight: 560;
+}
