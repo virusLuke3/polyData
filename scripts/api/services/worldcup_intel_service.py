@@ -190,7 +190,7 @@ def _espn_scoreboard_signals(ctx: dict) -> List[Dict[str, Any]]:
                 summary=summary or "ESPN public scoreboard fixture status.",
                 category="officialFacts",
                 tags=["FACT", "SCOREBOARD"],
-                age="live",
+                age=str(event.get("date") or ""),
                 url=str(event.get("links", [{}])[0].get("href") if event.get("links") else "#"),
                 accent="green",
                 provider="espn-scoreboard",
@@ -206,7 +206,7 @@ def _news_to_signal(item: Dict[str, str], *, category: str, tags: List[str], acc
         summary=item.get("summary") or "Live news item matched to World Cup intelligence query.",
         category=category,
         tags=tags,
-        age=item.get("publishedAt") or "rss",
+        age=item.get("publishedAt") or "",
         url=item.get("url") or "#",
         accent=accent,
         provider="google-news-rss",
@@ -238,23 +238,25 @@ def _weather_code_label(code: Any) -> str:
 
 def _open_meteo_weather(ctx: dict) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    for city in HOST_CITIES:
-        try:
-            payload = ctx["http_json_get"](
-                OPEN_METEO_URL,
-                params={
-                    "latitude": city["latitude"],
-                    "longitude": city["longitude"],
-                    "current": "temperature_2m,weather_code,wind_speed_10m,precipitation",
-                    "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-                    "forecast_days": 5,
-                    "timezone": "auto",
-                },
-                timeout=7,
-                headers=_headers(),
-            )
-        except Exception:
-            continue
+    try:
+        payload = ctx["http_json_get"](
+            OPEN_METEO_URL,
+            params={
+                "latitude": ",".join(str(city["latitude"]) for city in HOST_CITIES),
+                "longitude": ",".join(str(city["longitude"]) for city in HOST_CITIES),
+                "current": "temperature_2m,weather_code,wind_speed_10m,precipitation",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "forecast_days": 5,
+                "timezone": "auto",
+            },
+            timeout=12,
+            headers=_headers(),
+        )
+    except Exception:
+        return []
+    payloads = payload if isinstance(payload, list) else [payload]
+    for city, city_payload in zip(HOST_CITIES, payloads):
+        payload = city_payload if isinstance(city_payload, dict) else {}
         current = payload.get("current") if isinstance(payload, dict) else {}
         daily = payload.get("daily") if isinstance(payload, dict) else {}
         times = daily.get("time") or []
@@ -371,11 +373,11 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
 
     signals: List[Dict[str, Any]] = []
     signals.extend(_espn_scoreboard_signals(ctx))
-    signals.extend(_news_to_signal(item, category="injuryTracker", tags=["INJURY", "WATCH"], accent="red") for item in injury_items)
-    signals.extend(_news_to_signal(item, category="lineupWatch", tags=["PRED XI", "WATCH"], accent="purple") for item in lineup_items)
-    signals.extend(_news_to_signal(item, category="xgModel", tags=["XG", "MODEL"], accent="purple") for item in xg_items)
-    signals.extend(_news_to_signal(item, category="tacticalMatchup", tags=["TACTIC", "WATCH"], accent="gold") for item in tactic_items)
-    signals.extend(_news_to_signal(item, category="localMedia", tags=["LOCAL", "WATCH"], accent="blue") for item in local_items)
+    signals.extend(_news_to_signal(item, category="injuryTracker", tags=["INJURY"], accent="red") for item in injury_items)
+    signals.extend(_news_to_signal(item, category="lineupWatch", tags=["PRED XI"], accent="purple") for item in lineup_items)
+    signals.extend(_news_to_signal(item, category="xgModel", tags=["XG"], accent="purple") for item in xg_items)
+    signals.extend(_news_to_signal(item, category="tacticalMatchup", tags=["TACTIC"], accent="gold") for item in tactic_items)
+    signals.extend(_news_to_signal(item, category="localMedia", tags=["LOCAL"], accent="blue") for item in local_items)
     for item in weather[:8]:
         condition = item.get("current", {}).get("condition") or "weather"
         signals.append(
@@ -384,8 +386,8 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
                 title=f"{next((city['city'] for city in HOST_CITIES if city['id'] == item.get('cityId')), item.get('cityId'))}: {condition}",
                 summary=f"{item.get('current', {}).get('tempC')}C · wind {item.get('current', {}).get('windKph')} kph · 5-day venue forecast attached.",
                 category="refVenue",
-                tags=["WEATHER", "LIVE"],
-                age="live",
+                tags=["WEATHER"],
+                age=generated_at,
                 url="https://open-meteo.com/" if item.get("source") != "wttr.in" else "https://wttr.in/",
                 accent="blue",
                 provider=str(item.get("source") or "weather"),
@@ -411,7 +413,7 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
         "generatedAt": generated_at,
         "status": "ok" if signals or news or weather else "empty",
         "cacheMode": "live",
-        "source": "ESPN public API / Google News RSS / Open-Meteo",
+        "source": f"ESPN public API / Google News / {weather_source}",
         "sourceUrl": "https://site.api.espn.com/",
         "providerStates": provider_states,
         "news": news[:limit],
@@ -487,7 +489,7 @@ def get_worldcup_intel_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[s
             {
                 "generatedAt": _utc_now_iso(),
                 "status": "error",
-                "cacheMode": "fallback",
+                "cacheMode": "source-required",
                 "providerStates": {"worldcupIntel": f"error:{exc.__class__.__name__}"},
                 "signals": [],
                 "news": [],
