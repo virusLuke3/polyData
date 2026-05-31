@@ -52,21 +52,12 @@ GROUND_TO_CITY_ID = {
     "Vancouver": "vancouver",
 }
 
-FALLBACK_SOURCE_MATCHES = [
-    {"num": 1, "date": "2026-06-11", "time": "13:00 UTC-6", "team1": "Mexico", "team2": "South Africa", "group": "Group A", "round": "Matchday 1", "ground": "Mexico City"},
-    {"num": 2, "date": "2026-06-11", "time": "20:00 UTC-7", "team1": "South Korea", "team2": "Czech Republic", "group": "Group A", "round": "Matchday 1", "ground": "Guadalajara (Zapopan)"},
-    {"num": 7, "date": "2026-06-12", "time": "15:00 UTC-4", "team1": "Canada", "team2": "Bosnia & Herzegovina", "group": "Group B", "round": "Matchday 1", "ground": "Toronto"},
-    {"num": 19, "date": "2026-06-16", "time": "20:00 UTC-6", "team1": "Argentina", "team2": "Algeria", "group": "Group D", "round": "Matchday 2", "ground": "Kansas City"},
-    {"num": 55, "date": "2026-06-16", "time": "20:00 UTC-7", "team1": "Argentina", "team2": "Algeria", "group": "Group D", "round": "Matchday 2", "ground": "Vancouver"},
-]
-
-
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _headers() -> Dict[str, str]:
-    return {"Accept": "application/json", "User-Agent": "polydata-worldcup-dashboard-seed/1.0"}
+    return {"Accept": "application/json", "User-Agent": "polydata-worldcup-dashboard/1.0"}
 
 
 def _city_by_id(city_id: str) -> Dict[str, Any]:
@@ -153,7 +144,7 @@ def _fetch_schedule_source(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], s
                 return [row for row in matches if isinstance(row, dict)], "openfootball/worldcup.json"
         except Exception:
             pass
-    return FALLBACK_SOURCE_MATCHES, "fallback"
+    return [], "source-required"
 
 
 def _normalize_matches(source_matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -182,111 +173,11 @@ def _normalize_matches(source_matches: List[Dict[str, Any]]) -> List[Dict[str, A
                 "homeTeam": home_team,
                 "awayTeam": away_team,
                 "status": "finished" if kickoff < now else "scheduled",
-                "marketLinked": index < 18,
-                "oddsLinked": index < 24,
+                "marketLinked": False,
+                "oddsLinked": False,
             }
         )
     return sorted(rows, key=lambda row: str(row.get("kickoffUtc") or ""))
-
-
-def _fallback_news(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    next_match = next((match for match in matches if match.get("status") == "scheduled"), matches[0] if matches else {})
-    return [
-        {
-            "id": "worldcup-command-map-status",
-            "title": "World Cup host-city command map is running from the seeded dashboard snapshot",
-            "source": "PolyMonitor",
-            "url": "#",
-            "publishedAt": _utc_now_iso(),
-            "summary": f"Next match context: {next_match.get('homeTeam', 'TBD')} vs {next_match.get('awayTeam', 'TBD')} in {next_match.get('city', 'host city')}.",
-            "matchId": next_match.get("id"),
-            "cityId": next_match.get("cityId"),
-        },
-        {
-            "id": "worldcup-markets-weather-watch",
-            "title": "Weather, venue and market layers are refreshed through the World Cup seed pipeline",
-            "source": "PolyMonitor",
-            "url": "#",
-            "publishedAt": _utc_now_iso(),
-            "summary": "The dashboard preserves the latest Redis or SQLite snapshot if upstream providers fail.",
-        },
-    ]
-
-
-def _fallback_weather() -> List[Dict[str, Any]]:
-    generated_at = _utc_now_iso()
-    condition_by_country = {"US": "Clear", "CA": "Cool", "MX": "Warm"}
-    rows: List[Dict[str, Any]] = []
-    for index, city in enumerate(WORLD_CUP_CITIES):
-        base_temp = 18 + (index % 7) + (3 if city["country"] == "MX" else 0) - (2 if city["country"] == "CA" else 0)
-        forecast = []
-        for day in range(5):
-            forecast.append(
-                {
-                    "date": f"2026-06-{11 + day:02d}",
-                    "highC": base_temp + 3 + (day % 2),
-                    "lowC": base_temp - 4,
-                    "condition": condition_by_country.get(str(city["country"]), "Clear"),
-                    "precipitationProbability": 10 + ((index + day) % 5) * 7,
-                }
-            )
-        rows.append(
-            {
-                "cityId": city["id"],
-                "current": {
-                    "tempC": base_temp,
-                    "condition": condition_by_country.get(str(city["country"]), "Clear"),
-                    "windKph": 6 + (index % 5) * 2,
-                    "precipitationProbability": forecast[0]["precipitationProbability"],
-                },
-                "forecast": forecast,
-                "generatedAt": generated_at,
-                "source": "seed-estimate",
-            }
-        )
-    return rows
-
-
-def _merge_weather(seed_weather: List[Dict[str, Any]], runtime_weather: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows = {str(item.get("cityId")): item for item in seed_weather if isinstance(item, dict) and item.get("cityId")}
-    for item in runtime_weather:
-        if isinstance(item, dict) and item.get("cityId"):
-            rows[str(item["cityId"])] = item
-    return list(rows.values())
-
-
-def _odds_for_matches(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    odds: List[Dict[str, Any]] = []
-    for index, match in enumerate(matches[:36]):
-        home_prob = 0.38 + ((index % 5) * 0.015)
-        draw_prob = 0.28 - ((index % 3) * 0.01)
-        away_prob = max(0.18, 1 - home_prob - draw_prob)
-        outcomes = [
-            {"name": str(match.get("homeTeam") or "Home"), "decimalOdds": round(1 / home_prob, 2), "impliedProbability": round(home_prob, 3)},
-            {"name": "Draw", "decimalOdds": round(1 / draw_prob, 2), "impliedProbability": round(draw_prob, 3)},
-            {"name": str(match.get("awayTeam") or "Away"), "decimalOdds": round(1 / away_prob, 2), "impliedProbability": round(away_prob, 3)},
-        ]
-        odds.append(
-            {
-                "matchId": match.get("id"),
-                "provider": "Model consensus watch",
-                "providerType": "traditional_sportsbook",
-                "marketType": "moneyline",
-                "outcomes": outcomes,
-                "generatedAt": _utc_now_iso(),
-            }
-        )
-    return odds
-
-
-def _rosters(matches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    teams: List[str] = []
-    for match in matches:
-        for side in (match.get("homeTeam"), match.get("awayTeam")):
-            text = str(side or "")
-            if text and text != "TBD" and not text.startswith(("Winner ", "Loser ", "3rd ")) and text not in teams:
-                teams.append(text)
-    return [{"team": team, "updatedAt": _utc_now_iso(), "players": []} for team in teams[:48]]
 
 
 def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -298,7 +189,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     odds = payload.get("odds") if isinstance(payload.get("odds"), list) else []
     return {
         "generatedAt": str(payload.get("generatedAt") or _utc_now_iso()),
-        "cacheMode": str(payload.get("cacheMode") or "seeded"),
+        "cacheMode": str(payload.get("cacheMode") or "remote"),
         "tournament": payload.get("tournament") if isinstance(payload.get("tournament"), dict) else {
             "id": "fifa-world-cup-2026",
             "name": "FIFA World Cup 2026",
@@ -313,7 +204,7 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "rosters": rosters,
         "odds": odds,
         "intelligence": payload.get("intelligence") if isinstance(payload.get("intelligence"), dict) else None,
-        "source": str(payload.get("source") or "World Cup dashboard seed"),
+        "source": str(payload.get("source") or "World Cup verified dashboard"),
         "sourceUrl": str(payload.get("sourceUrl") or OPENFOOTBALL_2026_URL),
         "providerStates": payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {},
         "summary": {
@@ -327,25 +218,40 @@ def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _has_generated_fallback_artifacts(payload: Dict[str, Any]) -> bool:
+    cache_mode = str(payload.get("cacheMode") or "").lower()
+    source = str(payload.get("source") or "").lower()
+    provider_states = payload.get("providerStates") if isinstance(payload.get("providerStates"), dict) else {}
+    odds = payload.get("odds") if isinstance(payload.get("odds"), list) else []
+    weather = payload.get("weather") if isinstance(payload.get("weather"), list) else []
+    return (
+        cache_mode in {"seed", "seeded"}
+        or "dashboard seed" in source
+        or "fallback" in source
+        or "dashboardSeed" in provider_states
+        or any(str(row.get("provider") or "") == "Model consensus watch" for row in odds if isinstance(row, dict))
+        or any(str(row.get("source") or "") == "seed-estimate" for row in weather if isinstance(row, dict))
+    )
+
+
 def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
     generated_at = _utc_now_iso()
     source_matches, schedule_source = _fetch_schedule_source(ctx)
     matches = _normalize_matches(source_matches)
-    fallback_weather = _fallback_weather()
     intel: Optional[Dict[str, Any]] = None
     try:
         intel = worldcup_intel_service.get_worldcup_intel_snapshot(ctx, limit=120)
     except Exception as exc:
-        intel = {"status": "error", "cacheMode": "fallback", "error": exc.__class__.__name__, "news": [], "weather": [], "signals": []}
-    weather = _merge_weather(fallback_weather, intel.get("weather") if isinstance(intel, dict) and isinstance(intel.get("weather"), list) else [])
+        intel = {"status": "error", "cacheMode": "source-required", "error": exc.__class__.__name__, "news": [], "weather": [], "signals": []}
+    weather = intel.get("weather") if isinstance(intel, dict) and isinstance(intel.get("weather"), list) else []
     intel_news = intel.get("news") if isinstance(intel, dict) and isinstance(intel.get("news"), list) else []
-    news = [*intel_news[:24], *_fallback_news(matches)]
+    news = intel_news[:24]
     starts_at = matches[0]["kickoffUtc"] if matches else "2026-06-11T19:00:00Z"
     ends_at = matches[-1]["kickoffUtc"] if matches else "2026-07-19T19:00:00Z"
     return _normalize_payload(
         {
             "generatedAt": generated_at,
-            "cacheMode": "seeded",
+            "cacheMode": "remote" if matches else "source-required",
             "tournament": {
                 "id": "fifa-world-cup-2026",
                 "name": "FIFA World Cup 2026",
@@ -357,16 +263,17 @@ def build_worldcup_dashboard_payload(ctx: Dict[str, Any]) -> Dict[str, Any]:
             "matches": matches,
             "news": news,
             "weather": weather,
-            "rosters": _rosters(matches),
-            "odds": _odds_for_matches(matches),
+            "rosters": [],
+            "odds": [],
             "intelligence": intel,
             "source": f"{schedule_source} / {intel.get('source') if isinstance(intel, dict) else 'runtime intel'}",
             "sourceUrl": OPENFOOTBALL_2026_URL,
             "providerStates": {
-                "schedule": "ok" if len(matches) >= 100 else "fallback",
-                "dashboardSeed": "ok",
+                "schedule": "ok" if len(matches) >= 100 else "source-required",
                 "worldcupIntel": str((intel or {}).get("status") or "unknown"),
                 "weather": "ok" if weather else "empty",
+                "odds": "source-required",
+                "rosters": "source-required",
             },
         }
     )
@@ -377,14 +284,20 @@ def _read_cached(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if callable(reader):
         cached = reader(WORLDCUP_DASHBOARD_NAMESPACE, WORLDCUP_DASHBOARD_CACHE_KEY)
         if isinstance(cached, dict):
+            if _has_generated_fallback_artifacts(cached):
+                return None
             return {**_normalize_payload(cached), "cacheMode": "redis"}
     store = ctx.get("SNAPSHOT_STORE")
     if store is not None:
         cached = store.get(WORLDCUP_DASHBOARD_NAMESPACE, WORLDCUP_DASHBOARD_CACHE_KEY)
         if isinstance(cached, dict):
+            if _has_generated_fallback_artifacts(cached):
+                return None
             return {**_normalize_payload(cached), "cacheMode": "sqlite"}
         stale = store.get_stale(WORLDCUP_DASHBOARD_NAMESPACE, WORLDCUP_DASHBOARD_CACHE_KEY)
         if isinstance(stale, dict):
+            if _has_generated_fallback_artifacts(stale):
+                return None
             return {**_normalize_payload(stale), "cacheMode": "stale"}
     return None
 
@@ -413,13 +326,13 @@ def get_worldcup_dashboard_snapshot(ctx: Dict[str, Any]) -> Dict[str, Any]:
         return _normalize_payload(
             {
                 "generatedAt": _utc_now_iso(),
-                "cacheMode": "fallback",
-                "matches": _normalize_matches(FALLBACK_SOURCE_MATCHES),
+                "cacheMode": "source-required",
+                "matches": [],
                 "cities": WORLD_CUP_CITIES,
-                "weather": _fallback_weather(),
+                "weather": [],
                 "news": [],
                 "rosters": [],
                 "odds": [],
-                "providerStates": {"dashboardSeed": f"error:{exc.__class__.__name__}"},
+                "providerStates": {"worldcupDashboard": f"error:{exc.__class__.__name__}"},
             }
         )

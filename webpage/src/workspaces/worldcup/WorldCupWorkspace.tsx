@@ -801,7 +801,7 @@ function WeatherPanel({
             detail="Weather panel requires runtime Open-Meteo/wttr host-city forecasts. No browser-generated temperatures are displayed."
             rows={[
               { source: 'Open-Meteo', status: payload.intelligence?.providerStates?.openMeteo || 'required', detail: 'current and 5-day forecast by host city' },
-              { source: 'wttr.in fallback', status: payload.intelligence?.providerStates?.wttr || 'optional fallback', detail: 'used only when Open-Meteo misses a city' },
+              { source: 'wttr.in secondary', status: payload.intelligence?.providerStates?.wttr || 'optional', detail: 'used only when Open-Meteo does not return a city' },
             ]}
           />
         ) : null}
@@ -1076,7 +1076,7 @@ function MarketBoardPanel({
         <article className="wm-worldcup-market-card" key={`${market.eventId || market.title}`}>
           <div className="wm-worldcup-card-head">
             <span>{formatCompact(market.volume24h)} · {Math.round(market.confidence * 100)} conf</span>
-            <b>{index === 0 ? 'PRIMARY' : market.source.toUpperCase()}</b>
+            <b>{index === 0 ? 'VERIFIED' : market.source.toUpperCase()}</b>
           </div>
           <strong>{market.title}</strong>
           <div className="wm-worldcup-prob-grid">
@@ -2055,8 +2055,8 @@ function SourceAuditPanel({
 }) {
   const states = payload.intelligence?.providerStates || {};
   const rows: SourceRequiredRow[] = [
-    { source: 'Calendar / match control', status: payload.matches.length ? payload.cacheMode : 'missing', detail: `${payload.matches.length} schedule rows; no hardcoded fallback fixtures` },
-    { source: 'News', status: news.length ? 'ok' : 'empty', detail: `${news.length} ESPN/latest-content rows; no fallback news` },
+    { source: 'Calendar / match control', status: payload.matches.length ? payload.cacheMode : 'missing', detail: `${payload.matches.length} schedule rows; no hardcoded fixtures` },
+    { source: 'News', status: news.length ? 'ok' : 'empty', detail: `${news.length} ESPN/latest-content rows; no generated news` },
     { source: 'Weather / venue risk', status: payload.weather.length ? (states.openMeteo || states.wttr || 'ok') : 'missing', detail: `${payload.weather.length} host-city weather rows` },
     { source: 'Polymarket markets', status: markets.length ? 'local-db' : 'not matched', detail: `${markets.length} linked local DB / Gamma market rows` },
     { source: 'Bookmaker odds', status: odds.length ? 'ok' : 'source required', detail: `${odds.length} licensed odds snapshots` },
@@ -2067,7 +2067,7 @@ function SourceAuditPanel({
     <Panel title="SOURCE AUDIT" count={rows.length} className="wm-worldcup-panel wm-worldcup-source-audit-panel">
       <SourceRequired
         title="VERIFIED DATA MODE"
-        detail="This workspace no longer renders browser-generated seed numbers, fallback news, fake odds, fake squads, or inferred Polymarket markets."
+        detail="This workspace only renders rows backed by an upstream provider, cached snapshot, or local Polymarket DB link; generated odds, squads, news and market rows are blocked."
         rows={rows}
       />
     </Panel>

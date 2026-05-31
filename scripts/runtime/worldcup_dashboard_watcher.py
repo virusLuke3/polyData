@@ -92,7 +92,7 @@ class WorldCupDashboardWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
         self.requests.trust_env = False
-        self.requests.headers.update({"User-Agent": "polydata-worldcup-dashboard-seed/1.0"})
+        self.requests.headers.update({"User-Agent": "polydata-worldcup-dashboard/1.0"})
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_WORLDCUP_DASHBOARD_SEED_TTL_SECONDS", "0") or 0)
@@ -143,7 +143,7 @@ class WorldCupDashboardWatcher:
             raw = self.redis_client.get(self.redis_key())
             if raw:
                 payload = json.loads(raw)
-                if isinstance(payload, dict):
+                if isinstance(payload, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(payload):
                     return payload
         except Exception:
             print("[worldcup-dashboard] WARN redis read failed", file=sys.stderr)
@@ -151,7 +151,9 @@ class WorldCupDashboardWatcher:
             worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
             worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY,
         )
-        return stale if isinstance(stale, dict) else {}
+        if isinstance(stale, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(stale):
+            return stale
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
@@ -189,7 +191,7 @@ class WorldCupDashboardWatcher:
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
-            cache_mode="seeded",
+            cache_mode="verified-cache",
             payload_status=status,
             metadata={"result": "stored", "refreshSeconds": self.interval_seconds},
         )
@@ -233,7 +235,7 @@ class WorldCupDashboardWatcher:
             )
             return {"status": "preserved", "payload": preserved}
 
-        payload = {**payload, "cacheMode": "seeded"}
+        payload = {**payload, "cacheMode": "remote"}
         self.store_payload(payload)
         status = "ok" if record_count > 0 and len(payload.get("matches") or []) >= 64 else "degraded"
         self.store_seed_meta(

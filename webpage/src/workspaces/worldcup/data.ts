@@ -167,7 +167,7 @@ export async function loadWorldCupDashboard(marketGroups: MarketGroupItem[] = []
       return mergeWorldCupMarketLinks(runtimeDashboard, marketGroups);
     }
   } catch {
-    // Fall through to the legacy browser-side schedule loader when the seed API is unavailable.
+    // Fall through to the browser-side schedule loader when the runtime API is unavailable.
   }
   const runtimeIntelPromise = fetchRuntimeWorldCupIntel(120).catch(() => null);
   try {
@@ -177,7 +177,7 @@ export async function loadWorldCupDashboard(marketGroups: MarketGroupItem[] = []
     const matches = normalizeWorldCupMatches(data.matches || [], marketGroups);
     return mergeWorldCupRuntimeIntel(buildWorldCupDashboard(matches, 'remote'), await runtimeIntelPromise);
   } catch {
-    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard([], 'fallback'), await runtimeIntelPromise);
+    return mergeWorldCupRuntimeIntel(buildWorldCupDashboard([], 'source-required'), await runtimeIntelPromise);
   }
 }
 
@@ -201,7 +201,7 @@ function mergeWorldCupMarketLinks(payload: WorldCupDashboardPayload, marketGroup
 function mergeWorldCupRuntimeIntel(payload: WorldCupDashboardPayload, intel: WorldCupDashboardPayload['intelligence']): WorldCupDashboardPayload {
   if (!intel) return payload;
   const news = Array.isArray(intel.news) && intel.news.length ? [...intel.news, ...payload.news] : payload.news;
-  const weather = Array.isArray(intel.weather) && intel.weather.length ? mergeWeather(payload.weather, intel.weather) : payload.weather;
+  const weather = Array.isArray(intel.weather) && intel.weather.length ? mergeWeatherRows(payload.weather, intel.weather) : payload.weather;
   return {
     ...payload,
     cacheMode: intel.status === 'ok' ? 'remote' : payload.cacheMode,
@@ -212,15 +212,15 @@ function mergeWorldCupRuntimeIntel(payload: WorldCupDashboardPayload, intel: Wor
   };
 }
 
-function mergeWeather(seedWeather: WorldCupCityWeather[], runtimeWeather: WorldCupCityWeather[]) {
-  const rows = new Map(seedWeather.map((item) => [item.cityId, item]));
+function mergeWeatherRows(baseWeather: WorldCupCityWeather[], runtimeWeather: WorldCupCityWeather[]) {
+  const rows = new Map(baseWeather.map((item) => [item.cityId, item]));
   runtimeWeather.forEach((item) => {
     if (item?.cityId) rows.set(item.cityId, item);
   });
   return Array.from(rows.values());
 }
 
-function buildWorldCupDashboard(matches: WorldCupMatch[], cacheMode: 'remote' | 'fallback'): WorldCupDashboardPayload {
+function buildWorldCupDashboard(matches: WorldCupMatch[], cacheMode: 'remote' | 'source-required'): WorldCupDashboardPayload {
   return {
     generatedAt: new Date().toISOString(),
     cacheMode,
